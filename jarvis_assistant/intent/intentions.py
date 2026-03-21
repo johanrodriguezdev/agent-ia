@@ -1,0 +1,36 @@
+from enum import Enum
+
+class Intent(Enum):
+    OPEN_APP = "OPEN_APP"
+    SEARCH_WEB = "SEARCH_WEB"
+    OPEN_FOLDER = "OPEN_FOLDER"
+    LIST_FILES = "LIST_FILES"
+    CREATE_FILE = "CREATE_FILE"
+    
+    # Nuevas intenciones extra del sistema operativo e IA
+    GET_TIME = "GET_TIME"
+    SYS_VOL_UP = "SYS_VOL_UP"
+    SYS_VOL_DOWN = "SYS_VOL_DOWN"
+    SYS_MUTE = "SYS_MUTE"
+    TAKE_SCREENSHOT = "TAKE_SCREENSHOT"
+    SYS_POWER_OFF = "SYS_POWER_OFF"
+    WIKIPEDIA_SUMMARY = "WIKIPEDIA_SUMMARY"
+    RECALL_MEMORY = "RECALL_MEMORY"
+    TEACH_COMMAND = "TEACH_COMMAND"
+    
+    PC_CLICK = "PC_CLICK"
+    PC_TYPE = "PC_TYPE"
+    PC_SCROLL = "PC_SCROLL"
+    
+    AUTOPILOT = "AUTOPILOT"
+    
+    # System Actions (funciones reales sin simulación de GUI)
+    CALCULATE = "CALCULATE"
+    SEARCH_FILES = "SEARCH_FILES"
+    FOLDER_SIZE = "FOLDER_SIZE"
+    FIND_LARGEST = "FIND_LARGEST"
+    SYSTEM_INFO = "SYSTEM_INFO"
+    CPU_INFO = "CPU_INFO"
+    RAM_INFO = "RAM_INFO"
+    
+    UNKNOWN = "UNKNOWN"

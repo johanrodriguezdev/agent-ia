@@ -1,0 +1,106 @@
+{
+  "_descripcion": "Mapa extensible de frases de usuario a funciones internas del sistema Jarvis.",
+  "_version": "1.0",
+  "_uso": "Agrega nuevas entradas con la frase clave y la funcion interna a invocar.",
+
+  "capacidades": [
+
+    {
+      "frases": ["abre bloc de notas", "abrir bloc de notas", "abrir notepad", "bloc de notas"],
+      "modulo":  "os_integration.system_actions",
+      "funcion": "open_notepad",
+      "params":  {}
+    },
+
+    {
+      "frases": ["abre explorador de archivos", "explorador de archivos", "abrir explorador", "mis archivos"],
+      "modulo":  "os_integration.system_actions",
+      "funcion": "open_file_explorer",
+      "params":  {}
+    },
+
+    {
+      "frases": ["toma captura", "tomar captura", "captura de pantalla", "screenshot", "pantalla"],
+      "modulo":  "os_integration.screenshot_tools",
+      "funcion": "take_full_screenshot",
+      "params":  {}
+    },
+
+    {
+      "frases": ["analiza almacenamiento", "cuanto espacio hay", "almacenamiento", "espacio en disco", "info del disco", "disco"],
+      "modulo":  "os_integration.filesystem_tools",
+      "funcion": "get_disk_info",
+      "params":  {}
+    },
+
+    {
+      "frases": ["analiza carpeta escritorio", "analiza escritorio", "cuanto pesa el escritorio"],
+      "modulo":  "os_integration.filesystem_tools",
+      "funcion": "analyze_folder_storage",
+      "params":  {"folder_path": "escritorio"}
+    },
+
+    {
+      "frases": ["analiza carpeta documentos", "analiza documentos", "cuanto pesan mis documentos"],
+      "modulo":  "os_integration.filesystem_tools",
+      "funcion": "analyze_folder_storage",
+      "params":  {"folder_path": "documentos"}
+    },
+
+    {
+      "frases": ["analiza carpeta descargas", "analiza descargas", "cuanto pesan mis descargas"],
+      "modulo":  "os_integration.filesystem_tools",
+      "funcion": "analyze_folder_storage",
+      "params":  {"folder_path": "descargas"}
+    },
+
+    {
+      "frases": ["lista archivos escritorio", "listar escritorio", "que hay en el escritorio"],
+      "modulo":  "os_integration.filesystem_tools",
+      "funcion": "list_files_detailed",
+      "params":  {"folder_path": "escritorio"}
+    },
+
+    {
+      "frases": ["lista mis descargas", "listar descargas", "que hay en descargas"],
+      "modulo":  "os_integration.filesystem_tools",
+      "funcion": "list_files_detailed",
+      "params":  {"folder_path": "descargas"}
+    },
+
+    {
+      "frases": ["crea archivo de texto", "nuevo archivo", "crear archivo"],
+      "modulo":  "os_integration.filesystem_tools",
+      "funcion": "create_text_file",
+      "params":  {"filename": "Nuevo_Documento", "content": "", "folder": "escritorio"}
+    },
+
+    {
+      "frases": ["cierra la ventana", "cerrar ventana", "cierra esto"],
+      "modulo":  "os_integration.system_actions",
+      "funcion": "close_active_window",
+      "params":  {}
+    },
+
+    {
+      "frases": ["minimiza ventana", "minimizar", "minimiza esto"],
+      "modulo":  "os_integration.system_actions",
+      "funcion": "minimize_window",
+      "params":  {}
+    },
+
+    {
+      "frases": ["maximiza ventana", "maximizar", "maximiza esto"],
+      "modulo":  "os_integration.system_actions",
+      "funcion": "maximize_window",
+      "params":  {}
+    },
+
+    {
+      "frases": ["resolucion de pantalla", "resolución", "que resolucion tengo"],
+      "modulo":  "os_integration.screenshot_tools",
+      "funcion": "get_screen_resolution",
+      "params":  {}
+    }
+  ]
+}

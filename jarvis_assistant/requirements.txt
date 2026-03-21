@@ -1,0 +1,14 @@
+SpeechRecognition==3.10.1
+PyAudio==0.2.14
+scikit-learn
+joblib
+numpy
+wikipedia
+pyautogui
+Pillow
+pyttsx3
+psutil
+sentence-transformers
+torch
+sqlite3
+PyQt6
