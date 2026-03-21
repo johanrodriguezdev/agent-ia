@@ -1,14 +1,54 @@
+# ================================================================
+# Glass Assistant — Dependencias
+# ================================================================
+# Para instalar: pip install -r requirements.txt
+#
+# ✅ BUG CORREGIDO: sqlite3 fue eliminado de esta lista.
+#    sqlite3 es parte de la librería estándar de Python (stdlib)
+#    y NO se puede instalar con pip. En Python 3.12+ intentar
+#    "pip install sqlite3" lanza un error que aborta toda la
+#    instalación. Glass lo usa internamente sin ninguna instalación.
+# ================================================================
+
+# --- Reconocimiento de voz ---
 SpeechRecognition==3.10.1
 PyAudio==0.2.14
+
+# --- Machine Learning (clasificador de intenciones) ---
 scikit-learn
 joblib
 numpy
-wikipedia
-pyautogui
-Pillow
-pyttsx3
-psutil
+
+# --- Memoria semántica con embeddings vectoriales ---
 sentence-transformers
 torch
-sqlite3
+
+# --- Integraciones externas ---
+wikipedia
+
+# --- Automatización del PC (pyautogui) ---
+pyautogui
+Pillow
+
+# --- Síntesis de voz (TTS) ---
+pyttsx3
+
+# --- Información del sistema ---
+psutil
+
+# --- Interfaz gráfica HUD ---
 PyQt6
+
+# ================================================================
+# DEPENDENCIAS OPCIONALES (descomenta si las necesitas)
+# ================================================================
+
+# Telegram bot (para usar Glass desde el celular):
+# python-telegram-bot==20.7
+
+# Whisper local (STT offline, reemplaza Google Speech):
+# openai-whisper
+
+# API de Claude (para chat conversacional inteligente):
+# anthropic
+# ================================================================
