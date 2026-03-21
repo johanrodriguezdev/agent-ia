@@ -12,10 +12,9 @@ def main(boot_mode=None):
     ui.display_output(get_random_greeting(), read_aloud=True)
     
     while True:
-        # Si boot_mode está definido (ej: desde instalador), omitimos el menú inicial
         if boot_mode:
             choice = boot_mode
-            boot_mode = None # Solo la primera vez
+            boot_mode = None
         else:
             choice = ui.get_input_method()
         
@@ -32,26 +31,23 @@ def main(boot_mode=None):
                 ui.display_output("Micrófono activado. Estoy escuchando, Señor.", read_aloud=True)
                 command = ui.get_voice_command()
             elif choice == '3':
-                # Modo escucha pasiva continua
                 wake_result = listen_for_wake_word()
                 
                 if wake_result is True:
-                    # Notificar proactivamente el estado activo
                     ui.display_output("Dígame, Señor.", read_aloud=True)
                     command = ui.get_voice_command()
                 elif isinstance(wake_result, str) and wake_result:
                     command = wake_result
                 else:
-                    break # Salir al menú principal si falla
+                    break
                     
-                # Condición de salida del loop continuo
                 agent_name = get_agent_name().lower()
                 if command.strip().lower() in ["descansa", f"{agent_name} descansa", "apágate", "salir"]:
                     ui.display_output("Entendido, Señor. Pasando a modo de bajo consumo. Avíseme si me necesita.", read_aloud=True)
-                    break 
+                    break
 
             if not command:
-                break # Regresa al Menú Principal si no hay Input
+                break
                 
             # === BLOQUE DE EJECUCIÓN ===
             ui.display_output(f"Comando detectado: '{command}'", read_aloud=False)
@@ -61,7 +57,7 @@ def main(boot_mode=None):
             _cmd_lower = command.strip().lower()
             if any(t in _cmd_lower for t in _autopilot_triggers):
                 try:
-                    from agents.task_planner  import TaskPlanner
+                    from agents.task_planner import TaskPlanner
                     from agents.task_executor import TaskExecutor
                     planner  = TaskPlanner()
                     executor = TaskExecutor()
@@ -71,7 +67,6 @@ def main(boot_mode=None):
                         ui.display_output("Iniciando ejecución de protocolos...", read_aloud=True)
                         
                         def on_step(idx, result):
-                            # Interacción constante: anunciar progreso
                             ui.display_output(f"Protocolo {idx+1} completado: {result}", read_aloud=True)
                         
                         summary = executor.execute(plan, on_step_done=on_step)
@@ -87,6 +82,7 @@ def main(boot_mode=None):
                 except Exception as _ap_err:
                     ui.display_output(f"Señor, el Autopilot ha tenido una falla: {_ap_err}", read_aloud=True)
             
+            # Comandos aprendidos
             from learning.command_learning import run_custom_command
             
             def execute_simulated_action(action_text):
@@ -97,10 +93,10 @@ def main(boot_mode=None):
                 
             if run_custom_command(command, execute_simulated_action):
                 ui.display_output("Rutina completada perfectamente. ¿Algo más, Señor?", read_aloud=True)
-                if choice == '3': continue 
+                if choice == '3': continue
                 else: break
 
-            # 0.5. Capacidades directas
+            # Capacidades directas del sistema operativo (JSON)
             try:
                 from os_integration.capabilities_router import try_capability
                 cap_result = try_capability(command)
@@ -111,16 +107,17 @@ def main(boot_mode=None):
                     save_memory(command, cap_result)
                     if choice == '3': continue
                     else: break
-            except Exception: pass
+            except Exception:
+                pass
                 
             try:
                 from ui.gui import update_gui_state
                 update_gui_state("PROCESSING")
-            except: pass
+            except:
+                pass
                 
             intent, params = classify_command(command)
             
-            # (El bloque de TEACH_COMMAND se mantiene igual pero es ejecutado si coincide)
             from intent.intentions import Intent
             if intent == Intent.TEACH_COMMAND:
                 ui.display_output("Por supuesto, Señor. ¿Cuál será la frase de activación?", read_aloud=True)
@@ -139,23 +136,24 @@ def main(boot_mode=None):
                 else: break
             
             result = dispatch(intent, params)
+
+            # ✅ BUG CORREGIDO: display_output solo una vez aquí
             ui.display_output(result, read_aloud=True)
             ui.display_output("¿Desea que realice alguna otra acción, Señor?", read_aloud=True)
             
             from ai.memory_manager import save_memory
             save_memory(command, result)
             
-            # Guardar también como embedding semántico (para recuperación inteligente)
+            # Guardar embedding semántico (sin bloquear el flujo si falla)
             try:
                 from ai.semantic_memory import store_memory as sem_store
                 sem_store(f"Pregunta: {command} | Respuesta: {result}")
             except Exception:
-                pass  # Si sentence-transformers no cargó, no bloqueamos el flujo
+                pass
             
-            ui.display_output(result, read_aloud=True)
-            
-            # Condición de retorno al inicio: si era opción 1 o 2, sal del sub-bucle. 
-            # Si es opción 3, se repetirá arriba.
+            # ✅ BUG CORREGIDO: eliminado el segundo display_output(result) que existía aquí
+            # y que hacía que Glass hablara CADA respuesta DOS veces.
+
             if choice != '3':
                 break
 
@@ -177,12 +175,9 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"\nError fatal en el ciclo del asistente: {e}")
         finally:
-            # Dado que matamos el sistema desde un daemon thread secundario de consola, 
-            # forzamos os._exit(0) para saltarnos el blindaje de PyQt6 en Windows.
             os._exit(0)
 
     jarvis_mind = threading.Thread(target=jarvis_runner, daemon=True)
     jarvis_mind.start()
     
-    # Este hilo queda atrapado ejecutando la pantalla.
     sys.exit(app.exec())

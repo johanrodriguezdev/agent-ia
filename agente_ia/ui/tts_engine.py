@@ -1,41 +1,72 @@
 import pyttsx3
 
-# Inicializa el motor al nivel de módulo pero con prevención de errores
-try:
-    engine = pyttsx3.init()
-    engine.setProperty('rate', 155)
+# ✅ BUG CORREGIDO: El motor TTS ya NO se inicializa al importar el módulo.
+# Antes, si los drivers de audio fallaban al arrancar, TODA la aplicación
+# crasheaba antes de mostrar siquiera el menú. Ahora se inicializa la
+# primera vez que se necesita (patrón "lazy initialization").
 
-    voices = engine.getProperty('voices')
-    for voice in voices:
-        if "ES" in voice.id.upper() or "SPANISH" in voice.id.upper() or "ESPAÑOL" in voice.id.upper():
-            engine.setProperty('voice', voice.id)
-            break
-except Exception as e:
-    print(f"[Aviso] El motor de sintetizador de voz (TTS) no pudo conectarse: {e}")
-    engine = None
+_engine = None
+
+def _get_engine():
+    """
+    Retorna el motor TTS. Lo inicializa solo si aún no existe.
+    Si falla, retorna None sin romper el flujo principal de Glass.
+    """
+    global _engine
+    if _engine is not None:
+        return _engine
+    
+    try:
+        _engine = pyttsx3.init()
+        _engine.setProperty('rate', 155)
+
+        # Buscar voz en español
+        voices = _engine.getProperty('voices')
+        for voice in voices:
+            if "ES" in voice.id.upper() or "SPANISH" in voice.id.upper() or "ESPAÑOL" in voice.id.upper():
+                _engine.setProperty('voice', voice.id)
+                break
+
+        return _engine
+
+    except Exception as e:
+        print(f"[Aviso] El motor de voz (TTS) no pudo iniciarse: {e}")
+        print("[Aviso] Glass funcionará en modo silencioso hasta que se resuelva el problema de audio.")
+        _engine = None
+        return None
+
 
 def speak(text: str):
     """
-    Toma un texto y lo reproduce por voz simulada.
-    Se encapsula con un try/except para impedir que bloquee o rompa el bucle de Jarvis
-    en caso de problemas de hardware/drivers de sonido.
+    Reproduce el texto por voz.
+    Si el motor no está disponible, Glass continúa funcionando en silencio
+    (el texto igual se muestra en pantalla por la CLI).
     """
-    if not text or engine is None:
+    if not text:
         return
+
+    engine = _get_engine()
+    if engine is None:
+        return  # Sin audio pero sin crash — Glass sigue funcionando
         
     try:
         from ui.gui import update_gui_state
         update_gui_state("RESPONDING")
-        engine.say(text)
-        engine.runAndWait()
     except ImportError:
-        # Previene falla en caso no estemos corriendo GUI localmente
+        pass
+
+    try:
         engine.say(text)
         engine.runAndWait()
     except Exception as e:
-        print(f"[Falla al intentar reproducir voz]: {e}")
+        print(f"[Falla de voz]: {e}")
+        # ✅ Si el motor falla en medio de una sesión, lo reseteamos
+        # para que el próximo intento vuelva a intentar inicializarlo.
+        global _engine
+        _engine = None
     finally:
         try:
+            from ui.gui import update_gui_state
             update_gui_state("IDLE")
-        except:
+        except Exception:
             pass
