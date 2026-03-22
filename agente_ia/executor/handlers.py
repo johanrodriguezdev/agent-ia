@@ -1,18 +1,39 @@
+"""
+executor/handlers.py
+Handlers que conectan las intenciones con las funciones reales del sistema.
+
+✅ ACTUALIZADO: Se agregó handle_chat() que usa Claude como cerebro
+   conversacional cuando el clasificador ML retorna Intent.UNKNOWN.
+"""
+
 from os_integration import process_mgr, browser, file_system, system_ctrl, wiki_api
 from ai import memory_manager
 from automation import pc_controller
 
-# Importación condicional de memoria semántica (puede no estar cargada todavía)
+# Importación condicional de memoria semántica
 try:
     from ai import semantic_memory as _sem_mem
     SEMANTIC_MEMORY_AVAILABLE = True
 except Exception:
     SEMANTIC_MEMORY_AVAILABLE = False
 
+# ✅ NUEVO: Importación condicional del cerebro Claude
+# Si la librería anthropic no está instalada o la API key no está configurada,
+# Glass simplemente no usará este módulo sin romper el flujo.
+try:
+    from ai.claude_brain import ask_claude
+    CLAUDE_AVAILABLE = True
+except Exception:
+    CLAUDE_AVAILABLE = False
+
+
+# ──────────────────────────────────────────────────────────────────
+#  HANDLERS EXISTENTES (sin cambios)
+# ──────────────────────────────────────────────────────────────────
+
 def handle_open_app(params: dict) -> str:
     app_name = params.get("app_name", "")
     if app_name:
-        # De acuerdo al requerimiento, la invocación de App ahora debe venir simulada por humano a la GUI
         return pc_controller.open_application(app_name)
     return "No entendí el nombre del programa a abrir."
 
@@ -65,7 +86,6 @@ def handle_recall_memory(params: dict) -> str:
     if not query:
         return "¿Sobre qué quieres que haga el recuerdo?"
 
-    # 1. Búsqueda semántica (por significado, no coincidencia exacta)
     if SEMANTIC_MEMORY_AVAILABLE:
         try:
             resultado_sem = _sem_mem.search_similar_memory(query, threshold=0.75)
@@ -74,7 +94,6 @@ def handle_recall_memory(params: dict) -> str:
         except Exception as e:
             print(f"[Aviso] Fallo en búsqueda semántica: {e}")
 
-    # 2. Fallback a búsqueda por texto exacto (LIKE en SQLite)
     memoria_previa = memory_manager.search_memory(query)
     if memoria_previa:
         return f"Revisando mis registros, encontré esto: {memoria_previa}"
@@ -98,5 +117,66 @@ def handle_pc_scroll(params: dict) -> str:
     direction = params.get("direction", "abajo")
     return pc_controller.scroll(direction)
 
+
+# ──────────────────────────────────────────────────────────────────
+#  ✅ NUEVO: HANDLER DE CHAT INTELIGENTE (Claude como cerebro)
+# ──────────────────────────────────────────────────────────────────
+
+def handle_chat(params: dict) -> str:
+    """
+    Handler para Intent.UNKNOWN y cualquier pregunta conversacional.
+
+    Flujo de fallback en cascada:
+      1. Intenta buscar en memoria semántica (¿respondimos algo similar antes?)
+      2. Si no encuentra nada relevante → pregunta a Claude
+      3. Si Claude no está disponible → respuesta genérica elegante
+
+    Args:
+        params: dict con clave "query" conteniendo el texto original del usuario.
+    """
+    query = params.get("query", "")
+
+    if not query:
+        return "Dígame, Señor. Estoy a su disposición."
+
+    # ── Paso 1: Buscar en memoria semántica ────────────────────────
+    # Si Glass ya respondió algo muy similar antes, lo recupera sin
+    # gastar tokens de API. Umbral más bajo (0.85) para mayor precisión.
+    if SEMANTIC_MEMORY_AVAILABLE:
+        try:
+            resultado_sem = _sem_mem.search_similar_memory(query, threshold=0.85)
+            if resultado_sem:
+                print(f"[🧠 Memoria semántica] Respuesta recuperada sin API")
+                return resultado_sem
+        except Exception:
+            pass
+
+    # ── Paso 2: Consultar a Claude ─────────────────────────────────
+    if CLAUDE_AVAILABLE:
+        print(f"[🤖 Claude Brain] Procesando: '{query[:50]}...' " if len(query) > 50 else f"[🤖 Claude Brain] Procesando: '{query}'")
+        response = ask_claude(query)
+        return response
+
+    # ── Paso 3: Fallback sin Claude ────────────────────────────────
+    # Si anthropic no está instalado o no hay API key, Glass responde
+    # de forma elegante en lugar de un error feo.
+    return (
+        "Señor, ese comando no está en mis protocolos actuales. "
+        "Para activar mi inteligencia conversacional avanzada, "
+        "configure la variable ANTHROPIC_API_KEY e instale la librería anthropic."
+    )
+
+
+# ──────────────────────────────────────────────────────────────────
+#  HANDLER LEGACY (mantenido por compatibilidad)
+# ──────────────────────────────────────────────────────────────────
+
 def handle_unknown(params: dict) -> str:
-    return "Lo siento, ese comando no está programado ni reconocido en mis rutinas actuales."
+    """
+    Handler legacy para Intent.UNKNOWN.
+    ✅ Ahora redirige automáticamente a handle_chat para respuesta inteligente
+    en lugar de mostrar el mensaje de error anterior.
+    """
+    # Reconstruir el query desde params si viene del clasificador
+    query = params.get("query", params.get("app_name", params.get("path", "")))
+    return handle_chat({"query": query})
