@@ -173,8 +173,14 @@ if __name__ == "__main__":
         except KeyboardInterrupt:
             print("\nDetenido por el usuario (Ctrl + C).")
         except Exception as e:
-            print(f"\nError fatal en el ciclo del asistente: {e}")
+            import traceback
+            import sys
+            print(f"\n[❌] Error fatal en el ciclo del asistente:")
+            traceback.print_exc()
+            sys.stdout.flush()
         finally:
+            import sys
+            sys.stdout.flush()
             os._exit(0)
 
     jarvis_mind = threading.Thread(target=jarvis_runner, daemon=True)
