@@ -1,16 +1,12 @@
 """
 channels/telegram_bot.py
-Bot de Telegram para Glass — Audio dividido en partes, sin cortes.
+Bot de Telegram para Glass — versión completa.
 
-Mejoras:
-  - Textos largos se dividen en múltiples audios seguidos (sin cortar frases)
-  - Limpieza profunda del texto antes de TTS (sin marcadores wiki, markdown, etc.)
-  - Notas de voz nativas con FFmpeg (OGG/OPUS)
-  - Fallback a archivo MP3 si no hay FFmpeg
-
-Requisitos:
-  pip install edge-tts python-telegram-bot==20.7
-  winget install ffmpeg
+- Aislamiento por usuario (memoria y conversación separadas)
+- Capturas de pantalla enviadas como foto al chat
+- Apagar y reiniciar el PC desde Telegram
+- Notas de voz nativas con edge-tts + FFmpeg
+- Audio dividido en partes para textos largos
 """
 
 import os
@@ -28,10 +24,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-GLASS_VOICE = "es-CO-GonzaloNeural"
-
-# Máximo de caracteres por audio — balance entre calidad y velocidad
-# 900 chars ≈ 45-60 segundos de audio, suficiente para respuestas completas
+GLASS_VOICE   = "es-CO-GonzaloNeural"
 MAX_AUDIO_CHARS = 900
 
 
@@ -61,72 +54,33 @@ def _has_ffmpeg() -> bool:
 FFMPEG_AVAILABLE = _has_ffmpeg()
 
 
-# ── Limpieza de texto para TTS ─────────────────────────────────────
+# ── Limpieza TTS ───────────────────────────────────────────────────
 
 def _clean_for_tts(text: str) -> str:
-    """
-    Limpieza profunda del texto antes de enviarlo al motor de voz.
-    Elimina todos los elementos que suenan mal o generan desorden en audio.
-    """
-    # 1. Eliminar marcadores de Wikipedia (== Título ==)
     text = re.sub(r'==+\s*[^=]+\s*==+', '', text)
-
-    # 2. Eliminar markdown de Telegram
-    text = re.sub(r'\*{1,3}', '', text)   # negrita
-    text = re.sub(r'_{1,3}', '', text)    # cursiva
-    text = re.sub(r'`{1,3}', '', text)    # código
-    text = re.sub(r'~{1,2}', '', text)    # tachado
-
-    # 3. Eliminar URLs (suenan horribles en TTS)
-    text = re.sub(r'https?://\S+', '', text)
-    text = re.sub(r'www\.\S+', '', text)
-
-    # 4. Eliminar emojis y símbolos especiales
-    text = re.sub(r'[•·▸▹►▻→←↑↓]', '', text)
-    text = re.sub(r'[✅❌⚠️💡🔊💬✓✗]', '', text)
-
-    # 5. Eliminar paréntesis con contenido corto (siglas, refs)
+    text = re.sub(r'\*{1,3}|_{1,3}|`{1,3}|~{1,2}', '', text)
+    text = re.sub(r'https?://\S+|www\.\S+', '', text)
+    text = re.sub(r'[•·▸►→←↑↓✅❌⚠️💡🔊💬✓✗]', '', text)
     text = re.sub(r'\([^)]{1,20}\)', '', text)
-
-    # 6. Limpiar líneas con solo guiones o asteriscos
-    text = re.sub(r'^[\s\-\*_=]+$', '', text, flags=re.MULTILINE)
-
-    # 7. Reemplazar saltos de línea por pausas naturales
     text = re.sub(r'\n{2,}', '. ', text)
     text = re.sub(r'\n', ', ', text)
-
-    # 8. Limpiar espacios múltiples y puntuación repetida
     text = re.sub(r'\s+', ' ', text)
     text = re.sub(r'[,\s]+\.', '.', text)
     text = re.sub(r'\.{2,}', '.', text)
-    text = re.sub(r',{2,}', ',', text)
-
-    # 9. Eliminar caracteres no pronunciables
-    text = re.sub(r'[<>\[\]{}|\\^~]', '', text)
-
     return text.strip()
 
 
 def _split_for_tts(text: str, max_chars: int = MAX_AUDIO_CHARS) -> list[str]:
-    """
-    Divide el texto en bloques para TTS respetando oraciones completas.
-    Nunca corta en medio de una oración.
-    Retorna lista de strings, cada uno <= max_chars.
-    """
     if len(text) <= max_chars:
         return [text]
 
-    parts = []
-    # Dividir por oraciones (punto + espacio, signos de interrogación/exclamación)
+    parts, current = [], ""
     sentences = re.split(r'(?<=[.!?])\s+', text)
 
-    current = ""
     for sentence in sentences:
         sentence = sentence.strip()
         if not sentence:
             continue
-
-        # Si la oración sola ya supera el límite, dividir por comas
         if len(sentence) > max_chars:
             sub_parts = re.split(r'(?<=,)\s+', sentence)
             for sub in sub_parts:
@@ -146,17 +100,12 @@ def _split_for_tts(text: str, max_chars: int = MAX_AUDIO_CHARS) -> list[str]:
     if current:
         parts.append(current.strip())
 
-    # Filtrar partes vacías o muy cortas (menos de 10 chars)
     return [p for p in parts if len(p) >= 10]
 
 
 # ── TTS — Generar audio ────────────────────────────────────────────
 
-async def _generate_single_audio(text: str) -> tuple[str | None, str]:
-    """
-    Genera un archivo de audio para un bloque de texto.
-    Retorna (ruta, tipo) donde tipo es 'voice' (OGG) o 'audio' (MP3).
-    """
+async def _generate_audio(text: str) -> tuple[str | None, str]:
     try:
         import edge_tts
 
@@ -173,7 +122,6 @@ async def _generate_single_audio(text: str) -> tuple[str | None, str]:
                 pass
             return None, "none"
 
-        # Con FFmpeg → OGG para nota de voz nativa
         if FFMPEG_AVAILABLE:
             ogg_path = mp3_path.replace(".mp3", ".ogg")
             r = subprocess.run([
@@ -181,37 +129,31 @@ async def _generate_single_audio(text: str) -> tuple[str | None, str]:
                 "-c:a", "libopus", "-b:a", "64k",
                 ogg_path, "-y", "-loglevel", "quiet"
             ], capture_output=True, timeout=30)
-
             try:
                 os.unlink(mp3_path)
             except Exception:
                 pass
-
             if r.returncode == 0 and Path(ogg_path).exists():
                 return ogg_path, "voice"
 
         return mp3_path, "audio"
 
     except ImportError:
+        logger.warning("edge-tts no instalado: pip install edge-tts")
         return None, "none"
     except Exception as e:
-        logger.warning(f"Error generando audio: {e}")
+        logger.warning(f"TTS error: {e}")
         return None, "none"
 
 
 async def send_voice_parts(update, text: str):
-    """
-    Divide el texto en partes y envía cada una como nota de voz separada.
-    El usuario recibe todas las partes seguidas sin cortes de frases.
-    """
+    """Divide el texto y envía cada parte como nota de voz."""
     clean = _clean_for_tts(text)
     if not clean:
         return
 
     parts = _split_for_tts(clean)
-    total = len(parts)
-
-    logger.info(f"Enviando {total} parte(s) de audio")
+    logger.info(f"Enviando {len(parts)} parte(s) de audio")
 
     for i, part in enumerate(parts):
         try:
@@ -219,10 +161,8 @@ async def send_voice_parts(update, text: str):
         except Exception:
             pass
 
-        audio_path, audio_type = await _generate_single_audio(part)
-
+        audio_path, audio_type = await _generate_audio(part)
         if not audio_path or not Path(audio_path).exists():
-            logger.warning(f"No se generó audio para parte {i+1}")
             continue
 
         try:
@@ -231,9 +171,7 @@ async def send_voice_parts(update, text: str):
                     await update.message.reply_voice(voice=af)
                 else:
                     await update.message.reply_audio(
-                        audio=af,
-                        title=f"Glass {'('+str(i+1)+'/'+str(total)+')' if total > 1 else ''}",
-                        performer="Glass Assistant"
+                        audio=af, title="Glass", performer="Glass Assistant"
                     )
         except Exception as e:
             logger.warning(f"Error enviando parte {i+1}: {e}")
@@ -243,12 +181,11 @@ async def send_voice_parts(update, text: str):
             except Exception:
                 pass
 
-        # Pequeña pausa entre partes para que lleguen en orden
-        if i < total - 1:
+        if i < len(parts) - 1:
             await asyncio.sleep(0.5)
 
 
-# ── STT — Transcribir audio ────────────────────────────────────────
+# ── STT ────────────────────────────────────────────────────────────
 
 def _transcribe_audio(audio_path: str) -> str:
     try:
@@ -276,12 +213,35 @@ def _transcribe_audio(audio_path: str) -> str:
 
 # ── Envío de respuesta ─────────────────────────────────────────────
 
-async def _send_response(update, text: str, send_voice: bool = False):
-    """Envía texto siempre. Si send_voice=True, también envía audio(s)."""
-    await _send_long_message(update, text)
+async def _send_response(update, context, response, send_voice: bool = False):
+    """
+    Envía la respuesta completa:
+    - Siempre: texto
+    - Si hay image_path: foto (captura de pantalla)
+    - Si send_voice: notas de voz
+    """
+    # Texto
+    await _send_long_message(update, response.text)
 
+    # Imagen (captura de pantalla)
+    if response.image_path and Path(response.image_path).exists():
+        try:
+            with open(response.image_path, "rb") as img:
+                await update.message.reply_photo(
+                    photo=img,
+                    caption="Captura de pantalla, Señor."
+                )
+        except Exception as e:
+            logger.warning(f"Error enviando captura: {e}")
+        finally:
+            try:
+                os.unlink(response.image_path)
+            except Exception:
+                pass
+
+    # Voz
     if send_voice:
-        await send_voice_parts(update, text)
+        await send_voice_parts(update, response.text)
 
 
 async def _send_long_message(update, text: str):
@@ -319,14 +279,14 @@ async def cmd_start(update, context):
         f"Soy *{agent}*, su asistente de IA personal.\n\n"
         f"*Formas de comunicarse:*\n"
         f"• Texto — cualquier pregunta o comando\n"
-        f"• Voz — envíe un audio y respondo con voz\n"
+        f"• Voz — mándeme un audio y respondo con voz\n"
         f"• Imagen — la analizo y describo\n\n"
         f"*Comandos:*\n"
         f"/voz — activar respuestas con audio\n"
         f"/texto — solo texto\n"
-        f"/ayuda — todos los comandos\n"
+        f"/memoria — ver mi historial\n"
         f"/limpiar — reiniciar conversación\n"
-        f"/estado — verificar sistemas\n\n"
+        f"/ayuda — todos los comandos\n\n"
         f"¿En qué puedo asistirle, Señor?",
         parse_mode="Markdown"
     )
@@ -337,35 +297,32 @@ async def cmd_ayuda(update, context):
     agent = get_agent_name().upper()
     await update.message.reply_text(
         f"*{agent} — Comandos disponibles*\n\n"
-        f"*Modo de respuesta:*\n"
-        f"/voz — Glass responde con nota de voz\n"
-        f"/texto — solo respuestas de texto\n\n"
+        f"*Respuesta:*\n"
+        f"/voz — respuestas con nota de voz\n"
+        f"/texto — solo texto\n\n"
         f"*Conversación:*\n"
+        f"/memoria — ver historial de conversaciones\n"
         f"/limpiar — reiniciar conversación\n"
-        f"/estado — verificar sistemas\n"
-        f"/ayuda — este menú\n\n"
+        f"/estado — verificar sistemas\n\n"
         f"*Control del PC:*\n"
-        f"'apaga el pc' — apagar equipo\n"
-        f"'reinicia el pc' — reiniciar equipo\n"
         f"'toma una captura' — foto de pantalla al chat\n"
+        f"'apaga el pc' — apagar equipo en 10 segundos\n"
+        f"'reinicia el pc' — reiniciar equipo en 10 segundos\n"
         f"'qué hora es' — hora actual\n"
         f"'info del sistema' — specs del PC\n"
         f"'cuánta RAM tengo' — memoria disponible\n"
-        f"'uso del CPU' — procesador actual",
+        f"'uso del CPU' — estado del procesador",
         parse_mode="Markdown"
     )
 
 
 async def cmd_voz(update, context):
     context.user_data["voice_mode"] = True
-    ffmpeg_info = "Nota de voz nativa activa" if FFMPEG_AVAILABLE else (
-        "Archivo de audio (instala FFmpeg para nota de voz:\nwinget install ffmpeg)"
-    )
+    ffmpeg_info = "Nota de voz nativa" if FFMPEG_AVAILABLE else "Archivo MP3 (instala FFmpeg para nota de voz nativa)"
     await update.message.reply_text(
         f"*Modo voz activado, Señor.*\n\n"
         f"Voz: {GLASS_VOICE}\n"
-        f"FFmpeg: {ffmpeg_info}\n\n"
-        f"Textos largos se enviarán en varias notas de voz seguidas.\n"
+        f"Audio: {ffmpeg_info}\n\n"
         f"Use /texto para desactivarlo.",
         parse_mode="Markdown"
     )
@@ -378,19 +335,37 @@ async def cmd_texto(update, context):
     )
 
 
-async def cmd_limpiar(update, context):
-    try:
-        from ai.claude_brain import clear_conversation
-        clear_conversation()
-    except Exception:
-        pass
+async def cmd_memoria(update, context):
+    """Muestra el historial de conversaciones del usuario."""
+    from ai.user_manager import registry
+    user = update.effective_user
+    session = registry.get_or_create(
+        user_id=str(user.id),
+        user_name=user.first_name or "Usuario",
+        channel="telegram"
+    )
+    summary = session.get_memory_summary()
     await update.message.reply_text(
-        "Historial reiniciado, Señor. Listo para nuevas órdenes."
+        f"*Registros de {user.first_name}*\n\n{summary}",
+        parse_mode="Markdown"
+    )
+
+
+async def cmd_limpiar(update, context):
+    from ai.user_manager import registry
+    user = update.effective_user
+    session = registry.get(str(user.id), "telegram")
+    if session:
+        session.clear_history()
+    await update.message.reply_text(
+        "Historial de conversación reiniciado, Señor. Listo para nuevas órdenes."
     )
 
 
 async def cmd_estado(update, context):
     import datetime
+    from ai.user_manager import registry
+
     now = datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")
     voice_mode = context.user_data.get("voice_mode", False)
 
@@ -400,17 +375,16 @@ async def cmd_estado(update, context):
     except ImportError:
         tts_status = "No instalado (pip install edge-tts)"
 
-    ffmpeg_status = "Nota de voz nativa" if FFMPEG_AVAILABLE else "Sin FFmpeg — archivo MP3"
+    ffmpeg_status = "Nota de voz nativa" if FFMPEG_AVAILABLE else "Sin FFmpeg (winget install ffmpeg)"
 
     await update.message.reply_text(
         f"*Estado de Glass — {now}*\n\n"
         f"Bot Telegram: Activo\n"
         f"Motor IA: Operativo\n"
-        f"Memoria: Funcionando\n"
+        f"Usuarios activos: {registry.active_count()}\n"
         f"Motor de voz: {tts_status}\n"
         f"FFmpeg: {ffmpeg_status}\n"
-        f"Modo actual: {'Voz' if voice_mode else 'Texto'}\n"
-        f"Limite audio: {MAX_AUDIO_CHARS} chars por nota",
+        f"Modo: {'Voz' if voice_mode else 'Texto'}",
         parse_mode="Markdown"
     )
 
@@ -419,6 +393,7 @@ async def cmd_estado(update, context):
 
 async def handle_text(update, context):
     from channels.gateway import GlassGateway, GlassMessage, MessageType
+
     user = update.effective_user
     text = (update.message.text or "").strip()
     if not text:
@@ -429,6 +404,16 @@ async def handle_text(update, context):
         chat_id=update.effective_chat.id, action="typing"
     )
 
+    # Detectar comandos de PC en texto libre
+    text_lower = text.lower()
+    if any(w in text_lower for w in ["apaga el pc", "apagar el pc", "apaga la pc", "apagar la computadora"]):
+        await _handle_shutdown(update, context, voice_mode)
+        return
+
+    if any(w in text_lower for w in ["reinicia el pc", "reiniciar el pc", "reinicia la pc", "reiniciar el equipo"]):
+        await _handle_restart(update, context, voice_mode)
+        return
+
     msg = GlassMessage(
         user_id=str(user.id),
         user_name=user.first_name or "Usuario",
@@ -436,11 +421,12 @@ async def handle_text(update, context):
         msg_type=MessageType.TEXT
     )
     response = GlassGateway().process(msg)
-    await _send_response(update, response.text, send_voice=voice_mode)
+    await _send_response(update, context, response, send_voice=voice_mode)
 
 
 async def handle_voice(update, context):
     from channels.gateway import GlassGateway, GlassMessage, MessageType
+
     user = update.effective_user
 
     await context.bot.send_chat_action(
@@ -464,13 +450,23 @@ async def handle_voice(update, context):
 
     if not transcribed:
         await update.message.reply_text(
-            "No pude entender el audio, Señor. ¿Podría repetirlo o escribirlo?"
+            "No pude entender el audio, Señor. ¿Podría repetirlo?"
         )
         return
 
     await update.message.reply_text(
         f"_Escuché: \"{transcribed}\"_", parse_mode="Markdown"
     )
+
+    # Detectar comandos de PC en voz
+    text_lower = transcribed.lower()
+    if any(w in text_lower for w in ["apaga el pc", "apagar el pc", "apaga la pc"]):
+        await _handle_shutdown(update, context, send_voice=True)
+        return
+
+    if any(w in text_lower for w in ["reinicia el pc", "reiniciar el pc", "reinicia la pc"]):
+        await _handle_restart(update, context, send_voice=True)
+        return
 
     msg = GlassMessage(
         user_id=str(user.id),
@@ -479,8 +475,47 @@ async def handle_voice(update, context):
         msg_type=MessageType.VOICE
     )
     response = GlassGateway().process(msg)
-    # Siempre con voz cuando el usuario habló
-    await _send_response(update, response.text, send_voice=True)
+    await _send_response(update, context, response, send_voice=True)
+
+
+# ── Acciones del PC ────────────────────────────────────────────────
+
+async def _handle_shutdown(update, context, send_voice: bool = False):
+    """Apaga el PC con confirmación y cuenta regresiva."""
+    msg = (
+        "Iniciando secuencia de apagado, Señor.\n"
+        "El equipo se apagará en 10 segundos.\n\n"
+        "Envíe 'cancela apagado' para abortar."
+    )
+    await update.message.reply_text(msg)
+
+    if send_voice:
+        await send_voice_parts(update, msg)
+
+    try:
+        import os as _os
+        _os.system("shutdown /s /t 10")
+    except Exception as e:
+        await update.message.reply_text(f"Error al iniciar apagado: {e}")
+
+
+async def _handle_restart(update, context, send_voice: bool = False):
+    """Reinicia el PC con cuenta regresiva."""
+    msg = (
+        "Iniciando secuencia de reinicio, Señor.\n"
+        "El equipo se reiniciará en 10 segundos.\n\n"
+        "Envíe 'cancela reinicio' para abortar."
+    )
+    await update.message.reply_text(msg)
+
+    if send_voice:
+        await send_voice_parts(update, msg)
+
+    try:
+        import os as _os
+        _os.system("shutdown /r /t 10")
+    except Exception as e:
+        await update.message.reply_text(f"Error al iniciar reinicio: {e}")
 
 
 async def handle_photo(update, context):
@@ -509,7 +544,8 @@ async def handle_photo(update, context):
                 {"type": "image", "source": {
                     "type": "base64", "media_type": "image/jpeg", "data": data
                 }},
-                {"type": "text", "text": f"Eres GLASS, asistente formal tipo JARVIS. Responde en español concisamente: {caption}"}
+                {"type": "text",
+                 "text": f"Eres GLASS, asistente formal tipo JARVIS. Responde en español: {caption}"}
             ]}]
         )
         result = resp.content[0].text
@@ -521,7 +557,12 @@ async def handle_photo(update, context):
         except Exception:
             pass
 
-    await _send_response(update, result, send_voice=voice_mode)
+    from channels.gateway import GlassResponse
+    await _send_response(
+        update, context,
+        GlassResponse(text=result),
+        send_voice=voice_mode
+    )
 
 
 async def handle_error(update, context):
@@ -555,10 +596,11 @@ def run_telegram_bot():
         agent = "GLASS"
 
     print(f"\n{'='*50}")
-    print(f"  {agent} — Bot Telegram activo")
+    print(f"  {agent} — Bot Telegram completo")
     print(f"  Voz: {GLASS_VOICE}")
-    print(f"  FFmpeg: {'Nota de voz nativa' if FFMPEG_AVAILABLE else 'No disponible'}")
-    print(f"  Limite audio: {MAX_AUDIO_CHARS} chars por nota")
+    print(f"  FFmpeg: {'Nota de voz nativa' if FFMPEG_AVAILABLE else 'Sin FFmpeg'}")
+    print(f"  Aislamiento: por usuario activo")
+    print(f"  PC: apagado / reinicio / captura activados")
     print(f"  /voz en Telegram para activar audio")
     print(f"  Ctrl+C para detener")
     print(f"{'='*50}\n")
@@ -570,6 +612,7 @@ def run_telegram_bot():
     app.add_handler(CommandHandler("help",    cmd_ayuda))
     app.add_handler(CommandHandler("voz",     cmd_voz))
     app.add_handler(CommandHandler("texto",   cmd_texto))
+    app.add_handler(CommandHandler("memoria", cmd_memoria))
     app.add_handler(CommandHandler("limpiar", cmd_limpiar))
     app.add_handler(CommandHandler("estado",  cmd_estado))
     app.add_handler(MessageHandler(
