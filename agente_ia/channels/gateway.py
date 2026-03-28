@@ -1,12 +1,9 @@
 """
 channels/gateway.py
-Gateway central de Glass — normaliza mensajes de cualquier canal
-(Telegram, Discord, CLI, Web) al mismo formato interno.
-
-El núcleo de Glass nunca sabe de dónde viene el mensaje.
-Todos los canales entregan un GlassMessage y reciben un GlassResponse.
+Gateway central de Glass — aislamiento por usuario + acciones del PC.
 """
 
+import os
 from dataclasses import dataclass, field
 from typing import Optional
 from enum import Enum
@@ -14,104 +11,166 @@ from enum import Enum
 
 class MessageType(Enum):
     TEXT  = "text"
-    VOICE = "voice"   # Audio de voz → se transcribe con Whisper/Google STT
-    IMAGE = "image"   # Imagen → se describe con Claude Vision
-    FILE  = "file"    # Archivo adjunto
+    VOICE = "voice"
+    IMAGE = "image"
+    FILE  = "file"
 
 
 @dataclass
 class GlassMessage:
-    """
-    Mensaje normalizado que cualquier canal entrega al núcleo.
-    El núcleo solo trabaja con este formato, sin importar el origen.
-    """
-    user_id:    str                        # ID único del usuario (telegram_id, discord_id, etc.)
-    user_name:  str                        # Nombre del usuario para personalización
-    text:       str                        # Texto del mensaje (ya transcrito si era voz)
-    channel:    str                        # "telegram" | "discord" | "cli" | "web"
+    user_id:    str
+    user_name:  str
+    text:       str
+    channel:    str
     msg_type:   MessageType = MessageType.TEXT
-    audio_path: Optional[str] = None       # Ruta local al audio si msg_type == VOICE
-    image_path: Optional[str] = None       # Ruta local a la imagen si msg_type == IMAGE
-    raw_data:   dict = field(default_factory=dict)  # Datos crudos del canal (para uso avanzado)
+    audio_path: Optional[str] = None
+    image_path: Optional[str] = None
+    raw_data:   dict = field(default_factory=dict)
 
 
 @dataclass
 class GlassResponse:
-    """
-    Respuesta normalizada que el núcleo devuelve a cualquier canal.
-    Cada canal decide cómo renderizarla (texto, audio, imagen, etc.)
-    """
-    text:        str                       # Respuesta en texto siempre incluida
-    speak:       bool = True               # Si el canal soporta voz, leerla en voz alta
-    audio_path:  Optional[str] = None      # Ruta a audio generado (si TTS produjo archivo)
-    extra:       dict = field(default_factory=dict)  # Datos extra por canal
+    text:       str
+    speak:      bool = True
+    image_path: Optional[str] = None  # Captura de pantalla para enviar al chat
+    audio_path: Optional[str] = None
+    extra:      dict = field(default_factory=dict)
 
 
 class GlassGateway:
-    """
-    Punto de entrada central para todos los canales.
-    Recibe un GlassMessage, lo procesa con el núcleo de Glass,
-    y devuelve un GlassResponse.
-    """
-
-    def __init__(self):
-        # Importaciones lazy para no bloquear el arranque si algo falla
-        self._classifier = None
-        self._dispatcher = None
-
-    def _get_core(self):
-        """Inicializa el núcleo de Glass solo cuando se necesita (lazy)."""
-        if self._classifier is None:
-            from intent.classifier import classify_command
-            from router.dispatcher import dispatch
-            self._classifier = classify_command
-            self._dispatcher = dispatch
-        return self._classifier, self._dispatcher
 
     def process(self, message: GlassMessage) -> GlassResponse:
-        """
-        Procesa un mensaje de cualquier canal y retorna la respuesta.
-        Este es el único punto de integración entre canales y núcleo.
-        """
-        from ui.personality import format_response
-        from ai.memory_manager import save_memory
-        from ai.claude_brain import ask_claude
+        from ai.user_manager import registry
+
+        # Sesión aislada por usuario
+        session = registry.get_or_create(
+            user_id=message.user_id,
+            user_name=message.user_name,
+            channel=message.channel
+        )
 
         text = message.text.strip()
         if not text:
-            return GlassResponse(
-                text="Dígame, estoy escuchando.",
-                speak=True
-            )
+            return GlassResponse(text="Dígame, estoy escuchando.", speak=True)
 
         try:
-            classify, dispatch = self._get_core()
-
-            # 1. Clasificar intención
+            from intent.classifier import classify_command
             from intent.intentions import Intent
-            intent, params = classify(text)
+            from router.dispatcher import dispatch
 
-            # 2. Si es UNKNOWN → Claude como cerebro conversacional
+            intent, params = classify_command(text)
+
+            # Captura de pantalla → enviar como imagen al chat
+            if intent == Intent.TAKE_SCREENSHOT:
+                return self._handle_screenshot(session, text)
+
+            # UNKNOWN → Claude Brain personalizado por usuario
             if intent == Intent.UNKNOWN:
-                # Inyectar contexto del usuario en el mensaje para personalización
-                params["query"] = text
-                from executor.handlers import handle_chat
-                result = handle_chat({"query": text})
+                result = self._ask_claude_for_user(text, session)
             else:
                 result = dispatch(intent, params)
 
-            # 3. Guardar en memoria
-            save_memory(text, result)
+            # Memoria aislada del usuario
+            session.save_memory(text, result)
 
-            # 4. Guardar embedding semántico (sin bloquear si falla)
             try:
-                from ai.semantic_memory import store_memory as sem_store
-                sem_store(f"[{message.channel}] {message.user_name}: {text} → {result}")
+                self._save_semantic(session, text, result)
             except Exception:
                 pass
 
             return GlassResponse(text=result, speak=True)
 
         except Exception as e:
-            error_msg = f"Lo siento, he encontrado un inconveniente procesando su solicitud: {str(e)[:80]}"
-            return GlassResponse(text=error_msg, speak=True)
+            return GlassResponse(
+                text=f"Lo siento, he encontrado un inconveniente: {str(e)[:80]}",
+                speak=True
+            )
+
+    def _ask_claude_for_user(self, text: str, session) -> str:
+        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        if not api_key:
+            return "Configure ANTHROPIC_API_KEY para activar la inteligencia conversacional, Señor."
+
+        try:
+            import anthropic
+            import datetime
+            from config_manager import get_agent_name
+
+            agent = get_agent_name().upper()
+            memory_context = session.get_memory_md()
+
+            system = (
+                f"Eres {agent}, asistente de IA personal formal tipo JARVIS. "
+                f"Hablas siempre en español. Te diriges al usuario como 'Señor' o por su nombre.\n"
+                f"Usuario: {session.user_name} | Canal: {session.channel}\n"
+                f"Fecha: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
+            )
+            if memory_context:
+                system += f"\nPerfil del usuario:\n{memory_context}\n"
+
+            session.add_to_history("user", text)
+
+            client = anthropic.Anthropic(api_key=api_key)
+            response = client.messages.create(
+                model="claude-sonnet-4-5",
+                max_tokens=1024,
+                system=system,
+                messages=session.get_history()
+            )
+            result = response.content[0].text
+            session.add_to_history("assistant", result)
+            return result
+
+        except ImportError:
+            return "Instale la librería anthropic: pip install anthropic"
+        except Exception as e:
+            if session.conversation_history and session.conversation_history[-1]["role"] == "user":
+                session.conversation_history.pop()
+            return f"Error en inteligencia conversacional: {str(e)[:80]}"
+
+    def _handle_screenshot(self, session, text: str) -> GlassResponse:
+        """Toma captura y la devuelve para enviar como imagen en Telegram."""
+        try:
+            import pyautogui
+            import tempfile
+            import time
+
+            time.sleep(1.5)
+            screenshot = pyautogui.screenshot()
+
+            with tempfile.NamedTemporaryFile(
+                suffix=".png", delete=False, prefix="glass_cap_"
+            ) as f:
+                tmp_path = f.name
+
+            screenshot.save(tmp_path)
+            session.save_memory(text, "Captura de pantalla enviada al chat")
+
+            return GlassResponse(
+                text="Aquí tiene la captura de pantalla, Señor.",
+                speak=True,
+                image_path=tmp_path
+            )
+        except Exception as e:
+            return GlassResponse(
+                text=f"No pude tomar la captura, Señor: {str(e)[:60]}",
+                speak=True
+            )
+
+    def _save_semantic(self, session, text: str, result: str):
+        try:
+            import json
+            import sqlite3
+            from ai.embedding_engine import create_embedding
+
+            content = f"Pregunta: {text} | Respuesta: {result}"
+            embedding = create_embedding(content)
+            conn = sqlite3.connect(str(session.sem_db_path))
+            conn.execute(
+                "INSERT INTO semantic_memories (text, embedding_json) VALUES (?, ?)",
+                (content, json.dumps(embedding))
+            )
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
