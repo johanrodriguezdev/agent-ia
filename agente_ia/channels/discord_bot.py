@@ -56,16 +56,18 @@ def _get_agent_name() -> str:
         return "GLASS"
 
 
-def _process_message(user_id: str, user_name: str, text: str) -> str:
+def _process_message(user_id: str, user_name: str, text: str, image_path: str = None) -> str:
     """Procesa un mensaje a través del Gateway de Glass."""
     try:
         from channels.gateway import GlassGateway, GlassMessage, MessageType
+        msg_type = MessageType.IMAGE if image_path else MessageType.TEXT
         msg = GlassMessage(
             user_id=f"discord_{user_id}",
             user_name=user_name,
             text=text,
             channel="discord",
-            msg_type=MessageType.TEXT
+            msg_type=msg_type,
+            image_path=image_path
         )
         gateway = GlassGateway()
         response = gateway.process(msg)
@@ -102,7 +104,7 @@ def run_discord_bot():
     @bot.event
     async def on_ready():
         print(f"\n{'='*45}")
-        print(f"  {agent} — Bot de Discord activo")
+        print(f"  {agent} - Bot de Discord activo")
         print(f"  Conectado como: {bot.user}")
         print(f"{'='*45}\n")
         # Sincronizar comandos slash
@@ -125,15 +127,32 @@ def run_discord_bot():
 
         # Limpiar la mención del texto
         text = message.content.replace(f"<@{bot.user.id}>", "").strip()
-        if not text:
+        if not text and not message.attachments:
             text = "Hola"
+
+        image_path = None
+        if message.attachments:
+            for att in message.attachments:
+                if att.content_type and att.content_type.startswith('image/'):
+                    temp = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
+                    image_path = temp.name
+                    temp.close()
+                    await att.save(image_path)
+                    break
 
         async with message.channel.typing():
             result = _process_message(
                 str(message.author.id),
                 message.author.display_name,
-                text
+                text,
+                image_path=image_path
             )
+            
+        if image_path:
+            try:
+                os.unlink(image_path)
+            except Exception:
+                pass
 
         # Responder con embed elegante
         embed = discord.Embed(
@@ -145,8 +164,8 @@ def run_discord_bot():
 
     # ── Comandos slash ─────────────────────────────────────────────
 
-    @bot.tree.command(name="glass", description="Habla con Glass")
-    @app_commands.describe(mensaje="Tu pregunta o comando para Glass")
+    @bot.tree.command(name="orion", description=f"Habla con {agent}")
+    @app_commands.describe(mensaje=f"Tu pregunta o comando para {agent}")
     async def slash_glass(interaction: discord.Interaction, mensaje: str):
         await interaction.response.defer()
         result = _process_message(
@@ -162,7 +181,7 @@ def run_discord_bot():
         embed.set_footer(text=f"{agent} Assistant")
         await interaction.followup.send(embed=embed)
 
-    @bot.tree.command(name="limpiar", description="Reinicia la conversación con Glass")
+    @bot.tree.command(name="limpiar", description=f"Reinicia la conversación con {agent}")
     async def slash_limpiar(interaction: discord.Interaction):
         try:
             from ai.claude_brain import clear_conversation
@@ -174,7 +193,7 @@ def run_discord_bot():
             ephemeral=True
         )
 
-    @bot.tree.command(name="ayuda", description="Ver comandos de Glass")
+    @bot.tree.command(name="ayuda", description=f"Ver comandos de {agent}")
     async def slash_ayuda(interaction: discord.Interaction):
         embed = discord.Embed(
             title=f"{agent} — Comandos",
@@ -187,7 +206,7 @@ def run_discord_bot():
         )
         embed.add_field(
             name="Comandos slash",
-            value="`/glass` — hacer una pregunta\n`/limpiar` — reiniciar conversación\n`/ayuda` — este menú",
+            value="`/orion` — hacer una pregunta\n`/limpiar` — reiniciar conversación\n`/ayuda` — este menú",
             inline=False
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)

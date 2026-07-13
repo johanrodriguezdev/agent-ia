@@ -52,3 +52,78 @@ def shutdown_pc() -> str:
         return "Atención: El sistema se apagará en 5 segundos. Guarda tus archivos."
     except Exception as e:
          return "No se pudo invocar el apagado."
+
+def close_app(app_name: str) -> str:
+    """Cierra un programa/proceso por nombre en Windows."""
+    import subprocess
+    
+    if not app_name:
+        return "No me indicó qué programa cerrar, Señor."
+    
+    # Mapeo de nombres comunes a nombres de proceso reales
+    app_aliases = {
+        "chrome": "chrome.exe",
+        "google chrome": "chrome.exe",
+        "firefox": "firefox.exe",
+        "mozilla": "firefox.exe",
+        "edge": "msedge.exe",
+        "microsoft edge": "msedge.exe",
+        "word": "WINWORD.EXE",
+        "excel": "EXCEL.EXE",
+        "powerpoint": "POWERPNT.EXE",
+        "outlook": "OUTLOOK.EXE",
+        "teams": "Teams.exe",
+        "discord": "Discord.exe",
+        "spotify": "Spotify.exe",
+        "telegram": "Telegram.exe",
+        "whatsapp": "WhatsApp.exe",
+        "steam": "steam.exe",
+        "epic games": "EpicGamesLauncher.exe",
+        "notepad": "notepad.exe",
+        "bloc de notas": "notepad.exe",
+        "explorador": "explorer.exe",
+        "explorer": "explorer.exe",
+        "vscode": "Code.exe",
+        "visual studio code": "Code.exe",
+        "visual studio": "devenv.exe",
+        "calculadora": "CalculatorApp.exe",
+        "obs": "obs64.exe",
+        "obs studio": "obs64.exe",
+        "vlc": "vlc.exe",
+        "brave": "brave.exe",
+        "opera": "opera.exe",
+    }
+    
+    # Buscar el nombre del proceso
+    app_lower = app_name.lower().strip()
+    process_name = app_aliases.get(app_lower, None)
+    
+    if not process_name:
+        # Si no está en los alias, intentar con el nombre + .exe
+        process_name = app_lower if app_lower.endswith(".exe") else f"{app_lower}.exe"
+    
+    try:
+        # Verificar si el proceso está corriendo
+        check = subprocess.run(
+            ["tasklist", "/FI", f"IMAGENAME eq {process_name}"],
+            capture_output=True, text=True, timeout=5
+        )
+        
+        if process_name.lower() not in check.stdout.lower():
+            return f"El programa '{app_name}' no parece estar ejecutándose, Señor."
+        
+        # Cerrar el proceso
+        result = subprocess.run(
+            ["taskkill", "/IM", process_name, "/F"],
+            capture_output=True, text=True, timeout=10
+        )
+        
+        if result.returncode == 0:
+            return f"Programa '{app_name}' cerrado exitosamente, Señor."
+        else:
+            return f"No pude cerrar '{app_name}': {result.stderr.strip()}"
+            
+    except subprocess.TimeoutExpired:
+        return f"El intento de cerrar '{app_name}' tardó demasiado."
+    except Exception as e:
+        return f"Error al intentar cerrar '{app_name}': {str(e)[:60]}"

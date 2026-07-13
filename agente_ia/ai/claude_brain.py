@@ -33,8 +33,9 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 # Modelo a usar — Sonnet es el balance ideal entre velocidad e inteligencia
 CLAUDE_MODEL = "claude-sonnet-4-5"
 
-# Límite de turnos en el historial de conversación (para no exceder el contexto)
-MAX_HISTORY_TURNS = 20
+# Límite de turnos en el historial de conversación (más memoria)
+MAX_HISTORY_TURNS = 100
+
 
 # Ruta al archivo de perfil del usuario (memoria persistente tipo OpenClaw)
 MEMORY_FILE = os.path.join(os.path.dirname(__file__), "..", "MEMORY.md")
@@ -50,10 +51,10 @@ _conversation_history: list[dict] = []
 #  SYSTEM PROMPT — personalidad y contexto de Glass
 # ──────────────────────────────────────────────────────────────────
 
-def _build_system_prompt() -> str:
+def _build_system_prompt(sem_context: str = "") -> str:
     """
-    Construye el system prompt combinando la personalidad de Glass
-    con el perfil del usuario desde MEMORY.md si existe.
+    Construye el system prompt combinando la personalidad de Glass,
+    el perfil del usuario desde MEMORY.md y el contexto semántico relevante.
     """
     agent_name = _get_agent_name()
 
@@ -65,7 +66,21 @@ REGLAS DE COMPORTAMIENTO:
 - Responde siempre en español, de forma concisa y directa.
 - Mantén el tono formal de asistente personal de alto nivel.
 - Si el usuario pregunta algo que puedes responder con tu conocimiento, hazlo directamente.
-- Si el usuario pide ejecutar acciones en el PC (abrir apps, buscar archivos, etc.), indícale que puedes hacerlo si reformula el comando de forma más específica.
+- Si el usuario pide ejecutar acciones en el PC que no sabes hacer, AHORA PUEDES APRENDERLAS POR TI MISMO. 
+  Si detectas que el usuario te está pidiendo una secuencia de acciones o quieres aprender un comando nuevo automáticamente para ayudarle, responde INCLUYENDO un bloque JSON con este formato exacto:
+  ```json
+  {{
+    "learn_command": "frase o comando clave",
+    "actions": ["comando reconocido 1", "comando reconocido 2"]
+  }}
+  ```
+  Esto hará que lo aprendas. Puedes incluir también un mensaje normal conversacional confirmando que lo has aprendido.
+- Si el usuario te pide que recuerdes datos importantes sobre él o preferencias que no quieres olvidar en futuras sesiones, responde INCLUYENDO un bloque JSON con este formato exacto:
+  ```json
+  {{
+    "save_memory": "Dato específico relevante que debo anexar a mi memoria permanente"
+  }}
+  ```
 - Nunca rompas el personaje ni menciones que eres Claude de Anthropic. Eres {agent_name.upper()}.
 - Fecha y hora actual: {datetime.now().strftime('%d/%m/%Y %H:%M')}
 """
@@ -76,10 +91,15 @@ REGLAS DE COMPORTAMIENTO:
         base_prompt += f"""
 PERFIL Y CONTEXTO DEL USUARIO (tu memoria persistente):
 {memory_context}
-
-Usa este contexto para personalizar tus respuestas cuando sea relevante.
 """
 
+    if sem_context:
+        base_prompt += f"""
+RECUERDOS RELEVANTES DE CONVERSACIONES PASADAS (Memoria Semántica):
+{sem_context}
+"""
+
+    base_prompt += "\nUsa este contexto y recuerdos para personalizar tus respuestas cuando sea relevante."
     return base_prompt
 
 
@@ -133,22 +153,6 @@ def ask_claude(user_message: str) -> str:
     """
     global _conversation_history
 
-    # ── Verificar API key ──────────────────────────────────────────
-    if not ANTHROPIC_API_KEY:
-        return (
-            "Señor, mi módulo de inteligencia conversacional no está configurado. "
-            "Por favor establezca la variable de entorno ANTHROPIC_API_KEY para activarlo."
-        )
-
-    # ── Importar Anthropic (instalación opcional) ──────────────────
-    try:
-        import anthropic
-    except ImportError:
-        return (
-            "Señor, la librería 'anthropic' no está instalada. "
-            "Ejecute 'pip install anthropic' para activar el cerebro conversacional."
-        )
-
     # ── Agregar mensaje del usuario al historial ───────────────────
     _conversation_history.append({
         "role": "user",
@@ -160,19 +164,46 @@ def ask_claude(user_message: str) -> str:
         # Conservamos los últimos MAX_HISTORY_TURNS pares (user + assistant)
         _conversation_history = _conversation_history[-(MAX_HISTORY_TURNS * 2):]
 
-    # ── Llamada a la API de Claude ─────────────────────────────────
+    # ── Memoria Semántica Adicional ────────────────────────────────
+    sem_context = ""
     try:
-        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        from ai.semantic_memory import search_similar_memory
+        sem_context = search_similar_memory(user_message, threshold=0.65)
+    except Exception:
+        pass
 
-        response = client.messages.create(
-            model=CLAUDE_MODEL,
-            max_tokens=1024,
-            system=_build_system_prompt(),
-            messages=_conversation_history
+    # ── Llamada a la API de LLM Unificada ───────────────────────────
+    try:
+        from ai.llm_provider import generate_response
+        assistant_message = generate_response(
+            messages=_conversation_history,
+            system_prompt=_build_system_prompt(sem_context)
         )
-
-        # Extraer texto de la respuesta
-        assistant_message = response.content[0].text
+        
+        # ── Auto-Aprendizaje de Comandos y Memoria ───────────────────────────
+        import re
+        json_match = re.search(r'```json\s*(\{.*?\})\s*```', assistant_message, re.DOTALL)
+        if json_match:
+            try:
+                import json
+                learned_data = json.loads(json_match.group(1))
+                parsed_something = False
+                
+                if "learn_command" in learned_data and "actions" in learned_data:
+                    from learning.command_learning import save_custom_command
+                    save_custom_command(learned_data["learn_command"], learned_data["actions"])
+                    parsed_something = True
+                    
+                if "save_memory" in learned_data:
+                    memory_path = os.path.abspath(MEMORY_FILE)
+                    with open(memory_path, "a", encoding="utf-8") as f:
+                        f.write(f"\n- {learned_data['save_memory']} (Registrado: {datetime.now().strftime('%d/%m/%Y')})")
+                    parsed_something = True
+                
+                if parsed_something:
+                    assistant_message = re.sub(r'```json\s*\{.*?\}\s*```', '', assistant_message, flags=re.DOTALL).strip()
+            except Exception as parse_e:
+                print(f"[ Claude Auto-Learning Error ] {parse_e}")
 
         # ── Guardar respuesta en historial ─────────────────────────
         _conversation_history.append({
@@ -186,17 +217,17 @@ def ask_claude(user_message: str) -> str:
         error_str = str(e)
 
         # Errores comunes con mensajes claros
-        if "authentication" in error_str.lower() or "api_key" in error_str.lower():
-            return "Señor, la clave de API de inteligencia no es válida. Verifique ANTHROPIC_API_KEY."
-        elif "rate_limit" in error_str.lower():
-            return "Señor, he excedido el límite de consultas por minuto. Permítame un momento antes de continuar."
+        if "API_KEY" in error_str:
+            return f"Señor, verifique la configuración de su API Key. ({error_str})"
+        elif "rate" in error_str.lower() or "quota" in error_str.lower():
+            return "Señor, he excedido el límite de API. Verifique sus créditos disponibles."
         elif "connection" in error_str.lower() or "network" in error_str.lower():
-            return "Señor, no tengo acceso a internet en este momento. No puedo procesar consultas de inteligencia avanzada."
+            return "Señor, no tengo acceso fluido de red en este momento."
         else:
-            # Eliminar el mensaje del usuario del historial si falló (para no corromperlo)
+            # Eliminar el mensaje del usuario del historial si falló
             if _conversation_history and _conversation_history[-1]["role"] == "user":
                 _conversation_history.pop()
-            return f"Señor, mi módulo de inteligencia ha encontrado un inconveniente: {error_str[:100]}"
+            return f"Señor, mi módulo de inteligencia ha encontrado un inconveniente: {error_str}"
 
 
 def clear_conversation():

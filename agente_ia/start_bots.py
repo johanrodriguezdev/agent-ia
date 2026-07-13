@@ -65,10 +65,11 @@ def main():
         from config_manager import get_agent_name
         agent = get_agent_name().upper()
     except Exception:
-        agent = "GLASS"
+        agent = "O.R.I.O.N."
 
     print(f"\n{'='*50}")
-    print(f"  {agent} — Iniciando canales de comunicación")
+    print(f"  {agent} - Iniciando canales de comunicación")
+    print(f"  Sistema de tareas y recordatorios: activo")
     print(f"{'='*50}\n")
 
     threads = []
@@ -79,9 +80,9 @@ def main():
             t = threading.Thread(target=run_telegram, daemon=True, name="TelegramBot")
             t.start()
             threads.append(("Telegram", t))
-            print("  ✓ Telegram Bot — iniciando...")
+            print("  [+] Telegram Bot - iniciando...")
         else:
-            print("  ✗ Telegram Bot — sin token (agrega TELEGRAM_BOT_TOKEN)")
+            print("  [-] Telegram Bot - sin token (agrega TELEGRAM_BOT_TOKEN)")
 
     # ── Discord ────────────────────────────────────────────────────
     if run_discord_flag:
@@ -89,15 +90,15 @@ def main():
             t = threading.Thread(target=run_discord, daemon=True, name="DiscordBot")
             t.start()
             threads.append(("Discord", t))
-            print("  ✓ Discord Bot — iniciando...")
+            print("  [+] Discord Bot - iniciando...")
         else:
-            print("  ✗ Discord Bot — sin token (agrega DISCORD_BOT_TOKEN)")
+            print("  [-] Discord Bot - sin token (agrega DISCORD_BOT_TOKEN)")
 
     if not threads:
         print("\n  Sin canales configurados.")
         print("  Configura al menos un token en config.json o variables de entorno.\n")
         print("  Ejemplo config.json:")
-        print('  { "agent_name": "glass", "telegram_token": "TU_TOKEN" }\n')
+        print(f'  {{ "agent_name": "{agent.lower()}", "telegram_token": "TU_TOKEN" }}\n')
         return
 
     print(f"\n  {len(threads)} canal(es) activo(s). Presiona Ctrl+C para detener.\n")

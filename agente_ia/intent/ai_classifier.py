@@ -45,6 +45,33 @@ class IntentClassifierSystem:
             ("abre telegram", Intent.OPEN_APP.value),
             ("inicia el panel de control", Intent.OPEN_APP.value),
 
+            # ── CLOSE_APP ────────────────────────────────────────────────────
+            ("cierra chrome", Intent.CLOSE_APP.value),
+            ("cierra google chrome", Intent.CLOSE_APP.value),
+            ("cierra el navegador", Intent.CLOSE_APP.value),
+            ("cierra firefox", Intent.CLOSE_APP.value),
+            ("cierra spotify", Intent.CLOSE_APP.value),
+            ("cierra discord", Intent.CLOSE_APP.value),
+            ("cierra word", Intent.CLOSE_APP.value),
+            ("cierra excel", Intent.CLOSE_APP.value),
+            ("cierra el bloc de notas", Intent.CLOSE_APP.value),
+            ("cierra la aplicacion", Intent.CLOSE_APP.value),
+            ("mata el proceso de chrome", Intent.CLOSE_APP.value),
+            ("termina el programa", Intent.CLOSE_APP.value),
+            ("cierra el programa", Intent.CLOSE_APP.value),
+            ("cierra teams", Intent.CLOSE_APP.value),
+            ("cierra edge", Intent.CLOSE_APP.value),
+            ("cierra vlc", Intent.CLOSE_APP.value),
+            ("cierra zoom", Intent.CLOSE_APP.value),
+            ("cierra steam", Intent.CLOSE_APP.value),
+            ("mata spotify", Intent.CLOSE_APP.value),
+            ("termina chrome", Intent.CLOSE_APP.value),
+            ("finaliza el programa de discord", Intent.CLOSE_APP.value),
+            ("cierra el explorador", Intent.CLOSE_APP.value),
+            ("cierra visual studio code", Intent.CLOSE_APP.value),
+            ("cierra obs", Intent.CLOSE_APP.value),
+            ("cierra brave", Intent.CLOSE_APP.value),
+
             # ── SEARCH_WEB ───────────────────────────────────────────────────
             ("busca inteligencia artificial en google", Intent.SEARCH_WEB.value),
             ("busca en internet gatos", Intent.SEARCH_WEB.value),
@@ -169,7 +196,7 @@ class IntentClassifierSystem:
             # ── TEACH_COMMAND ────────────────────────────────────────────────
             ("aprende comando", Intent.TEACH_COMMAND.value),
             ("aprende un nuevo comando", Intent.TEACH_COMMAND.value),
-            ("jarvis aprende comando", Intent.TEACH_COMMAND.value),
+            ("orion aprende comando", Intent.TEACH_COMMAND.value),
             ("quiero enseñarte un comando", Intent.TEACH_COMMAND.value),
             ("enseñar comando", Intent.TEACH_COMMAND.value),
             ("aprende una nueva rutina", Intent.TEACH_COMMAND.value),
@@ -285,6 +312,17 @@ class IntentClassifierSystem:
         
         texts  = [clean_text(item[0]) for item in data]
         labels = [item[1] for item in data]
+        
+        # Integración Modular: Añadir datos de skills
+        try:
+            from skills.skill_manager import skill_manager
+            skill_data = skill_manager.get_all_training_data()
+            for text, intent in skill_data:
+                texts.append(clean_text(text))
+                labels.append(intent)
+        except Exception as e:
+            print(f"[Aviso] No se pudieron cargar datos modulares: {e}")
+            
         return texts, labels
 
     def _load_or_train(self):
@@ -316,8 +354,8 @@ class IntentClassifierSystem:
             os.remove(self.model_path)
         self._train()
 
-    def predict(self, text: str) -> Intent:
-        """Infiere la intención del texto crudo."""
+    def predict(self, text: str) -> str:
+        """Infiere la intención del texto crudo (Maneja Enum y Strings dinámicos)."""
         clean = clean_text(text)
         prediction = self.pipeline.predict([clean])[0]
-        return Intent(prediction)
+        return str(prediction)

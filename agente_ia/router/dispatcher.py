@@ -18,6 +18,7 @@ def dispatch(intent: Intent, params: dict) -> str:
     routes = {
         # Aplicaciones y sistema de archivos
         Intent.OPEN_APP:      handlers.handle_open_app,
+        Intent.CLOSE_APP:     handlers.handle_close_app,
         Intent.SEARCH_WEB:    handlers.handle_search_web,
         Intent.OPEN_FOLDER:   handlers.handle_open_folder,
         Intent.LIST_FILES:    handlers.handle_list_files,
@@ -59,5 +60,14 @@ def dispatch(intent: Intent, params: dict) -> str:
         Intent.UNKNOWN:       handlers.handle_unknown,
     }
     
+    # 1. Intentar Rutas Modulares (Skills Automáticas)
+    try:
+        from skills.skill_manager import skill_manager
+        if skill_manager.handles_intent(intent):
+            return skill_manager.execute(intent, params)
+    except Exception as e:
+        print(f"[Dispatcher] Error ejecutando skill modular: {e}")
+
+    # 2. Rutas Legacy Quemadas (Hardcoded)
     handler = routes.get(intent, handlers.handle_unknown)
     return handler(params)

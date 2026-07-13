@@ -39,13 +39,34 @@ def set_agent_name(new_name: str):
     config["agent_name"] = new_name.strip().lower()
     save_config(config)
 
+def get_agent_pronunciation() -> str:
+    config = load_config()
+    return config.get("agent_pronunciation", get_agent_name())
+
 def get_wake_words() -> list[str]:
     name = get_agent_name().lower()
-    return [
-        f"hey {name}", 
-        name, 
-        f"oye {name}", 
-        f"hola {name}",
-        f"despierta {name}",
-        f"hey {name} despierta"
-    ]
+    pronunciation = get_agent_pronunciation().lower()
+    
+    bases = {name, pronunciation}
+    
+    # Manejar el caso de "O.R.I.O.N." / "Orion" y los errores comunes de Google STT en español
+    if "orion" in name or "orion" in pronunciation:
+        bases.update([
+            "hay gris", "ahí gris", "ay gris", "y gris", 
+            "orion", "orion", "iris", "idris", "ygris", "hi gris"
+        ])
+        
+    words = []
+    for b in bases:
+        words.extend([
+            f"hey {b}", 
+            b, 
+            f"oye {b}", 
+            f"hola {b}",
+            f"despierta {b}",
+            f"hey {b} despierta"
+        ])
+        
+    # Ordenar por longitud descendente para que intente capturar primero "hey ahi gris" 
+    # antes que "ahi gris" solo, y evitar cortes incorrectos
+    return sorted(list(set(words)), key=len, reverse=True)

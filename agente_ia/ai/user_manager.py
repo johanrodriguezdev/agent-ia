@@ -93,9 +93,9 @@ class UserSession:
                 f"- Nombre: {self.user_name or 'Desconocido'}\n"
                 f"- Canal preferido: {self.channel}\n\n"
                 f"## Preferencias\n"
-                f"# (Glass las aprende automáticamente con el tiempo)\n\n"
+                f"# (O.R.I.O.N. las aprende automáticamente con el tiempo)\n\n"
                 f"## Notas\n"
-                f"# Agrega aquí información que quieras que Glass recuerde\n",
+                f"# Agrega aquí información que quieras que O.R.I.O.N. recuerde\n",
                 encoding="utf-8"
             )
 
