@@ -8,9 +8,10 @@ Enumeración de todas las intenciones que Glass puede reconocer.
 
 from enum import Enum
 
-class Intent(Enum):
+class Intent(str, Enum):
     # ── Aplicaciones y sistema de archivos ──────────────────────────
     OPEN_APP    = "OPEN_APP"
+    CLOSE_APP   = "CLOSE_APP"
     SEARCH_WEB  = "SEARCH_WEB"
     OPEN_FOLDER = "OPEN_FOLDER"
     LIST_FILES  = "LIST_FILES"

@@ -1,12 +1,12 @@
 """
 personality.py
-Módulo encargado de dar la personalidad de Jarvis a las respuestas.
-Transforma el texto crudo en una respuesta formal, educada y al estilo JARVIS (Iron Man).
+Módulo encargado de dar la personalidad al asistente.
+Transforma el texto crudo en una respuesta formal y educada.
 """
 
 import random
 
-# Lista de saludos y despedidas al estilo Jarvis
+# Lista de saludos y despedidas
 GREETINGS = [
     "A su servicio, Señor.",
     "Buen día, Señor. ¿En qué puedo asistirle hoy?",

@@ -7,7 +7,7 @@
 - Canal preferido: telegram
 
 ## Preferencias
-# (Glass las aprende automáticamente con el tiempo)
+# (O.R.I.O.N. las aprende automáticamente con el tiempo)
 
 ## Notas
-# Agrega aquí información que quieras que Glass recuerde
+# Agrega aquí información que quieras que O.R.I.O.N. recuerde

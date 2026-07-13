@@ -20,10 +20,27 @@ def classify_command(text: str) -> tuple[Intent, dict]:
     intent = ai_system.predict(clean_n)
     params = {}
     
-    # 2. Extracción de Entidades y Parámetros
+    # 2. Intentar extracción con Plugins Dinámicos (Skills)
+    try:
+        from skills.skill_manager import skill_manager
+        if skill_manager.handles_intent(intent):
+            params = skill_manager.extract_params(intent, text.lower().strip())
+            return intent, params
+    except Exception as e:
+        print(f"[Aviso] Fallo en la extracción modular de skill: {e}")
+
+    # 3. Extracción de Entidades y Parámetros (Legacy)
     if intent == Intent.OPEN_APP:
         # Extrae después de "abre", "inicia", "ejecuta", etc.
         match = re.search(r'\b(abre|inicia|ejecuta|arranca)\s+(?:el\s+|la\s+|aplicacion(?: de)?\s+)?(.*)', clean)
+        if match and match.group(2):
+            params["app_name"] = match.group(2).strip()
+        else:
+            params["app_name"] = clean
+
+    elif intent == Intent.CLOSE_APP:
+        # Extrae después de "cierra", "mata", "termina", "detén", etc.
+        match = re.search(r'\b(cierra|cerrar|mata|termina|deten|detén|finaliza|para|apaga|quita|salte de)\s+(?:el\s+(?:programa\s+|proceso\s+)?|la\s+(?:aplicacion\s+)?|del?\s+)?(.*)', clean)
         if match and match.group(2):
             params["app_name"] = match.group(2).strip()
         else:

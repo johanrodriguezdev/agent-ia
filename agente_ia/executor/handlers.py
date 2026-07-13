@@ -37,6 +37,12 @@ def handle_open_app(params: dict) -> str:
         return pc_controller.open_application(app_name)
     return "No entendí el nombre del programa a abrir."
 
+def handle_close_app(params: dict) -> str:
+    app_name = params.get("app_name", "")
+    if app_name:
+        return system_ctrl.close_app(app_name)
+    return "No me indicó qué programa cerrar, Señor."
+
 def handle_search_web(params: dict) -> str:
     query = params.get("query", "")
     if query:

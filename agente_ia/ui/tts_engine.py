@@ -56,6 +56,16 @@ def speak(text: str):
         pass
 
     try:
+        from config_manager import get_agent_name, get_agent_pronunciation
+        import re
+        agent_name = get_agent_name()
+        agent_pron = get_agent_pronunciation()
+        if agent_name.lower() != agent_pron.lower():
+            text = re.sub(r'(?i)\b' + agent_name + r'\b', agent_pron, text)
+    except Exception:
+        pass
+
+    try:
         engine.say(text)
         engine.runAndWait()
     except Exception as e:

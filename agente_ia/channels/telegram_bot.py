@@ -67,6 +67,17 @@ def _clean_for_tts(text: str) -> str:
     text = re.sub(r'\s+', ' ', text)
     text = re.sub(r'[,\s]+\.', '.', text)
     text = re.sub(r'\.{2,}', '.', text)
+
+    try:
+        from config_manager import get_agent_name, get_agent_pronunciation
+        agent_name = get_agent_name()
+        agent_pron = get_agent_pronunciation()
+        if agent_name.lower() != agent_pron.lower():
+            # Reemplazar ignorando mayúsculas/minúsculas usando re
+            text = re.sub(r'(?i)\b' + agent_name + r'\b', agent_pron, text)
+    except Exception:
+        pass
+
     return text.strip()
 
 
@@ -303,7 +314,14 @@ async def cmd_ayuda(update, context):
         f"*Conversación:*\n"
         f"/memoria — ver historial de conversaciones\n"
         f"/limpiar — reiniciar conversación\n"
-        f"/estado — verificar sistemas\n\n"
+        f"/estado — verificar sistemas\n"
+        f"/skills — administrar módulos (skills)\n\n"
+        f"*Tareas y Recordatorios:*\n"
+        f"/tareas — ver tareas pendientes\n"
+        f"/nueva [texto] — crear tarea rápida\n"
+        f"/completar [id] — marcar tarea como hecha\n"
+        f"/eliminar [id] — eliminar tarea\n"
+        f"O diga: 'recuérdame mañana a las 9am...'\n\n"
         f"*Control del PC:*\n"
         f"'toma una captura' — foto de pantalla al chat\n"
         f"'apaga el pc' — apagar equipo en 10 segundos\n"
@@ -387,6 +405,134 @@ async def cmd_estado(update, context):
         f"Modo: {'Voz' if voice_mode else 'Texto'}",
         parse_mode="Markdown"
     )
+
+
+async def cmd_skills(update, context):
+    try:
+        from skills.skill_manager import skill_manager
+        skill_list = "\n".join([f"• *{s.name}*: {s.description}" for s in skill_manager.skills])
+        if not skill_list:
+            skill_list = "No hay skills cargadas en el sistema modular."
+        await update.message.reply_text(f"*Panel de Skills (Módulos)*\n\n{skill_list}", parse_mode="Markdown")
+    except Exception as e:
+        await update.message.reply_text(f"Error cargando el panel de skills: {e}")
+
+
+# ── Comandos de Tareas y Recordatorios ─────────────────────────────
+
+async def cmd_tareas(update, context):
+    """Muestra las tareas pendientes del usuario."""
+    from tasks.task_manager import task_manager
+    user = update.effective_user
+    summary = task_manager.get_task_summary(str(user.id))
+    await update.message.reply_text(summary, parse_mode="Markdown")
+
+
+async def cmd_nueva(update, context):
+    """Crea una nueva tarea. Uso: /nueva recuérdame mañana a las 9am llamar al banco"""
+    from tasks.task_manager import task_manager
+    user = update.effective_user
+    text = " ".join(context.args) if context.args else ""
+
+    if not text:
+        await update.message.reply_text(
+            "*¿Qué tarea desea agregar, Señor?*\n\n"
+            "Uso: /nueva [descripción de la tarea]\n\n"
+            "Ejemplos:\n"
+            "• /nueva recuérdame mañana a las 9am llamar al banco\n"
+            "• /nueva entregar informe el viernes\n"
+            "• /nueva todos los lunes revisar correos\n\n"
+            "También puede simplemente decirme:\n"
+            "'Recuérdame mañana a las 9am llamar al banco'",
+            parse_mode="Markdown"
+        )
+        return
+
+    result = task_manager.create_from_natural(text, str(user.id), "telegram")
+    if result:
+        msg = task_manager.format_task_created(result)
+        await update.message.reply_text(msg, parse_mode="Markdown")
+    else:
+        # Si no parseó como tarea natural, crear como tarea simple
+        import datetime
+        remind_at = datetime.datetime.now() + datetime.timedelta(hours=1)
+        task_id = task_manager.create_task(
+            user_id=str(user.id),
+            title=text,
+            channel="telegram",
+            remind_at=remind_at.isoformat()
+        )
+        await update.message.reply_text(
+            f"✅ *Tarea registrada, Señor.*\n\n"
+            f"📋 *{text}*\n"
+            f"🆔 #{task_id}\n"
+            f"⏰ Recordatorio: en 1 hora\n\n"
+            f"Le notificaré en el momento indicado.",
+            parse_mode="Markdown"
+        )
+
+
+async def cmd_completar(update, context):
+    """Marca una tarea como completada. Uso: /completar [id]"""
+    from tasks.task_manager import task_manager
+    user = update.effective_user
+
+    if not context.args:
+        await update.message.reply_text(
+            "Indique el número de tarea, Señor.\n"
+            "Uso: /completar [id]\n\n"
+            "Use /tareas para ver sus tareas pendientes."
+        )
+        return
+
+    try:
+        task_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("El ID de tarea debe ser un número, Señor.")
+        return
+
+    success = task_manager.complete_task(task_id, str(user.id))
+    if success:
+        await update.message.reply_text(
+            f"☑️ *Tarea #{task_id} completada.*\n\n"
+            f"Excelente trabajo, Señor. Tarea archivada.",
+            parse_mode="Markdown"
+        )
+    else:
+        await update.message.reply_text(
+            f"No encontré la tarea #{task_id} en sus pendientes, Señor."
+        )
+
+
+async def cmd_eliminar(update, context):
+    """Elimina una tarea. Uso: /eliminar [id]"""
+    from tasks.task_manager import task_manager
+    user = update.effective_user
+
+    if not context.args:
+        await update.message.reply_text(
+            "Indique el número de tarea, Señor.\n"
+            "Uso: /eliminar [id]\n\n"
+            "Use /tareas para ver sus tareas."
+        )
+        return
+
+    try:
+        task_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("El ID de tarea debe ser un número, Señor.")
+        return
+
+    success = task_manager.delete_task(task_id, str(user.id))
+    if success:
+        await update.message.reply_text(
+            f"🗑 *Tarea #{task_id} eliminada, Señor.*",
+            parse_mode="Markdown"
+        )
+    else:
+        await update.message.reply_text(
+            f"No encontré la tarea #{task_id} en su lista, Señor."
+        )
 
 
 # ── Handlers de mensajes ───────────────────────────────────────────
@@ -528,41 +674,81 @@ async def handle_photo(update, context):
     )
 
     photo = update.message.photo[-1]
+    from channels.gateway import GlassGateway, GlassMessage, MessageType
+
     pf = await context.bot.get_file(photo.file_id)
     with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
         tmp = f.name
     await pf.download_to_drive(tmp)
 
     try:
-        import anthropic, base64
-        with open(tmp, "rb") as f:
-            data = base64.standard_b64encode(f.read()).decode("utf-8")
-        client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
-        resp = client.messages.create(
-            model="claude-sonnet-4-5", max_tokens=1024,
-            messages=[{"role": "user", "content": [
-                {"type": "image", "source": {
-                    "type": "base64", "media_type": "image/jpeg", "data": data
-                }},
-                {"type": "text",
-                 "text": f"Eres GLASS, asistente formal tipo JARVIS. Responde en español: {caption}"}
-            ]}]
+        msg = GlassMessage(
+            user_id=str(user.id),
+            user_name=user.first_name or "Usuario",
+            text=caption,
+            channel="telegram",
+            msg_type=MessageType.IMAGE,
+            image_path=tmp
         )
-        result = resp.content[0].text
+        response = GlassGateway().process(msg)
     except Exception as e:
-        result = f"No pude analizar la imagen, Señor: {str(e)[:80]}"
+        from channels.gateway import GlassResponse
+        response = GlassResponse(text=f"No pude analizar la imagen, Señor: {str(e)[:80]}")
     finally:
         try:
             os.unlink(tmp)
         except Exception:
             pass
 
-    from channels.gateway import GlassResponse
     await _send_response(
         update, context,
-        GlassResponse(text=result),
+        response,
         send_voice=voice_mode
     )
+
+
+async def handle_document(update, context):
+    user = update.effective_user
+    doc = update.message.document
+    filename = doc.file_name
+    caption = update.message.caption or ""
+    voice_mode = context.user_data.get("voice_mode", False)
+
+    await context.bot.send_chat_action(
+        chat_id=update.effective_chat.id, action="typing"
+    )
+
+    from channels.gateway import GlassGateway, GlassMessage, MessageType
+
+    df = await context.bot.get_file(doc.file_id)
+    tmp_dir = tempfile.gettempdir()
+    filepath = os.path.join(tmp_dir, filename)
+    await df.download_to_drive(filepath)
+
+    if not caption or ("analiza" not in caption.lower() and "resumen" not in caption.lower()):
+        text_to_process = f"analiza el archivo {filepath}"
+    else:
+        text_to_process = f"{caption} {filepath}"
+
+    try:
+        msg = GlassMessage(
+            user_id=str(user.id),
+            user_name=user.first_name or "Usuario",
+            text=text_to_process,
+            channel="telegram",
+            msg_type=MessageType.TEXT
+        )
+        response = GlassGateway().process(msg)
+    except Exception as e:
+        from channels.gateway import GlassResponse
+        response = GlassResponse(text=f"No pude procesar el archivo, Señor: {str(e)[:80]}")
+    finally:
+        try:
+            os.unlink(filepath)
+        except Exception:
+            pass
+
+    await _send_response(update, context, response, send_voice=voice_mode)
 
 
 async def handle_error(update, context):
@@ -596,17 +782,19 @@ def run_telegram_bot():
         agent = "GLASS"
 
     print(f"\n{'='*50}")
-    print(f"  {agent} — Bot Telegram completo")
+    print(f"  {agent} - Bot Telegram completo")
     print(f"  Voz: {GLASS_VOICE}")
     print(f"  FFmpeg: {'Nota de voz nativa' if FFMPEG_AVAILABLE else 'Sin FFmpeg'}")
     print(f"  Aislamiento: por usuario activo")
     print(f"  PC: apagado / reinicio / captura activados")
+    print(f"  Tareas: sistema de recordatorios activo")
     print(f"  /voz en Telegram para activar audio")
     print(f"  Ctrl+C para detener")
     print(f"{'='*50}\n")
 
     app = Application.builder().token(token).build()
 
+    # ── Comandos existentes ────────────────────────────────────────
     app.add_handler(CommandHandler("start",   cmd_start))
     app.add_handler(CommandHandler("ayuda",   cmd_ayuda))
     app.add_handler(CommandHandler("help",    cmd_ayuda))
@@ -615,12 +803,31 @@ def run_telegram_bot():
     app.add_handler(CommandHandler("memoria", cmd_memoria))
     app.add_handler(CommandHandler("limpiar", cmd_limpiar))
     app.add_handler(CommandHandler("estado",  cmd_estado))
+    app.add_handler(CommandHandler("skills",  cmd_skills))
+
+    # ── Comandos de Tareas ─────────────────────────────────────────
+    app.add_handler(CommandHandler("tareas",    cmd_tareas))
+    app.add_handler(CommandHandler("nueva",     cmd_nueva))
+    app.add_handler(CommandHandler("completar", cmd_completar))
+    app.add_handler(CommandHandler("eliminar",  cmd_eliminar))
+
+    # ── Handlers de mensajes ───────────────────────────────────────
     app.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND, handle_text
     ))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_error_handler(handle_error)
+
+    # ── Iniciar scheduler de tareas ────────────────────────────────
+    try:
+        from tasks.task_scheduler import task_scheduler
+        task_scheduler.set_telegram_app(app)
+        task_scheduler.start()
+        print("  [+] Scheduler de tareas — activo")
+    except Exception as e:
+        print(f"  [!] Scheduler de tareas — error: {e}")
 
     app.run_polling(allowed_updates=["message"])
 

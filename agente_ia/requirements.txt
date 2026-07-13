@@ -36,12 +36,23 @@ pyttsx3
 # --- Información del sistema ---
 psutil
 
+# --- Tareas y recordatorios (parseo de fechas naturales) ---
+dateparser
+
 # --- Interfaz gráfica HUD ---
 PyQt6
 
 # ================================================================
 # DEPENDENCIAS OPCIONALES (descomenta si las necesitas)
 # ================================================================
+
+# --- Análisis de Archivos y Web ---
+PyPDF2
+python-docx
+pandas
+openpyxl
+beautifulsoup4
+
 
 # Telegram bot (para usar Glass desde el celular):
 # python-telegram-bot==20.7
