@@ -1,34 +1,42 @@
-# MEMORY.md — Perfil y contexto del usuario
-# O.R.I.O.N. lee este archivo al inicio de cada sesión para personalizar sus respuestas.
-# Edítalo con tu información real para que O.R.I.O.N. te conozca mejor.
-# Mantén este archivo en menos de 100 líneas para no consumir demasiados tokens.
-# ─────────────────────────────────────────────────────────────────────────────
+# MEMORY.md — Memoria persistente de O.R.I.O.N.
 
-## Identidad del usuario
-- Nombre: Johan
-- Ubicación: Villavicencio, Meta, Colombia
-- Idioma preferido: Español
+> Este archivo contiene el contexto activo que Orion debe recordar entre sesiones.
+> Para el perfil completo del usuario, ver `USER.md`.
+> Para la identidad del asistente, ver `IDENTITY.md` y `SOUL.md`.
 
-## Perfil profesional
-- Desarrollador en formación, aprendiendo con ayuda de IA
-- Proyecto principal: O.R.I.O.N. (este asistente de IA local)
-- Herramientas: Python, VS Code, Windows 11
-- Intereses tecnológicos: Inteligencia artificial, automatización, asistentes de voz
+## Contexto activo del proyecto
 
-## Preferencias del asistente
-- Tono: Formal, serio, leal y elegante
-- Respuestas: Concisas pero completas
-- Nombre del agente: O.R.I.O.N.
+- **Proyecto principal**: O.R.I.O.N. — asistente de IA local en Python
+- **Objetivo actual**: construir un sistema operativo personal completo (identidad → memoria → herramientas → canales → voz → automatizaciones)
+- **Pipeline activo**: REQ-003 (Memoria Avanzada — EN_PRUEBAS), REQ-004 (Identidad — NUEVO)
 
-## Contexto del proyecto O.R.I.O.N.
-- O.R.I.O.N. es un asistente de IA local construido en Python
-- Tiene wake word, TTS, clasificador ML de intenciones, memoria semántica
-- Puede controlar el PC: abrir/cerrar apps, tomar capturas, gestionar archivos
-- Objetivo: llegar al nivel de OpenClaw (asistente con skills extensibles y mensajería)
+## Preferencias aprendidas
 
-## Notas y preferencias personales
-# (Agrega aquí cosas que quieres que O.R.I.O.N. recuerde sobre ti)
-# Ejemplo:
-# - Prefiero respuestas cortas cuando estoy trabajando
-# - Mi carpeta de proyectos está en C:\Users\johan\Proyectos
-# - Trabajo principalmente de noche
+- Johan trabaja principalmente de noche
+- Valora resultados prácticos sobre explicaciones teóricas extensas
+- Prefiere ver progreso tangible del sistema
+
+## Decisiones importantes
+
+| Fecha | Decisión |
+|-------|----------|
+| — | — |
+
+## Reglas aprendidas
+
+| Fecha | Aprendizaje |
+|-------|-------------|
+| — | — |
+
+## Proyectos activos
+
+- **O.R.I.O.N.**: asistente local con wake word, TTS, clasificador ML, memoria semántica, control de PC, skills modulares, canales Telegram/Discord
+
+## Estado del sistema
+
+- Proveedor IA principal: DeepSeek (deepseek-chat)
+- Backend: Python + SQLite (memoria, contexto, auditoría, tareas)
+- UI: CLI + PyQt6
+- Canales activos: Desktop, Telegram, Discord
+- Voz: wake word funcional, pipeline STT→TTS básico
+- Skills: 11 módulos cargados automáticamente

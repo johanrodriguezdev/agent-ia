@@ -42,6 +42,7 @@ class SystemControlSkill(BaseSkill):
         return {} # No usa parámetros complejos extraídos por regex
 
     def execute(self, intent: str, params: Dict[str, Any]) -> str:
+        channel = params.get("channel")
         if intent == "GET_TIME":
             return system_ctrl.get_current_time()
         elif intent == "SYS_VOL_UP":
@@ -53,5 +54,5 @@ class SystemControlSkill(BaseSkill):
         elif intent == "TAKE_SCREENSHOT":
             return system_ctrl.take_screenshot()
         elif intent == "SYS_POWER_OFF":
-            return system_ctrl.shutdown_pc()
+            return system_ctrl.shutdown_pc(channel)
         return "Comando de sistema no válido."

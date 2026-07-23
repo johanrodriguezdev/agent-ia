@@ -1,0 +1,42 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Get-ChildItem -LiteralPath \"c:\\\\Users\\\\johan\\\\Documentos\\\\Apps\\\\Agent IA\" -Recurse -Force)",
+      "PowerShell(Get-ChildItem -LiteralPath \"c:\\\\Users\\\\johan\\\\Documentos\\\\Apps\\\\Agent IA\\\\agente_ia\" -Recurse -ErrorAction SilentlyContinue | ForEach-Object FullName)",
+      "Bash(python --version)",
+      "Bash(python -m pytest tests/ --tb=short -v 2>&1 | tail -30)",
+      "Bash(python -m py_compile *.py)",
+      "Bash(echo \"OK\")",
+      "Bash(mkdir -p workspace/adjuntos/REQ-*/{origen,spec,propuestas,pruebas})",
+      "Bash(New-Item -ItemType Directory -Force -Path \"c:\\\\Users\\\\johan\\\\Documentos\\\\Apps\\\\Agent IA\\\\agente_ia\\\\workspace\\\\adjuntos\\\\REQ-*/origen\")",
+      "Bash(New-Item -ItemType Directory -Force -Path \"c:\\\\Users\\\\johan\\\\Documentos\\\\Apps\\\\Agent IA\\\\agente_ia\\\\workspace\\\\adjuntos\\\\REQ-*/spec\")",
+      "Bash(New-Item -ItemType Directory -Force -Path \"c:\\\\Users\\\\johan\\\\Documentos\\\\Apps\\\\Agent IA\\\\agente_ia\\\\workspace\\\\adjuntos\\\\REQ-*/propuestas\")",
+      "Bash(New-Item -ItemType Directory -Force -Path \"c:\\\\Users\\\\johan\\\\Documentos\\\\Apps\\\\Agent IA\\\\agente_ia\\\\workspace\\\\adjuntos\\\\REQ-*/pruebas\")",
+      "Bash(node .claude/scripts/update-tracker.mjs *)",
+      "PowerShell(node .claude/scripts/update-tracker.mjs *)",
+      "Read(//c/Users/johan/Documentos/Apps/Agent IA/agente_ia/**)",
+      "Read(//c/Users/johan/.claude/skills/**)",
+      "Bash(dir)",
+      "Bash(cat *.md)",
+      "Bash(Get-Content *.md)",
+      "Bash(Select-String -Pattern *)",
+      "Bash(grep -rn *)",
+      "Bash(xargs grep -l *)",
+      "Bash(Get-ChildItem -Filter *.py -Recurse)",
+      "Bash(Get-ChildItem -Filter *.json -Recurse)",
+      "Bash(Get-ChildItem -Filter *.md -Recurse)",
+      "Bash(Write-Output \"OK\")",
+      "Bash(Write-Host \"OK\")",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(exit 0)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\johan\\Documentos\\Apps\\Agent IA\\agente_ia\\workspace",
+      "c:\\Users\\johan\\.claude\\projects\\c--Users-johan-Documentos-Apps-Agent-IA\\memory"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": "node .claude/scripts/guard-git-commit.mjs",
+    "PostToolUse": "node .claude/scripts/remind-rules.mjs"
+  }
+}

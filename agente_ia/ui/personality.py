@@ -1,76 +1,91 @@
-"""
-personality.py
-Módulo encargado de dar la personalidad al asistente.
-Transforma el texto crudo en una respuesta formal y educada.
-"""
-
 import random
 
-# Lista de saludos y despedidas
 GREETINGS = [
-    "A su servicio, Señor.",
-    "Buen día, Señor. ¿En qué puedo asistirle hoy?",
-    "Sistemas en línea. Listo para sus órdenes, Señor.",
-    "Siempre un placer verle, Señor.",
-    "Panel de control activo. ¿Qué necesita, Señor?"
+    "Buenos dias, Senor. Todos los sistemas estan operativos.",
+    "A su servicio, Senor. En que puedo asistirle?",
+    "Bienvenido, Senor. Sistemas en linea y listos.",
+    "Senor, siempre es un placer. Que necesita?",
+    "Sistemas verificados. Estoy a su disposicion, Senor."
 ]
 
-ADRESSES = ["Señor", "Caballero", "Señor Tony"] # Tony como guiño opcional
+ADDRESS = "Senor"
 
 ACKNOWLEDGEMENTS = [
-    "Entendido, Señor.",
-    "Procesando su solicitud de inmediato.",
-    "A la orden, Señor. Ejecutando ahora.",
-    "Muy bien, Señor. Permítame un segundo.",
-    "Sistemas trabajando en ello.",
-    "Iniciando secuencia, Señor."
+    "Enseguida, Senor.",
+    "Como usted ordene, Senor.",
+    "Muy bien, Senor. Ejecutando ahora.",
+    "Hecho, Senor. Algo mas en que pueda servirle?",
+    "Perfectamente, Senor. Iniciando ahora.",
+    "Comprendido, Senor. Ya mismo."
 ]
 
 ERROR_MESSAGES = [
-    "Lo lamento, Señor. He encontrado un inconveniente en los protocolos.",
-    "Parece que hay una falla en la ejecución, Señor. Permítame revisar.",
-    "Señor, mis disculpas, pero no he podido completar esa tarea.",
-    "Error de sistema detectado. No ha sido posible procesar la orden."
+    "Lo lamento, Senor. He encontrado una limitacion en mis protocolos.",
+    "Senor, me temo que no puedo completar esa accion.",
+    "Mis disculpas, Senor. Se ha producido un error en el proceso.",
+    "Senor, he intentado ejecutar su orden pero el sistema no responde."
 ]
 
+FORMAL_PREFIXES = [
+    "Enseguida,",
+    "Como usted ordene,",
+    "Ejecutado,",
+    "Operacion completada,",
+    "Segun mis sistemas,",
+    "He finalizado la tarea,",
+    "Tal como solicito,"
+]
+
+REPORT_STARTS = [
+    "Todos los sistemas indican que",
+    "He confirmado que",
+    "Puedo informarle que",
+    "Los registros confirman que",
+]
+
+JARVIS_CLOSINGS = [
+    "Todo en orden, Senor.",
+    "Sistemas estables, Senor.",
+    "Operacion exitosa, Senor.",
+    "A su disposicion, Senor.",
+    "Sin novedades, Senor.",
+]
+
+
 def format_response(text: str, is_error: bool = False) -> str:
-    """
-    Toma un texto de salida del dispatcher/handler y lo envuelve
-    en una estructura formal de Jarvis.
-    """
     if not text:
         return random.choice(ACKNOWLEDGEMENTS)
-    
-    # Si el texto ya parece un saludo o algo conversacional corto, lo dejamos pasar
-    if len(text.split()) < 3 and any(word in text.lower() for word in ["hola", "buen", "saludos"]):
+
+    words = text.split()
+    is_greeting = any(w in text.lower() for w in ["hola", "buen", "saludos", "buenos"])
+    if len(words) < 4 and is_greeting:
         return random.choice(GREETINGS)
 
-    # Si es un error
     if is_error:
         prefix = random.choice(ERROR_MESSAGES)
         return f"{prefix}\nDetalle: {text}"
 
-    # Para respuestas normales
-    address = random.choice(ADRESSES)
-    
-    # Estructura formal: Prefijo + Contenido + "Señor"
-    formal_prefixes = [
-        "Por supuesto,",
-        "Como usted ordene,",
-        "Hecho,",
-        "Aquí tiene los resultados,",
-        "Según mis registros,",
-        "He completado la tarea,"
-    ]
-    
-    prefix = random.choice(formal_prefixes)
-    
-    # Si la respuesta es multilínea o muy larga, la presentamos más estructurada
-    if "\n" in text or len(text) > 100:
-        return f"{prefix} {address}:\n\n{text}\n\n¿Desea algo más?"
-    
-    # Respuesta corta
-    return f"{prefix} {address}. {text}"
+    style = random.randint(0, 4)
+
+    if style == 0:
+        prefix = random.choice(FORMAL_PREFIXES)
+        return f"{prefix} {ADDRESS}. {text}"
+
+    elif style == 1:
+        lower = text[0].lower() + text[1:] if text else text
+        return f"{random.choice(REPORT_STARTS)} {lower}, {ADDRESS}."
+
+    elif style == 2:
+        main = text.rstrip(".")
+        return f"{main}, {ADDRESS}."
+
+    elif style == 3:
+        main = text.rstrip(".")
+        return f"{main}. {random.choice(JARVIS_CLOSINGS)}"
+
+    else:
+        return f"{text}, {ADDRESS}. {random.choice(JARVIS_CLOSINGS)}"
+
 
 def get_random_greeting():
     return random.choice(GREETINGS)

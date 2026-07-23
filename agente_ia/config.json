@@ -1,10 +1,8 @@
 {
     "agent_name": "O.R.I.O.N.",
     "agent_pronunciation": "Orion",
-    "telegram_token": "8604336889:AAFCYlthXfAXzFRHBVYlqjfHkguT_BYsJz0",
     "ai_provider": "deepseek",
     "ai_model": "deepseek-chat",
-    "deepseek_api_key": "sk-40ecd76223844fadb97ae81ad0665d6b",
     "vision_provider": "",
     "fallback_provider": ""
 }

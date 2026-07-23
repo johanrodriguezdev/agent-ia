@@ -2,9 +2,13 @@ import os
 import re
 import tempfile
 import subprocess
+import logging
 from typing import Dict, List, Tuple, Any
 from skills.base_skill import BaseSkill
 from ai.llm_provider import generate_response
+from core.security_manager import security_manager, ChannelType
+
+logger = logging.getLogger(__name__)
 
 class CodeExecutionSkill(BaseSkill):
     @property
@@ -44,7 +48,11 @@ class CodeExecutionSkill(BaseSkill):
         task = params.get("task", "")
         if not task:
             return "Señor, por favor sea más específico con lo que desea que programe y ejecute."
-            
+
+        channel = params.get("channel", ChannelType.DESKTOP)
+        if not security_manager.require_confirmation("execute_code", channel, f"ejecutar código IA para: {task[:80]}"):
+            return "Ejecución de código cancelada, Señor."
+
         system_prompt = (
             "Eres el núcleo lógico de un agente de IA autónomo (Estilo OpenClaw/Devin). "
             "Debes resolver la tarea escribiendo un script en Python. Responde SOLO con el código de Python válido encerrado entre ```python y ```. "
@@ -79,9 +87,13 @@ class CodeExecutionSkill(BaseSkill):
                     tmp_path = f.name
                     f.write(code)
 
-                # 3. Ejecutar y atrapar el output
+                # 3. Ejecutar en modo aislado (-I: sin site-packages, sin .pth)
                 try:
-                    result = subprocess.run(["python", tmp_path], capture_output=True, text=True, timeout=45)
+                    result = subprocess.run(
+                        ["python", "-I", "-u", tmp_path],
+                        capture_output=True, text=True, timeout=45,
+                        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+                    )
                     stdout = result.stdout.strip()
                     stderr = result.stderr.strip()
                     

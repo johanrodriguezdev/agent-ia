@@ -1,22 +1,63 @@
+import subprocess
+import os
 import pyautogui
 import time
 
-# Configuración de seguridad: Si algo sale mal, mover rápido el mouse a una esquina aborta la ejecución
 pyautogui.FAILSAFE = True
-# Breve pausa automática después de cada acción de PyAutoGUI
 pyautogui.PAUSE = 0.5 
 
+# Mapa de nombres comunes a ejecutables para apertura directa
+_APP_EXEC_MAP = {
+    "chrome":           "chrome",
+    "google chrome":    "chrome",
+    "edge":             "msedge",
+    "microsoft edge":   "msedge",
+    "firefox":          "firefox",
+    "notepad":          "notepad",
+    "bloc de notas":    "notepad",
+    "calculadora":      "calc",
+    "calculator":       "calc",
+    "explorador":       "explorer",
+    "explorador de archivos": "explorer",
+    "paint":            "mspaint",
+    "word":             "winword",
+    "excel":            "excel",
+    "powerpoint":       "powerpnt",
+    "cmd":              "cmd",
+    "terminal":         "cmd",
+    "símbolo del sistema": "cmd",
+    "spotify":          "spotify",
+    "discord":          "discord",
+    "whatsapp":         "whatsapp",
+    "outlook":          "outlook",
+}
+
+def _try_direct_open(app_name: str) -> str | None:
+    """Intenta abrir la aplicación con subprocess.Popen directamente (sin simulación)."""
+    name = app_name.lower().strip()
+    exec_name = _APP_EXEC_MAP.get(name)
+    if not exec_name:
+        return None
+    try:
+        subprocess.Popen([exec_name], shell=True)
+        return f"{app_name} abierto directamente."
+    except Exception:
+        return None
+
 def open_application(app_name: str) -> str:
-    """Invoca una aplicación al abrir el menú inicio de windows y escribir el nombre (simulación humana)."""
+    """Abre una aplicación: primero intento directo, después simulación como respaldo."""
+    result = _try_direct_open(app_name)
+    if result:
+        return result
     try:
         pyautogui.press('win')
         time.sleep(0.5)
         pyautogui.write(app_name, interval=0.05)
         time.sleep(0.5)
         pyautogui.press('enter')
-        return f"Ejecuté la simulación humana para abrir {app_name}."
+        return f"Aplicación '{app_name}' abierta."
     except Exception as e:
-        return f"Hubo un fallo automatizando la apertura: {e}"
+        return f"Hubo un fallo abriendo la aplicación: {e}"
 
 def click_position(x: int, y: int) -> str:
     """Haz que el puntero del mouse vaya físicamente al punto y haga un clic izquierdo."""

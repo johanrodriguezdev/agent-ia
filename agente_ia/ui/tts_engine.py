@@ -1,82 +1,97 @@
-import pyttsx3
+import asyncio
+import logging
+import os
+import re
+import subprocess
+import tempfile
+import threading
+import time
 
-# ✅ BUG CORREGIDO: El motor TTS ya NO se inicializa al importar el módulo.
-# Antes, si los drivers de audio fallaban al arrancar, TODA la aplicación
-# crasheaba antes de mostrar siquiera el menú. Ahora se inicializa la
-# primera vez que se necesita (patrón "lazy initialization").
+logger = logging.getLogger(__name__)
 
-_engine = None
+_voice = "es-ES-ElviraNeural"
+_speaking = False
+_speak_lock = threading.Lock()
+_barge_in = False
 
-def _get_engine():
-    """
-    Retorna el motor TTS. Lo inicializa solo si aún no existe.
-    Si falla, retorna None sin romper el flujo principal de Glass.
-    """
-    global _engine
-    if _engine is not None:
-        return _engine
-    
+
+def is_speaking() -> bool:
+    return _speaking
+
+
+def signal_barge_in():
+    global _barge_in
+    _barge_in = True
+
+
+async def _speak_edge(text: str) -> bool:
+    global _speaking, _barge_in
+    import edge_tts
+    communicate = edge_tts.Communicate(text, _voice)
+    mp3_path = None
     try:
-        _engine = pyttsx3.init()
-        _engine.setProperty('rate', 155)
-
-        # Buscar voz en español
-        voices = _engine.getProperty('voices')
-        for voice in voices:
-            if "ES" in voice.id.upper() or "SPANISH" in voice.id.upper() or "ESPAÑOL" in voice.id.upper():
-                _engine.setProperty('voice', voice.id)
-                break
-
-        return _engine
-
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+            mp3_path = f.name
+        await asyncio.wait_for(communicate.save(mp3_path), timeout=15)
+        with _speak_lock:
+            _speaking = True
+        _play_mp3_windows(mp3_path)
+        return True
+    except asyncio.TimeoutError:
+        logger.warning("edge-tts agotó el tiempo de espera (15s)")
+        return False
     except Exception as e:
-        print(f"[Aviso] El motor de voz (TTS) no pudo iniciarse: {e}")
-        print("[Aviso] Glass funcionará en modo silencioso hasta que se resuelva el problema de audio.")
-        _engine = None
-        return None
+        logger.warning(f"Error edge-tts: {e}")
+        return False
+    finally:
+        with _speak_lock:
+            _speaking = False
+            _barge_in = False
+        if mp3_path and os.path.exists(mp3_path):
+            try:
+                os.unlink(mp3_path)
+            except Exception:
+                pass
+
+
+def _play_mp3_windows(mp3_path: str):
+    global _barge_in
+    proc = subprocess.Popen(
+        ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", mp3_path],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+    start = time.time()
+    max_duration = 60
+    while proc.poll() is None:
+        if _barge_in:
+            proc.kill()
+            break
+        if time.time() - start > max_duration:
+            logger.warning(f"Reproducción excedió {max_duration}s, forzando cierre")
+            proc.kill()
+            break
+        time.sleep(0.05)
+    if proc.poll() is None:
+        try:
+            proc.kill()
+        except Exception:
+            pass
 
 
 def speak(text: str):
-    """
-    Reproduce el texto por voz.
-    Si el motor no está disponible, Glass continúa funcionando en silencio
-    (el texto igual se muestra en pantalla por la CLI).
-    """
     if not text:
         return
 
-    engine = _get_engine()
-    if engine is None:
-        return  # Sin audio pero sin crash — Glass sigue funcionando
-        
+    from config_manager import get_agent_name, get_agent_pronunciation
+    agent_name = get_agent_name()
+    agent_pron = get_agent_pronunciation()
+    if agent_name.lower() != agent_pron.lower():
+        text = re.sub(r'(?i)\b' + agent_name + r'\b', agent_pron, text)
+
     try:
-        from ui.gui import update_gui_state
-        update_gui_state("RESPONDING")
+        import edge_tts
+        ok = asyncio.run(_speak_edge(text))
+        if not ok:
+            print("[Voz] No se pudo generar audio")
     except ImportError:
-        pass
-
-    try:
-        from config_manager import get_agent_name, get_agent_pronunciation
-        import re
-        agent_name = get_agent_name()
-        agent_pron = get_agent_pronunciation()
-        if agent_name.lower() != agent_pron.lower():
-            text = re.sub(r'(?i)\b' + agent_name + r'\b', agent_pron, text)
-    except Exception:
-        pass
-
-    try:
-        engine.say(text)
-        engine.runAndWait()
-    except Exception as e:
-        print(f"[Falla de voz]: {e}")
-        # ✅ Si el motor falla en medio de una sesión, lo reseteamos
-        # para que el próximo intento vuelva a intentar inicializarlo.
-        global _engine
-        _engine = None
-    finally:
-        try:
-            from ui.gui import update_gui_state
-            update_gui_state("IDLE")
-        except Exception:
-            pass
+        print("[Voz] edge-tts no instalado")

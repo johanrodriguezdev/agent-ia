@@ -3,6 +3,8 @@ import importlib.util
 import inspect
 from typing import Dict, List, Tuple
 from skills.base_skill import BaseSkill
+from core.base_agent import AgentTool
+
 
 class SkillManager:
     def __init__(self):
@@ -11,7 +13,6 @@ class SkillManager:
         self.load_all_skills()
 
     def load_all_skills(self):
-        """Busca dinámicamente archivos .py en la carpeta skills y las instancia."""
         self.skills.clear()
         self._intent_to_skill.clear()
 
@@ -29,7 +30,6 @@ class SkillManager:
                     module = importlib.util.module_from_spec(spec)
                     spec.loader.exec_module(module)
 
-                    # Buscar cualquier clase que herede de BaseSkill
                     for attr_name in dir(module):
                         attr = getattr(module, attr_name)
                         if inspect.isclass(attr) and issubclass(attr, BaseSkill) and attr is not BaseSkill:
@@ -46,14 +46,12 @@ class SkillManager:
         print(f"[SkillManager] Skill cargada: {skill.name} con intents: {skill.get_intents()}")
 
     def get_all_training_data(self) -> List[Tuple[str, str]]:
-        """Consolida la data de entrenamiento de todas las skills activas."""
         data = []
         for skill in self.skills:
             data.extend(skill.get_training_data())
         return data
 
     def extract_params(self, intent: str, text: str) -> dict:
-        """Delega la extracción al skill propietario."""
         skill = self._intent_to_skill.get(intent)
         if skill:
             return skill.extract_params(intent, text)
@@ -69,12 +67,22 @@ class SkillManager:
         return f"Error: No hay una Skill registrada para manejar la intención '{intent}'."
 
     def get_all_skills(self) -> List[BaseSkill]:
-        """Retorna todas las skills cargadas actualmente."""
         return self.skills
 
     def _discover_skills(self):
-        """Alias para hot-reload: redescubre y recarga todas las skills."""
         self.load_all_skills()
 
-# Singleton para utilizar en todo O.R.I.O.N. de forma centralizada
+    def get_agent_tools(self) -> List[AgentTool]:
+        tools = []
+        for skill in self.skills:
+            for intent in skill.get_intents():
+                tool = AgentTool(
+                    name=f"skill_{intent.lower()}",
+                    description=f"{skill.name}: {skill.description}",
+                    function=lambda params, s=skill, i=intent: s.execute(i, params)
+                )
+                tools.append(tool)
+        return tools
+
+
 skill_manager = SkillManager()

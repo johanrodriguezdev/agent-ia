@@ -15,7 +15,64 @@ from datetime import datetime
 
 
 # ─────────────────────────────────────────────
-#  ACCIONES DE APLICACIONES
+#  ACCIONES DIRECTAS (sin simulación)
+# ─────────────────────────────────────────────
+
+def open_chrome() -> str:
+    """Abre Google Chrome directamente sin simular tecleo."""
+    try:
+        posibles = [
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+            "chrome",
+        ]
+        for path in posibles:
+            if os.path.isfile(path) or path == "chrome":
+                subprocess.Popen([path, "--new-window", "https://www.google.com"])
+                time.sleep(1.0)
+                return "Google Chrome abierto."
+        return "No encontré Chrome en las rutas habituales."
+    except Exception as e:
+        return f"Error al abrir Chrome: {e}"
+
+def write_file_direct(text: str = "", filename: str = "") -> str:
+    """Escribe texto directamente a un archivo en el Escritorio usando Python,
+    sin simular tecleo ni diálogos."""
+    if not text:
+        return "No hay texto que escribir."
+    desktop = Path.home() / "OneDrive" / "Desktop"
+    if not desktop.exists():
+        desktop = Path.home() / "Desktop"
+    filepath = desktop / (filename or f"documento_{datetime.now().strftime('%H%M%S')}.txt")
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(text)
+    return f"Texto guardado directamente en: {filepath.name}"
+
+def open_file_in_notepad(filename: str = "") -> str:
+    """Abre un archivo existente en el Bloc de Notas."""
+    desktop = Path.home() / "OneDrive" / "Desktop"
+    if not desktop.exists():
+        desktop = Path.home() / "Desktop"
+    filepath = desktop / (filename or "documento.txt")
+    if not filepath.exists():
+        return f"El archivo {filepath.name} no existe."
+    subprocess.Popen(["notepad.exe", str(filepath)])
+    return f"Archivo {filepath.name} abierto en Bloc de Notas."
+
+def get_active_window_info() -> str:
+    """Retorna información de la ventana activa usando window_tracker."""
+    try:
+        from os_integration.window_tracker import get_active_window, format_open_windows
+        active = get_active_window()
+        if active:
+            return f"Ventana activa: {active.get('title', active['process'])} ({active['process']})"
+        return format_open_windows()
+    except Exception as e:
+        return f"No pude obtener información de ventanas: {e}"
+
+
+# ─────────────────────────────────────────────
+#  ACCIONES DE APLICACIONES (legacy)
 # ─────────────────────────────────────────────
 
 def open_notepad() -> str:
@@ -43,7 +100,7 @@ def open_browser() -> str:
 
 
 # ─────────────────────────────────────────────
-#  ACCIONES DE ESCRITURA Y CONTROL
+#  ACCIONES DE ESCRITURA Y CONTROL (legacy)
 # ─────────────────────────────────────────────
 
 def write_text(text: str = "") -> str:
@@ -63,14 +120,9 @@ def hotkey_action(keys: str = "ctrl,s") -> str:
     return f"Combinación de teclas ejecutada: {keys}"
 
 def save_file_desktop(filename: str = "documento_jarvis.txt") -> str:
-    """
-    Guarda el documento activo mediante Ctrl+Shift+S (Guardar Como)
-    y escribe la ruta del escritorio automáticamente.
-    """
     desktop = Path.home() / "OneDrive" / "Desktop"
     if not desktop.exists():
         desktop = Path.home() / "Desktop"
-
     filepath = str(desktop / filename)
     time.sleep(0.3)
     pyautogui.hotkey("ctrl", "shift", "s")
@@ -155,14 +207,20 @@ def search_google(query: str = "") -> str:
 # ─────────────────────────────────────────────
 
 ACTION_REGISTRY: dict[str, dict] = {
-    # Aplicaciones
-    "open_notepad":       {"fn": open_notepad,        "desc": "Abre el Bloc de Notas.", "category": "app"},
+    # Aplicaciones (directas)
+    "open_chrome":        {"fn": open_chrome,          "desc": "Abre Google Chrome directamente.", "category": "app"},
+    "open_notepad":       {"fn": open_notepad,         "desc": "Abre el Bloc de Notas.", "category": "app"},
     "open_explorer":      {"fn": open_explorer,        "desc": "Abre el Explorador de Windows.", "category": "app"},
     "open_calculator":    {"fn": open_calculator,      "desc": "Abre la Calculadora.", "category": "app"},
     "open_browser":       {"fn": open_browser,         "desc": "Abre el navegador web.", "category": "app"},
     "close_window":       {"fn": close_window,         "desc": "Cierra la ventana activa.", "category": "app"},
 
-    # Control y escritura
+    # Escritura directa (sin pyautogui)
+    "write_file_direct":  {"fn": write_file_direct,    "desc": "Escribe texto directamente a un archivo en el Escritorio.", "category": "file", "needs_param": "text"},
+    "open_file_in_notepad":{"fn": open_file_in_notepad,"desc": "Abre un archivo existente en Bloc de Notas.", "category": "file", "needs_param": "filename"},
+    "get_active_window_info":{"fn": get_active_window_info,"desc": "Muestra qué ventana está activa.", "category": "info"},
+
+    # Control y escritura (legacy - pyautogui)
     "write_text":         {"fn": write_text,           "desc": "Escribe texto en la aplicación activa.", "category": "input", "needs_param": "text"},
     "press_key":          {"fn": press_key,            "desc": "Presiona una tecla del teclado.", "category": "input", "needs_param": "key"},
     "hotkey_action":      {"fn": hotkey_action,        "desc": "Ejecuta una combinación de teclas.", "category": "input", "needs_param": "keys"},

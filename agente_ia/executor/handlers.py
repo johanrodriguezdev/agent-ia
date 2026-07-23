@@ -7,15 +7,11 @@ Handlers que conectan las intenciones con las funciones reales del sistema.
 """
 
 from os_integration import process_mgr, browser, file_system, system_ctrl, wiki_api
-from ai import memory_manager
+from ai.memory_manager import memory as unified_memory
 from automation import pc_controller
 
-# Importación condicional de memoria semántica
-try:
-    from ai import semantic_memory as _sem_mem
-    SEMANTIC_MEMORY_AVAILABLE = True
-except Exception:
-    SEMANTIC_MEMORY_AVAILABLE = False
+# Memoria semántica integrada en UnifiedMemory
+SEMANTIC_MEMORY_AVAILABLE = True
 
 # ✅ NUEVO: Importación condicional del cerebro Claude
 # Si la librería anthropic no está instalada o la API key no está configurada,
@@ -40,7 +36,7 @@ def handle_open_app(params: dict) -> str:
 def handle_close_app(params: dict) -> str:
     app_name = params.get("app_name", "")
     if app_name:
-        return system_ctrl.close_app(app_name)
+        return system_ctrl.close_app(app_name, params.get("channel"))
     return "No me indicó qué programa cerrar, Señor."
 
 def handle_search_web(params: dict) -> str:
@@ -79,7 +75,7 @@ def handle_take_screenshot(params: dict) -> str:
     return system_ctrl.take_screenshot()
 
 def handle_sys_power_off(params: dict) -> str:
-    return system_ctrl.shutdown_pc()
+    return system_ctrl.shutdown_pc(params.get("channel"))
 
 def handle_wikipedia_summary(params: dict) -> str:
     query = params.get("query", "")
@@ -92,17 +88,9 @@ def handle_recall_memory(params: dict) -> str:
     if not query:
         return "¿Sobre qué quieres que haga el recuerdo?"
 
-    if SEMANTIC_MEMORY_AVAILABLE:
-        try:
-            resultado_sem = _sem_mem.search_similar_memory(query, threshold=0.75)
-            if resultado_sem:
-                return f"Usando memoria semántica: {resultado_sem}"
-        except Exception as e:
-            print(f"[Aviso] Fallo en búsqueda semántica: {e}")
-
-    memoria_previa = memory_manager.search_memory(query)
-    if memoria_previa:
-        return f"Revisando mis registros, encontré esto: {memoria_previa}"
+    results = unified_memory.search_semantic(query, user_id="default", top_k=1, threshold=0.6)
+    if results:
+        return f"Revisando mis registros, encontré esto: {results[0].text}"
 
     return f"Mi memoria está en blanco con respecto a '{query}'. No encontré eventos pasados similares."
 
@@ -144,18 +132,6 @@ def handle_chat(params: dict) -> str:
 
     if not query:
         return "Dígame, Señor. Estoy a su disposición."
-
-    # ── Paso 1: Buscar en memoria semántica ────────────────────────
-    # Si Glass ya respondió algo muy similar antes, lo recupera sin
-    # gastar tokens de API. Umbral más bajo (0.85) para mayor precisión.
-    if SEMANTIC_MEMORY_AVAILABLE:
-        try:
-            resultado_sem = _sem_mem.search_similar_memory(query, threshold=0.85)
-            if resultado_sem:
-                print(f"[🧠 Memoria semántica] Respuesta recuperada sin API")
-                return resultado_sem
-        except Exception:
-            pass
 
     # ── Paso 2: Consultar a Claude ─────────────────────────────────
     if CLAUDE_AVAILABLE:

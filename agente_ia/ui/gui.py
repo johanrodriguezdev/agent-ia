@@ -7,9 +7,9 @@ Mejorado con HUD futurista, rejillas y efectos de brillo (glow).
 
 import sys
 import math
-from PyQt6.QtWidgets import QApplication, QWidget
+from PyQt6.QtWidgets import QApplication, QWidget, QSystemTrayIcon, QMenu
 from PyQt6.QtCore import Qt, QTimer, QPointF, QRectF
-from PyQt6.QtGui import QPainter, QColor, QPen, QRadialGradient, QFont, QPaintEvent, QPolygonF, QBrush
+from PyQt6.QtGui import QPainter, QColor, QPen, QRadialGradient, QFont, QPaintEvent, QPolygonF, QBrush, QIcon, QPixmap
 from config_manager import get_agent_name
 
 # Variable Global Hilo-Segura compartida con la logica background
@@ -34,19 +34,18 @@ class JarvisGUI(QWidget):
         agent_name = get_agent_name().upper()
         self.setWindowTitle(f"{agent_name} Core HUD")
         self.setFixedSize(400, 400)
-        # Ventana transparente y siempre encima
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
-        # Timer principal de animacion (30 FPS)
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.animate)
         self.timer.start(33)
-        
-        # Timer de sondeo de estado
+
         self.state_poll = QTimer(self)
         self.state_poll.timeout.connect(self.poll_state)
         self.state_poll.start(100)
+
+        self._setup_tray_icon(agent_name)
 
     def poll_state(self):
         global GLOBAL_STATE
@@ -185,6 +184,39 @@ class JarvisGUI(QWidget):
         painter.drawPolygon(poly)
 
     # Mouse events para mover la ventana
+    def _setup_tray_icon(self, agent_name: str):
+        self.tray_icon = QSystemTrayIcon(self)
+        pixmap = QPixmap(16, 16)
+        pixmap.fill(QColor(0, 100, 255))
+        self.tray_icon.setIcon(QIcon(pixmap))
+        self.tray_icon.setToolTip(f"{agent_name} — HUD")
+
+        menu = QMenu()
+        show_action = menu.addAction("Mostrar/Ocultar")
+        show_action.triggered.connect(self._toggle_visible)
+        quit_action = menu.addAction("Salir")
+        quit_action.triggered.connect(QApplication.instance().quit)
+        self.tray_icon.setContextMenu(menu)
+        self.tray_icon.activated.connect(self._on_tray_activated)
+        self.tray_icon.show()
+
+    def _toggle_visible(self):
+        self.setVisible(not self.isVisible())
+
+    def _on_tray_activated(self, reason):
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            self._toggle_visible()
+
+    def closeEvent(self, event):
+        event.ignore()
+        self.hide()
+        self.tray_icon.showMessage(
+            "O.R.I.O.N.",
+            "Continuo ejecutándome en segundo plano.",
+            QSystemTrayIcon.MessageIcon.Information,
+            2000
+        )
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self.old_pos = event.globalPosition().toPoint()

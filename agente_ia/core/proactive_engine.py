@@ -1,0 +1,134 @@
+import logging
+import threading
+import time
+from typing import Dict, Callable, List
+from datetime import datetime, time as dt_time
+
+from core.base_agent import BaseAgent
+from core.security_manager import security_manager, ChannelType
+
+logger = logging.getLogger(__name__)
+
+CHECK_INTERVAL = 60
+
+
+class ProactiveTrigger:
+    def __init__(self, agent: BaseAgent, schedule: str, action: str, user_id: str = "default"):
+        self.agent = agent
+        self.schedule = schedule
+        self.action = action
+        self.user_id = user_id
+        self.last_fired = None
+        self.active = True
+
+
+class ProactiveEngine:
+    def __init__(self):
+        self._triggers: List[ProactiveTrigger] = []
+        self._running = False
+        self._thread: threading.Thread = None
+        self._global_active = True
+        self._notify_callback: Callable = None
+
+    def set_notify_callback(self, callback: Callable):
+        self._notify_callback = callback
+
+    def register_trigger(self, agent: BaseAgent, schedule: str, action: str, user_id: str = "default"):
+        trigger = ProactiveTrigger(agent, schedule, action, user_id)
+        self._triggers.append(trigger)
+        logger.info(f"Trigger proactivo registrado: {agent.name} @ {schedule}")
+
+    def start(self):
+        if self._running:
+            return
+        self._running = True
+        self._thread = threading.Thread(target=self._run_loop, daemon=True, name="ProactiveEngine")
+        self._thread.start()
+        logger.info("ProactiveEngine iniciado")
+
+    def stop(self):
+        self._running = False
+        logger.info("ProactiveEngine detenido")
+
+    @property
+    def is_active(self) -> bool:
+        return self._global_active
+
+    @is_active.setter
+    def is_active(self, value: bool):
+        self._global_active = value
+        logger.info(f"Proactividad global {'activada' if value else 'desactivada'}")
+
+    def _run_loop(self):
+        time.sleep(15)
+        logger.info(f"ProactiveEngine activo — {len(self._triggers)} triggers registrados")
+
+        while self._running:
+            try:
+                if self._global_active:
+                    self._check_triggers()
+            except Exception as e:
+                logger.error(f"Error en ciclo proactivo: {e}")
+            time.sleep(CHECK_INTERVAL)
+
+    def _check_triggers(self):
+        now = datetime.now()
+
+        for trigger in self._triggers:
+            if not trigger.active:
+                continue
+
+            if not self._should_fire(trigger, now):
+                continue
+
+            if trigger.last_fired and (now - trigger.last_fired).total_seconds() < 300:
+                continue
+
+            logger.info(f"Trigger proactivo disparado: {trigger.agent.name} - {trigger.action}")
+            action_key = f"proactive_{trigger.agent.name}"
+
+            if not security_manager.is_action_allowed(action_key, ChannelType.DESKTOP):
+                logger.warning(f"Acción proactiva bloqueada por seguridad: {action_key}")
+                continue
+
+            try:
+                result = trigger.agent.execute(trigger.action, {
+                    "proactive": True,
+                    "user_id": trigger.user_id
+                })
+
+                if self._notify_callback:
+                    self._notify_callback(result)
+
+                trigger.last_fired = now
+                logger.info(f"Acción proactiva completada: {trigger.action[:60]}")
+            except Exception as e:
+                logger.error(f"Error en acción proactiva '{trigger.action}': {e}")
+
+    def _should_fire(self, trigger: ProactiveTrigger, now: datetime) -> bool:
+        sched = trigger.schedule.lower().strip()
+
+        if sched == "startup":
+            return trigger.last_fired is None
+
+        if sched == "hourly":
+            return trigger.last_fired is None or (now - trigger.last_fired).total_seconds() >= 3600
+
+        if sched.startswith("daily:"):
+            try:
+                hour, minute = sched.split(":")[1].split(":")
+                target = now.replace(hour=int(hour), minute=int(minute), second=0, microsecond=0)
+
+                if trigger.last_fired:
+                    if trigger.last_fired.date() == now.date():
+                        return False
+
+                elapsed = (now - target).total_seconds()
+                return 0 <= elapsed < CHECK_INTERVAL
+            except (ValueError, IndexError):
+                return False
+
+        return False
+
+
+proactive_engine = ProactiveEngine()

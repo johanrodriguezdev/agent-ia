@@ -22,13 +22,12 @@ from pathlib import Path
 
 
 def _has_token(key_env: str, key_config: str) -> bool:
-    """Verifica si existe un token para un canal dado."""
     if os.environ.get(key_env):
         return True
+    from config_manager import load_config
     try:
-        config_path = Path(__file__).parent / "config.json"
-        with open(config_path, "r", encoding="utf-8") as f:
-            return bool(json.load(f).get(key_config, ""))
+        cfg = load_config()
+        return bool(cfg.get(key_config, ""))
     except Exception:
         return False
 

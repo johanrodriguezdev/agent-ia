@@ -18,8 +18,12 @@ import os
 import ast
 import importlib
 import sys
+import logging
 from typing import Dict, List, Tuple, Any
 from skills.base_skill import BaseSkill
+from core.security_manager import security_manager, ChannelType
+
+logger = logging.getLogger(__name__)
 
 SKILLS_DIR = os.path.dirname(__file__)
 
@@ -96,13 +100,18 @@ class SkillCreatorSkill(BaseSkill):
         return {"raw_text": text, "intent": intent}
 
     def execute(self, intent: str, params: Dict[str, Any]) -> str:
-        if intent == "LIST_SKILLS":
-            return self._list_skills()
-        elif intent == "CREATE_SKILL":
+        channel = params.get("channel", ChannelType.DESKTOP)
+        if intent == "CREATE_SKILL":
+            if not security_manager.require_confirmation("create_skill", channel, "crear una nueva skill automáticamente"):
+                return "Creación de skill cancelada, Señor."
             return self._create_skill(params.get("raw_text", ""))
         elif intent == "MODIFY_SKILL":
+            if not security_manager.require_confirmation("modify_skill", channel, "modificar una skill existente"):
+                return "Modificación de skill cancelada, Señor."
             return self._modify_skill(params.get("raw_text", ""))
         elif intent == "DELETE_SKILL":
+            if not security_manager.require_confirmation("delete_skill", channel, "eliminar una skill permanentemente"):
+                return "Eliminación de skill cancelada, Señor."
             return self._delete_skill(params.get("raw_text", ""))
         return "No entendí qué operación realizar sobre las skills, Señor."
 

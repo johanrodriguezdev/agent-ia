@@ -39,19 +39,15 @@ def _get_token() -> str:
     token = os.environ.get("DISCORD_BOT_TOKEN", "")
     if token:
         return token
-    try:
-        config_path = Path(__file__).parent.parent / "config.json"
-        with open(config_path, "r", encoding="utf-8") as f:
-            return json.load(f).get("discord_token", "")
-    except Exception:
-        return ""
+    from config_manager import get_discord_token
+    return get_discord_token() or ""
 
 
 def _get_agent_name() -> str:
+    from config_manager import load_config
     try:
-        config_path = Path(__file__).parent.parent / "config.json"
-        with open(config_path, "r", encoding="utf-8") as f:
-            return json.load(f).get("agent_name", "glass").upper()
+        cfg = load_config()
+        return cfg.get("agent_name", "glass").upper()
     except Exception:
         return "GLASS"
 

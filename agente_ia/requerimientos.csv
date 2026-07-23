@@ -1,0 +1,5 @@
+ID,Descripcion,Categoria,Estado,Tipo_Cambio,Aprobacion_SPEC,Aprobacion_Arquitectura,Rama
+REQ-001,"Sistema de seguridad y estabilidad: niveles verde/amarillo/rojo, confirmaciones en acciones destructivas, migrar API keys a .env, logging centralizado, allowlist por canal",SEGURIDAD,LISTO_PARA_COMMIT,SEGURIDAD,APROBADO,—,feature/REQ-001-seguridad
+REQ-002,"Sistema de Agentes Interno: orquestador central que delega a sub-agentes especializados con contexto propio, colaboracion multi-paso, y capacidad proactiva",CORE,LISTO_PARA_COMMIT,FEATURE_NUEVA,APROBADO,APROBADO,feature/REQ-002-sistema-agentes
+REQ-003,"Memoria Avanzada: unificar sistemas de memoria (global y por usuario), RAG con busqueda vectorial eficiente, ciclo de vida de memoria (importancia, decaimiento, consolidacion), auto-resumen de conversaciones, y fijar inyeccion de contexto multiusuario",MEMORIA,EN_PRUEBAS,MEJORA,APROBADO,APROBADO,feature/REQ-003-memoria-avanzada
+REQ-004,"Capa de identidad de Orion: SOUL.md, IDENTITY.md, USER.md, AGENTS.md, OPERATING_AGREEMENT.md y actualizacion de MEMORY.md",CORE,LISTO_PARA_COMMIT,—,—,—,—
