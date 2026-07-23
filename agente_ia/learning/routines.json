@@ -1,0 +1,18 @@
+{
+  "modo trabajo": {
+    "description": "Abre las aplicaciones del entorno laboral: Google Chrome y Bloc de Notas",
+    "triggers": ["modo trabajo", "entorno de trabajo", "prepara trabajo", "inicia trabajo", "modo laboral"],
+    "actions": [
+      {"action": "open_chrome", "params": {}},
+      {"action": "open_notepad", "params": {}}
+    ]
+  },
+  "modo estudio": {
+    "description": "Abre las aplicaciones para estudiar: navegador y Bloc de Notas",
+    "triggers": ["modo estudio", "entorno de estudio", "prepara estudio", "modo aprender"],
+    "actions": [
+      {"action": "open_notepad", "params": {}},
+      {"action": "open_browser", "params": {}}
+    ]
+  }
+}

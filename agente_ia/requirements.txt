@@ -62,4 +62,10 @@ beautifulsoup4
 
 # API de Claude (para chat conversacional inteligente):
 # anthropic
+
+# TTS mejorado con voces naturales (edge-tts):
+edge-tts==7.1.0
+
+# Carga de variables de entorno desde .env
+python-dotenv==1.0.1
 # ================================================================

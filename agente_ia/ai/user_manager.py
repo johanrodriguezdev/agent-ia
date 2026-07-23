@@ -102,64 +102,41 @@ class UserSession:
     # ── Memoria ────────────────────────────────────────────────────
 
     def save_memory(self, user_input: str, response: str):
-        """Guarda una interacción en la memoria del usuario."""
         if not user_input or not response:
             return
         try:
-            conn = sqlite3.connect(str(self.db_path))
-            conn.execute(
-                "INSERT INTO memories (user_input, response, timestamp) VALUES (?, ?, ?)",
-                (user_input, response, datetime.datetime.now().isoformat())
-            )
-            conn.commit()
-            conn.close()
+            from ai.memory_manager import memory
+            memory.store(f"{user_input} | {response}", user_id=self.user_id, category="interaction")
         except Exception as e:
             print(f"[UserSession] Error guardando memoria de {self.user_id}: {e}")
 
     def search_memory(self, query: str) -> str:
-        """Busca en la memoria del usuario por texto."""
         try:
-            conn = sqlite3.connect(str(self.db_path))
-            cursor = conn.execute(
-                "SELECT response FROM memories WHERE user_input LIKE ? OR response LIKE ? "
-                "ORDER BY timestamp DESC LIMIT 1",
-                (f"%{query}%", f"%{query}%")
-            )
-            row = cursor.fetchone()
-            conn.close()
-            return row[0] if row else ""
+            from ai.memory_manager import memory
+            results = memory.search_keyword(query, user_id=self.user_id, limit=1)
+            if results:
+                return results[0].text
         except Exception:
-            return ""
+            pass
+        return ""
 
     def get_recent_memories(self, limit: int = 5) -> list[dict]:
-        """Retorna las últimas N interacciones del usuario."""
         try:
-            conn = sqlite3.connect(str(self.db_path))
-            cursor = conn.execute(
-                "SELECT user_input, response, timestamp FROM memories "
-                "ORDER BY timestamp DESC LIMIT ?", (limit,)
-            )
-            rows = cursor.fetchall()
-            conn.close()
+            from ai.memory_manager import memory
+            items = memory.search_keyword("", user_id=self.user_id, limit=limit)
             return [
-                {"input": r[0], "response": r[1], "timestamp": r[2]}
-                for r in rows
+                {"input": item.text[:100], "response": "", "timestamp": item.timestamp}
+                for item in items
             ]
         except Exception:
             return []
 
     def get_memory_summary(self) -> str:
-        """Retorna un resumen del historial para mostrar al usuario."""
-        memories = self.get_recent_memories(5)
-        if not memories:
+        try:
+            from ai.memory_manager import memory
+            return memory.get_summary(self.user_id)
+        except Exception:
             return "No tengo recuerdos registrados aún, Señor."
-
-        lines = [f"Últimas {len(memories)} interacciones:\n"]
-        for m in memories:
-            ts = m["timestamp"][:16].replace("T", " ")
-            inp = m["input"][:60] + "..." if len(m["input"]) > 60 else m["input"]
-            lines.append(f"• [{ts}] {inp}")
-        return "\n".join(lines)
 
     # ── Perfil MEMORY.md ───────────────────────────────────────────
 

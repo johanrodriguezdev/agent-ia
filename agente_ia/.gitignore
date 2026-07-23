@@ -1,0 +1,32 @@
+# O.R.I.O.N. — .gitignore
+
+# Entorno
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Logs
+logs/
+*.log
+output.txt
+
+# Bases de datos locales
+*.db
+*.db-journal
+*.db-wal
+
+# Modelos ML guardados
+intent/saved_model.pkl
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Directorios del sistema
+Thumbs.db
+.DS_Store

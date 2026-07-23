@@ -24,22 +24,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-GLASS_VOICE   = "es-CO-GonzaloNeural"
+GLASS_VOICE   = "es-ES-AlvaroNeural"
 MAX_AUDIO_CHARS = 900
 
 
 # ── Token ──────────────────────────────────────────────────────────
 
 def _get_token() -> str:
-    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-    if token:
-        return token
-    try:
-        config_path = Path(__file__).parent.parent / "config.json"
-        with open(config_path, "r", encoding="utf-8") as f:
-            return json.load(f).get("telegram_token", "")
-    except Exception:
-        return ""
+    from config_manager import get_telegram_token
+    return get_telegram_token()
 
 
 # ── FFmpeg ─────────────────────────────────────────────────────────
@@ -627,7 +620,11 @@ async def handle_voice(update, context):
 # ── Acciones del PC ────────────────────────────────────────────────
 
 async def _handle_shutdown(update, context, send_voice: bool = False):
-    """Apaga el PC con confirmación y cuenta regresiva."""
+    from core.security_manager import security_manager, ChannelType
+    if not security_manager.is_action_allowed("shutdown", ChannelType.TELEGRAM):
+        msg = "Lo siento, Señor. Por razones de seguridad no puedo apagar el PC desde Telegram."
+        await update.message.reply_text(msg)
+        return
     msg = (
         "Iniciando secuencia de apagado, Señor.\n"
         "El equipo se apagará en 10 segundos.\n\n"
@@ -646,7 +643,11 @@ async def _handle_shutdown(update, context, send_voice: bool = False):
 
 
 async def _handle_restart(update, context, send_voice: bool = False):
-    """Reinicia el PC con cuenta regresiva."""
+    from core.security_manager import security_manager, ChannelType
+    if not security_manager.is_action_allowed("restart", ChannelType.TELEGRAM):
+        msg = "Lo siento, Señor. Por razones de seguridad no puedo reiniciar el PC desde Telegram."
+        await update.message.reply_text(msg)
+        return
     msg = (
         "Iniciando secuencia de reinicio, Señor.\n"
         "El equipo se reiniciará en 10 segundos.\n\n"

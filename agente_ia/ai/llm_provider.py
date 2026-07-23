@@ -1,6 +1,46 @@
+import hashlib
 import os
 import json
+import logging
+from collections import OrderedDict
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+_response_cache: OrderedDict = OrderedDict()
+CACHE_MAX_SIZE = 100
+
+
+def _cache_key(messages, system_prompt, image_path, provider):
+    raw = json.dumps({"m": messages, "s": system_prompt, "i": image_path, "p": provider}, sort_keys=True)
+    return hashlib.md5(raw.encode()).hexdigest()
+
+
+def _cached_call(prov_name, messages, system_prompt, image_path, model_name):
+    key = _cache_key(messages, system_prompt, image_path, prov_name)
+    if key in _response_cache:
+        _response_cache.move_to_end(key)
+        logger.debug(f"Cache hit para {prov_name}")
+        return _response_cache[key]
+
+    result = _uncached_call(prov_name, messages, system_prompt, image_path, model_name)
+    _response_cache[key] = result
+    if len(_response_cache) > CACHE_MAX_SIZE:
+        _response_cache.popitem(last=False)
+    return result
+
+
+def _uncached_call(prov_name, messages, system_prompt, image_path, model_name):
+    if prov_name == "gemini":
+        return _ask_gemini(messages, system_prompt, image_path, model_name)
+    elif prov_name == "ollama":
+        return _ask_ollama(messages, system_prompt, image_path, model_name)
+    elif prov_name == "openai":
+        return _ask_openai(messages, system_prompt, image_path, model_name)
+    elif prov_name == "deepseek":
+        return _ask_deepseek(messages, system_prompt, image_path, model_name)
+    else:
+        return _ask_anthropic(messages, system_prompt, image_path, model_name)
 
 def get_provider_config():
     try:
@@ -18,44 +58,25 @@ def get_provider_config():
         return "anthropic", "", "", ""
 
 def generate_response(messages, system_prompt, image_path=None):
-    """
-    Sistema Híbrido de Enrutamiento (Multi-Provider + Fallback Offline)
-    """
     provider, vision_provider, fallback_provider, model_name = get_provider_config()
-    
-    # 1. Enrutamiento Inteligente para Visión (Imágenes)
+
     active_provider = provider
     if image_path and os.path.exists(image_path):
         if vision_provider:
             active_provider = vision_provider
-            
-    def _call_provider(prov_name):
-        if prov_name == "gemini":
-            return _ask_gemini(messages, system_prompt, image_path, model_name)
-        elif prov_name == "ollama":
-            return _ask_ollama(messages, system_prompt, image_path, model_name)
-        elif prov_name == "openai":
-            return _ask_openai(messages, system_prompt, image_path, model_name)
-        elif prov_name == "deepseek":
-            return _ask_deepseek(messages, system_prompt, image_path, model_name)
-        else:
-            return _ask_anthropic(messages, system_prompt, image_path, model_name)
 
-    # 2. Intentar llamar al proveedor principal
     try:
-        response = _call_provider(active_provider)
+        response = _cached_call(active_provider, messages, system_prompt, image_path, model_name)
         if "Error:" in response and fallback_provider and fallback_provider != active_provider:
             raise Exception(response)
         return response
     except Exception as e:
         if fallback_provider and fallback_provider != active_provider:
             try:
-                # Si el principal falló, no le pasemos el modelo del principal al fallback
-                # sino que dejamos que use su valor por defecto
                 if fallback_provider == "ollama":
                     fallback_resp = _ask_ollama(messages, system_prompt, image_path, "qwen3:8b")
                 else:
-                    fallback_resp = _call_provider(fallback_provider)
+                    fallback_resp = _uncached_call(fallback_provider, messages, system_prompt, image_path, model_name)
                 return f"[Fallback activado. Proveedor original falló por: {str(e)}]\n{fallback_resp}"
             except Exception as e2:
                 return f"Error en proveedor principal ({str(e)}) y también en el de emergencia ({str(e2)})."
@@ -100,8 +121,9 @@ def _ask_gemini(messages, system_prompt, image_path, model_name):
         with open(config_path, "r", encoding="utf-8") as f:
             cfg = json.load(f)
             api_key = cfg.get("gemini_api_key", api_key)
-    except: pass
-    
+    except Exception as e:
+        logger.debug(f"No se pudo leer gemini_api_key de config.json: {e}")
+
     if not api_key:
         return "Error: GEMINI_API_KEY no está configurada en variables ni en config.json."
         
@@ -190,8 +212,9 @@ def _ask_openai(messages, system_prompt, image_path, model_name):
         with open(config_path, "r", encoding="utf-8") as f:
             cfg = json.load(f)
             api_key = cfg.get("openai_api_key", api_key)
-    except: pass
-    
+    except Exception as e:
+        logger.debug(f"No se pudo leer openai_api_key de config.json: {e}")
+
     if not api_key:
         return "Error: OPENAI_API_KEY no está configurada."
         
@@ -224,16 +247,10 @@ def _ask_openai(messages, system_prompt, image_path, model_name):
     return response.choices[0].message.content
 
 def _ask_deepseek(messages, system_prompt, image_path, model_name):
-    # DeepSeek usa el estándar de OpenAI, por lo que usamos su librería
     from openai import OpenAI
-    api_key = os.environ.get("DEEPSEEK_API_KEY", "")
-    try:
-        config_path = Path(__file__).parent.parent / "config.json"
-        with open(config_path, "r", encoding="utf-8") as f:
-            cfg = json.load(f)
-            api_key = cfg.get("deepseek_api_key", api_key)
-    except: pass
-    
+    from config_manager import get_deepseek_api_key
+    api_key = get_deepseek_api_key()
+
     if not api_key:
         return "Error: DEEPSEEK_API_KEY no está configurada."
         

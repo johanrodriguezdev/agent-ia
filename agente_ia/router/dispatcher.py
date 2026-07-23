@@ -13,35 +13,24 @@ from executor import handlers
 from executor import system_action_handlers
 
 def dispatch(intent: Intent, params: dict) -> str:
-    """Enruta la intención al handler dinámico correcto."""
-    
     routes = {
-        # Aplicaciones y sistema de archivos
         Intent.OPEN_APP:      handlers.handle_open_app,
         Intent.CLOSE_APP:     handlers.handle_close_app,
         Intent.SEARCH_WEB:    handlers.handle_search_web,
         Intent.OPEN_FOLDER:   handlers.handle_open_folder,
         Intent.LIST_FILES:    handlers.handle_list_files,
         Intent.CREATE_FILE:   handlers.handle_create_file,
-        
-        # Sistema operativo
         Intent.GET_TIME:      handlers.handle_get_time,
         Intent.SYS_VOL_UP:    handlers.handle_sys_vol_up,
         Intent.SYS_VOL_DOWN:  handlers.handle_sys_vol_down,
         Intent.SYS_MUTE:      handlers.handle_sys_mute,
         Intent.TAKE_SCREENSHOT: handlers.handle_take_screenshot,
         Intent.SYS_POWER_OFF: handlers.handle_sys_power_off,
-        
-        # Conocimiento e información
         Intent.WIKIPEDIA_SUMMARY: handlers.handle_wikipedia_summary,
         Intent.RECALL_MEMORY:     handlers.handle_recall_memory,
-        
-        # Control del PC
         Intent.PC_CLICK:      handlers.handle_pc_click,
         Intent.PC_TYPE:       handlers.handle_pc_type,
         Intent.PC_SCROLL:     handlers.handle_pc_scroll,
-        
-        # System Actions (funciones reales sin GUI)
         Intent.CALCULATE:     system_action_handlers.handle_calculate,
         Intent.SEARCH_FILES:  system_action_handlers.handle_search_files,
         Intent.FOLDER_SIZE:   system_action_handlers.handle_folder_size,
@@ -49,18 +38,10 @@ def dispatch(intent: Intent, params: dict) -> str:
         Intent.SYSTEM_INFO:   system_action_handlers.handle_system_info,
         Intent.CPU_INFO:      system_action_handlers.handle_cpu_info,
         Intent.RAM_INFO:      system_action_handlers.handle_ram_info,
-        
-        # ✅ NUEVO: Chat conversacional con Claude
-        # Cualquier pregunta que llegue como CHAT va directo al cerebro
         Intent.CHAT:          handlers.handle_chat,
-        
-        # ✅ ACTUALIZADO: UNKNOWN ahora también usa Claude como fallback
-        # En lugar del mensaje "comando no reconocido", Glass intenta
-        # responder inteligentemente con Claude.
         Intent.UNKNOWN:       handlers.handle_unknown,
     }
-    
-    # 1. Intentar Rutas Modulares (Skills Automáticas)
+
     try:
         from skills.skill_manager import skill_manager
         if skill_manager.handles_intent(intent):
@@ -68,6 +49,19 @@ def dispatch(intent: Intent, params: dict) -> str:
     except Exception as e:
         print(f"[Dispatcher] Error ejecutando skill modular: {e}")
 
-    # 2. Rutas Legacy Quemadas (Hardcoded)
     handler = routes.get(intent, handlers.handle_unknown)
     return handler(params)
+
+
+def dispatch_as_tool(params: dict) -> str:
+    from intent.classifier import classify_command as classifier
+    text = params.get("task", params.get("query", ""))
+    if not text:
+        return "No hay texto para procesar."
+
+    try:
+        intent, intent_params = classifier(text)
+        intent_params["channel"] = params.get("channel", "desktop")
+        return dispatch(intent, intent_params)
+    except Exception as e:
+        return f"Error en dispatch: {e}"

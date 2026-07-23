@@ -19,7 +19,34 @@ from agents.action_registry import list_action_names
 # ─────────────────────────────────────────────────────────────────
 PLAN_TEMPLATES = [
 
-    # ── Bloc de notas + Escribir texto + Guardar ──────────────────
+    # ── Modo trabajo ──────────────────────────────────────────────
+    {
+        "patterns": [
+            r"modo trabajo",
+            r"entorno.*trabajo",
+            r"prepara.*trabajo",
+            r"inicia.*trabajo",
+        ],
+        "plan_builder": lambda m: [
+            {"action": "open_chrome",   "params": {}},
+            {"action": "open_notepad",  "params": {}},
+        ]
+    },
+
+    # ── Modo estudio ──────────────────────────────────────────────
+    {
+        "patterns": [
+            r"modo estudio",
+            r"entorno.*estudio",
+            r"prepara.*estudio",
+        ],
+        "plan_builder": lambda m: [
+            {"action": "open_notepad", "params": {}},
+            {"action": "open_browser", "params": {}},
+        ]
+    },
+
+    # ── Crear documento (DIRECTO: escribe archivo + abre en Notepad) ──
     {
         "patterns": [
             r"crea.*documento.*sobre (.*)",
@@ -29,11 +56,25 @@ PLAN_TEMPLATES = [
             r"crea.*resumen.*de (.*)",
         ],
         "plan_builder": lambda m: [
-            {"action": "open_notepad",        "params": {}},
-            {"action": "wait_seconds",         "params": {"seconds": 1.5}},
             {"action": "generate_ai_summary",  "params": {"topic": m.group(1).strip()}, "store_as": "summary_text"},
-            {"action": "write_text",           "params": {}, "use_stored": "summary_text"},
-            {"action": "save_file_desktop",    "params": {"filename": f"Resumen_{m.group(1).strip().replace(' ','_')}.txt"}},
+            {"action": "write_file_direct",     "params": {"filename": f"Resumen_{m.group(1).strip().replace(' ','_')}.txt"}, "use_stored": "summary_text"},
+            {"action": "open_file_in_notepad",  "params": {"filename": f"Resumen_{m.group(1).strip().replace(' ','_')}.txt"}},
+        ]
+    },
+
+    # ── Escribir resumen EN el bloc de notas ──────────────────────
+    {
+        "patterns": [
+            r"escribe.*resumen.*en.*bloc",
+            r"escribe.*resumen.*en.*notepad",
+            r"resumen.*en.*bloc",
+            r"resumen.*en.*notepad",
+        ],
+        "plan_builder": lambda m: [
+            {"action": "get_active_window_info", "params": {}},
+            {"action": "generate_ai_summary",  "params": {"topic": "información general"}, "store_as": "summary_text"},
+            {"action": "write_file_direct",     "params": {"filename": "resumen_automatico.txt"}, "use_stored": "summary_text"},
+            {"action": "open_file_in_notepad",  "params": {"filename": "resumen_automatico.txt"}},
         ]
     },
 
@@ -125,6 +166,28 @@ PLAN_TEMPLATES = [
         ],
         "plan_builder": lambda m: [
             {"action": "open_notepad", "params": {}},
+        ]
+    },
+    {
+        "patterns": [
+            r"abre.*chrome",
+            r"abre.*google chrome",
+        ],
+        "plan_builder": lambda m: [
+            {"action": "open_chrome", "params": {}},
+        ]
+    },
+
+    # ── Ventana activa ────────────────────────────────────────────
+    {
+        "patterns": [
+            r"que.*ventana.*activa",
+            r"que.*abierto",
+            r"ventana.*actual",
+            r"dime.*abierto",
+        ],
+        "plan_builder": lambda m: [
+            {"action": "get_active_window_info", "params": {}},
         ]
     },
 

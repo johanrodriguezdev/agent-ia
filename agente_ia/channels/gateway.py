@@ -72,6 +72,7 @@ class GlassGateway:
             from intent.classifier import classify_command
             from intent.intentions import Intent
             from router.dispatcher import dispatch
+            from core.orchestrator import orchestrator
 
             intent, params = classify_command(text)
 
@@ -83,7 +84,12 @@ class GlassGateway:
             if intent == Intent.UNKNOWN or message.msg_type == MessageType.IMAGE:
                 result = self._ask_claude_for_user(message, session)
             else:
-                result = dispatch(intent, params)
+                params["channel"] = message.channel
+                result = orchestrator.process_task(
+                    text=text,
+                    channel=message.channel,
+                    user_id=message.user_id
+                )
 
             # Memoria aislada del usuario
             session.save_memory(text, result)
@@ -219,109 +225,24 @@ class GlassGateway:
     def _ask_claude_for_user(self, message: GlassMessage, session) -> str:
         text = message.text
         try:
-            import datetime
-            from config_manager import get_agent_name
-            import re
-            import json
-            import sqlite3
-            from ai.embedding_engine import create_embedding
-            import numpy as np
-            
-            # Recuperar memoria semántica específica del usuario
-            sem_context = ""
-            try:
-                # Código simple para buscar el embed en sem_db_path
-                client_emb = create_embedding(text)
-                v1 = np.array(client_emb)
-                conn = sqlite3.connect(str(session.sem_db_path))
-                cursor = conn.execute("SELECT text, embedding_json FROM semantic_memories")
-                best_match = ""
-                highest_score = -1.0
-                for row_text, emb_json in cursor.fetchall():
-                    v2 = np.array(json.loads(emb_json))
-                    norm_a, norm_b = np.linalg.norm(v1), np.linalg.norm(v2)
-                    score = float(np.dot(v1, v2) / (norm_a * norm_b)) if norm_a and norm_b else 0.0
-                    if score > highest_score:
-                        highest_score = score
-                        best_match = row_text
-                conn.close()
-                if highest_score >= 0.65:
-                    sem_context = best_match
-            except Exception:
-                pass
+            from ai.claude_brain import ask_claude
 
-            agent = get_agent_name().upper()
-            memory_context = session.get_memory_md()
-
-            system = (
-                f"Eres {agent}, asistente de IA personal con personalidad seria, leal y elegante. "
-                f"Hablas siempre en español. Te diriges al usuario como 'Señor' o por su nombre.\n"
-                f"Usuario: {session.user_name} | Canal: {session.channel}\n"
-                f"Fecha: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
-            )
-            
-            system += """
-REGLAS ADICIONALES:
-- Si el usuario pide ejecutar acciones en el PC que no sabes hacer, AHORA PUEDES APRENDERLAS POR TI MISMO. 
-  Si detectas que el usuario te está pidiendo una secuencia de acciones o quieres aprender un comando nuevo automáticamente para ayudarle, responde INCLUYENDO un bloque JSON con este formato exacto:
-  ```json
-  {
-    "learn_command": "frase o comando clave",
-    "actions": ["comando reconocido 1", "comando reconocido 2"]
-  }
-  ```
-- Si el usuario te pide que recuerdes datos importantes sobre él, responde INCLUYENDO un bloque JSON:
-  ```json
-  {
-    "save_memory": "Dato específico relevante que debo anexar a mi memoria permanente"
-  }
-  ```
-"""
-            if memory_context:
-                system += f"\nPerfil del usuario:\n{memory_context}\n"
-                
-            if sem_context:
-                system += f"\nRECUERDOS RELEVANTES DE CONVERSACIONES PASADAS (Memoria Semántica):\n{sem_context}\n"
-
-            # Modificar ligeramente el último mensaje si hay imagen
             if message.image_path and os.path.exists(message.image_path):
                 if not text or len(text.strip()) < 2:
                     text = "Analiza en detalle esta imagen y dime todo lo que ves e investiga su contexto."
                 else:
                     text = f"Analiza esta imagen con la siguiente petición: {text}. Investiga en profundidad y actúa como experto."
 
-            # Guarda en el historial RAM del usuario (texto simple)
             session.add_to_history("user", text)
-            
-            from ai.llm_provider import generate_response
-            result = generate_response(
-                messages=session.get_history(),
-                system_prompt=system,
-                image_path=message.image_path
+
+            result = ask_claude(
+                user_message=text,
+                user_id=message.user_id,
+                user_name=session.user_name,
+                channel=message.channel,
+                image_path=message.image_path or "",
             )
-            
-            # --- Procesar auto-aprendizaje y memoria para el usuario ---
-            json_match = re.search(r'```json\s*(\{.*?\})\s*```', result, re.DOTALL)
-            if json_match:
-                try:
-                    learned_data = json.loads(json_match.group(1))
-                    parsed_something = False
-                    
-                    if "learn_command" in learned_data and "actions" in learned_data:
-                        from learning.command_learning import save_custom_command
-                        save_custom_command(learned_data["learn_command"], learned_data["actions"])
-                        parsed_something = True
-                        
-                    if "save_memory" in learned_data:
-                        new_mem = f"\n- {learned_data['save_memory']} (Registrado: {datetime.datetime.now().strftime('%d/%m/%Y')})"
-                        session.update_memory_md(session.get_memory_md() + new_mem)
-                        parsed_something = True
-                        
-                    if parsed_something:
-                        result = re.sub(r'```json\s*\{.*?\}\s*```', '', result, flags=re.DOTALL).strip()
-                except Exception as parse_e:
-                    print(f"[Gateway Claude Auto-Learning Error] {parse_e}")
-            
+
             session.add_to_history("assistant", result)
             return result
 
@@ -361,18 +282,8 @@ REGLAS ADICIONALES:
 
     def _save_semantic(self, session, text: str, result: str):
         try:
-            import json
-            import sqlite3
-            from ai.embedding_engine import create_embedding
-
+            from ai.memory_manager import memory
             content = f"Pregunta: {text} | Respuesta: {result}"
-            embedding = create_embedding(content)
-            conn = sqlite3.connect(str(session.sem_db_path))
-            conn.execute(
-                "INSERT INTO semantic_memories (text, embedding_json) VALUES (?, ?)",
-                (content, json.dumps(embedding))
-            )
-            conn.commit()
-            conn.close()
+            memory.store(content, user_id=session.user_id, category="semantic", importance=0.5)
         except Exception:
             pass

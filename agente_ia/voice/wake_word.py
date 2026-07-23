@@ -1,83 +1,117 @@
 import speech_recognition as sr
+import logging
+import time
+import numpy as np
 from ui.tts_engine import speak
 from nlp.parser import clean_text
 from config_manager import get_wake_words, get_agent_name
 
+logger = logging.getLogger(__name__)
+
+_whisper_model = None
+
+def _get_whisper():
+    global _whisper_model
+    if _whisper_model is None:
+        try:
+            import whisper
+            _whisper_model = whisper.load_model("base", device="cpu")
+            print("[Whisper] Modelo local cargado para wake word (fallback offline)")
+        except Exception:
+            _whisper_model = False
+    return _whisper_model if _whisper_model is not False else None
+
+def _transcribe_whisper(audio_data: sr.AudioData) -> str:
+    try:
+        model = _get_whisper()
+        if model is None:
+            return ""
+        raw = audio_data.get_raw_data()
+        audio_np = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+        result = model.transcribe(audio_np, language="es", fp16=False)
+        return result.get("text", "").strip()
+    except Exception:
+        return ""
+
 def parse_wake_command(text: str) -> tuple[bool, str]:
-    """
-    Analiza el texto para detectar la wake word y extraer el comando consecuente si existe.
-    """
     text_clean = clean_text(text)
-    
     wake_words = get_wake_words()
-    # Adicionalmente, permitimos la forma castellanizada temporalmente para cualquier nombre
     wake_words.extend([name.replace("j", "y") for name in wake_words if "j" in name])
-    
+
     for word in wake_words:
-        # Buscamos si la palabra clave está en el texto
         pos = text_clean.find(word)
         if pos != -1:
-            # Extraemos todo lo que el usuario haya dicho DESPUÉS de la palabra clave
             command = text_clean[pos + len(word):].strip()
             return True, command
-            
     return False, ""
 
 def listen_for_wake_word():
-    """
-    Escucha de forma continua el micrófono con un consumo optimizado usando frases cortas.
-    Retorna True si solo detectó la palabra clave (esperando siguiente comando).
-    Retorna el 'comando' en string si el usuario lo dijo en la misma frase.
-    """
     recognizer = sr.Recognizer()
-    
-    # Optimización: Reducimos un poco el threshold dinámico de energía 
-    # y la limitamos para que libere la CPU mas seguido.
     recognizer.dynamic_energy_threshold = False
-    recognizer.energy_threshold = 400 
+    recognizer.energy_threshold = 400
 
     with sr.Microphone() as source:
-        print("\n[🦻 Modo Wake Word]: Escuchando de fondo continuamente...")
+        print("\n[Modo Manos Libres]: Escuchando... Di \"Orion\" para activarme")
         recognizer.adjust_for_ambient_noise(source, duration=1)
-        
+
         while True:
             try:
-                # Ampliamos a 6 segundos para dar margen si dice el comando en la misma frase
                 audio = recognizer.listen(source, timeout=1, phrase_time_limit=6)
-                
+
+                try:
+                    from ui.tts_engine import is_speaking, signal_barge_in
+                    if is_speaking():
+                        signal_barge_in()
+                        print("[Barge-in] Usuario interrumpio")
+                except Exception:
+                    pass
+
                 try:
                     from ui.gui import update_gui_state
                     update_gui_state("LISTENING")
-                except: pass
-                
-                text = recognizer.recognize_google(audio, language="es-ES")
+                except Exception:
+                    pass
+
+                text = ""
+                try:
+                    text = recognizer.recognize_google(audio, language="es-ES")
+                except (sr.RequestError, sr.UnknownValueError):
+                    text = _transcribe_whisper(audio)
+
+                if not text:
+                    continue
+
                 is_wake, extracted_cmd = parse_wake_command(text)
-                
                 if is_wake:
-                    print(f"[✅ Wake Word Detectada]: '{text}'")
+                    print(f"[Orion detectado]: '{text}'")
                     if extracted_cmd:
-                        # Dijo "[Nombre] + comando", entregamos directo
                         return extracted_cmd
                     else:
-                        # Solo dijo "[Nombre]"
-                        speak("Sí, te escucho")
+                        speak("Lo escucho, Senor")
                         return True
-                        
+
             except sr.WaitTimeoutError:
-                # Silencio detectado, dejamos continuar el bucle sano
                 pass
             except sr.UnknownValueError:
-                # Trató de procesar sonido ininteligible, ignoramos
                 pass
-            except sr.RequestError as e:
-                print(f"[Error de Conexión] La escucha falló: {e}")
-                speak("Tengo un problema de red escuchando")
-                return False
+            except sr.RequestError:
+                text = _transcribe_whisper(audio) if 'audio' in dir() else ""
+                if text:
+                    is_wake, extracted_cmd = parse_wake_command(text)
+                    if is_wake:
+                        if extracted_cmd:
+                            return extracted_cmd
+                        speak("Lo escucho, Senor")
+                        return True
+                continue
             except KeyboardInterrupt:
-                print("\nSaliendo de escucha continua...")
+                print("\nSaliendo de modo manos libres...")
                 return False
             finally:
                 try:
                     from ui.gui import update_gui_state
                     update_gui_state("IDLE")
-                except: pass
+                except Exception:
+                    pass
+
+            time.sleep(0.05)

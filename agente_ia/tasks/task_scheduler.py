@@ -147,6 +147,32 @@ class TaskScheduler:
             except Exception as e:
                 logger.error(f"Error en callback de notificación: {e}")
 
+        # Notificación local (TTS + Windows Toast)
+        if channel == "desktop" or channel == "telegram":
+            self._notify_local(title, task_id)
+
+    def _notify_local(self, title: str, task_id):
+        try:
+            from ui.tts_engine import speak
+            speak(f"Señor, recuerde: {title}")
+        except Exception:
+            pass
+        try:
+            import subprocess
+            ps_script = (
+                f'[Windows.UI.Notifications.ToastNotificationManager,'
+                f' Windows.UI.Notifications, ContentType=WindowsRuntime]::CreateToastNotifier("O.R.I.O.N.").Show('
+                f'(New-Object Windows.UI.Notifications.ToastNotification('
+                f'[Windows.Data.Xml.Dom.XmlDocument]::LoadXml('
+                f"'<toast><visual><binding template=\"ToastText02\"><text id=\"1\">⏰ RECORDATORIO</text>"
+                f"<text id=\"2\">{title}</text></binding></visual></toast>'"
+                f'))));'
+                f'Start-Sleep -Seconds 5'
+            )
+            subprocess.run(["powershell", "-Command", ps_script], capture_output=True, timeout=10)
+        except Exception:
+            pass
+
     def _send_telegram_message(self, chat_id: str, text: str):
         """Envía un mensaje de Telegram mediante petición HTTP directa."""
         import requests
@@ -155,17 +181,9 @@ class TaskScheduler:
         from pathlib import Path
         
         # Recuperar token
-        token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-        if not token:
-            try:
-                config_path = Path(__file__).parent.parent.parent / "config.json"
-                if not config_path.exists():
-                     config_path = Path(__file__).parent.parent / "config.json"
-                with open(config_path, "r", encoding="utf-8") as f:
-                    token = json.load(f).get("telegram_token", "")
-            except Exception:
-                pass
-                
+        from config_manager import get_telegram_token
+        token = get_telegram_token()
+
         if not token:
             logger.warning("No hay token de Telegram configurado para enviar recordatorios.")
             return

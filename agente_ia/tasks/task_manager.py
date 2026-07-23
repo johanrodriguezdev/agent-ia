@@ -205,6 +205,10 @@ def _parse_recurrence(text: str) -> Optional[str]:
     if "cada semana" in text_lower or "semanalmente" in text_lower:
         return "weekly:mon"
 
+    # "cada mes" / "mensualmente" / "todos los meses"
+    if any(p in text_lower for p in ["cada mes", "mensualmente", "todos los meses"]):
+        return "monthly"
+
     return None
 
 
@@ -463,6 +467,16 @@ class TaskManager:
             next_remind = remind_at + datetime.timedelta(days=1)
         elif recurrence.startswith("weekly:"):
             next_remind = remind_at + datetime.timedelta(weeks=1)
+        elif recurrence == "monthly":
+            month = remind_at.month + 1
+            year = remind_at.year + (month - 1) // 12
+            month = ((month - 1) % 12) + 1
+            try:
+                next_remind = remind_at.replace(year=year, month=month)
+            except ValueError:
+                import calendar
+                last_day = calendar.monthrange(year, month)[1]
+                next_remind = remind_at.replace(year=year, month=month, day=last_day)
         else:
             return
 
@@ -510,6 +524,8 @@ class TaskManager:
                     recurrence_tag = " 🔁 Diaria"
                 elif t["recurrence"].startswith("weekly:"):
                     recurrence_tag = " 🔁 Semanal"
+                elif t["recurrence"] == "monthly":
+                    recurrence_tag = " 🔁 Mensual"
 
             status_mark = "☑️" if t["status"] == "completed" else "☐"
             tachado_ini = "~" if t["status"] == "completed" else ""
@@ -536,6 +552,8 @@ class TaskManager:
         rec = task_info.get("recurrence")
         if rec == "daily":
             recurrence_str = "\n🔁 Recurrencia: Diaria"
+        elif rec == "monthly":
+            recurrence_str = "\n🔁 Recurrencia: Mensual"
         elif rec and rec.startswith("weekly:"):
             day_map = {"mon": "Lunes", "tue": "Martes", "wed": "Miércoles",
                        "thu": "Jueves", "fri": "Viernes", "sat": "Sábado", "sun": "Domingo"}
