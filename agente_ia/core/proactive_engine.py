@@ -85,7 +85,7 @@ class ProactiveEngine:
                 continue
 
             logger.info(f"Trigger proactivo disparado: {trigger.agent.name} - {trigger.action}")
-            action_key = f"proactive_{trigger.agent.name}"
+            action_key = "proactive_trigger"
 
             if not security_manager.is_action_allowed(action_key, ChannelType.DESKTOP):
                 logger.warning(f"Acción proactiva bloqueada por seguridad: {action_key}")

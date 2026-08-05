@@ -1,4 +1,5 @@
 import random
+from datetime import datetime
 
 GREETINGS = [
     "Buenos dias, Senor. Todos los sistemas estan operativos.",
@@ -89,3 +90,22 @@ def format_response(text: str, is_error: bool = False) -> str:
 
 def get_random_greeting():
     return random.choice(GREETINGS)
+
+
+def get_time_based_greeting(display_name: str = "") -> str:
+    """Return a greeting based on the current hour (REQ-008/CA-03/CA-04).
+
+    Rangos exactos de CA-03: "Buenas noches" 19:00–04:59 (envuelve medianoche, se
+    evalúa primero por ser el rango explícito más específico), "Buenos días" 05:00–11:59,
+    "Buenas tardes" 12:00–18:59. Si `display_name` está vacío, retorna el saludo sin coma
+    final (p. ej. "Buenos días" en vez de "Buenos días, "). Independiente de
+    `get_random_greeting()` (que se conserva intacta para voz/CLI).
+    """
+    hour = datetime.now().hour
+    if hour >= 19 or hour < 5:
+        base = "Buenas noches"
+    elif hour < 12:
+        base = "Buenos días"
+    else:
+        base = "Buenas tardes"
+    return f"{base}, {display_name}" if display_name else base

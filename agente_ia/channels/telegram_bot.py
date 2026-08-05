@@ -1,6 +1,6 @@
 """
 channels/telegram_bot.py
-Bot de Telegram para Glass — versión completa.
+Bot de Telegram para Noddoo — versión completa.
 
 - Aislamiento por usuario (memoria y conversación separadas)
 - Capturas de pantalla enviadas como foto al chat
@@ -175,7 +175,7 @@ async def send_voice_parts(update, text: str):
                     await update.message.reply_voice(voice=af)
                 else:
                     await update.message.reply_audio(
-                        audio=af, title="Glass", performer="Glass Assistant"
+                        audio=af, title="Noddoo", performer="Noddoo Assistant"
                     )
         except Exception as e:
             logger.warning(f"Error enviando parte {i+1}: {e}")
@@ -389,7 +389,7 @@ async def cmd_estado(update, context):
     ffmpeg_status = "Nota de voz nativa" if FFMPEG_AVAILABLE else "Sin FFmpeg (winget install ffmpeg)"
 
     await update.message.reply_text(
-        f"*Estado de Glass — {now}*\n\n"
+        f"*Estado de Noddoo — {now}*\n\n"
         f"Bot Telegram: Activo\n"
         f"Motor IA: Operativo\n"
         f"Usuarios activos: {registry.active_count()}\n"
@@ -543,16 +543,15 @@ async def handle_text(update, context):
         chat_id=update.effective_chat.id, action="typing"
     )
 
-    # Detectar comandos de PC en texto libre
-    text_lower = text.lower()
-    if any(w in text_lower for w in ["apaga el pc", "apagar el pc", "apaga la pc", "apagar la computadora"]):
-        await _handle_shutdown(update, context, voice_mode)
-        return
-
-    if any(w in text_lower for w in ["reinicia el pc", "reiniciar el pc", "reinicia la pc", "reiniciar el equipo"]):
-        await _handle_restart(update, context, voice_mode)
-        return
-
+    # REQ-006/B6: se elimina el pre-chequeo de "apaga el pc"/"reinicia el pc" que había
+    # acá — ahora `GlassGateway().process()` resuelve TODO el texto vía
+    # `core/resolution.py:resolve()`, que ya clasifica y despacha `SYS_POWER_OFF`/etc. por
+    # el mismo camino gateado que cualquier otro intent. El resultado funcional es idéntico
+    # (YELLOW seguía bloqueado en Telegram antes y después de este cambio, por
+    # `CHANNEL_ALLOWED_LEVELS`), solo cambia el texto de la denegación de la frase
+    # específica en español de `_handle_shutdown`/`_handle_restart` al mensaje genérico de
+    # `resolve()`. `_handle_shutdown`/`_handle_restart` quedan disponibles para invocación
+    # directa (p.ej. desde comandos explícitos ya existentes o tests).
     msg = GlassMessage(
         user_id=str(user.id),
         user_name=user.first_name or "Usuario",
@@ -597,16 +596,8 @@ async def handle_voice(update, context):
         f"_Escuché: \"{transcribed}\"_", parse_mode="Markdown"
     )
 
-    # Detectar comandos de PC en voz
-    text_lower = transcribed.lower()
-    if any(w in text_lower for w in ["apaga el pc", "apagar el pc", "apaga la pc"]):
-        await _handle_shutdown(update, context, send_voice=True)
-        return
-
-    if any(w in text_lower for w in ["reinicia el pc", "reiniciar el pc", "reinicia la pc"]):
-        await _handle_restart(update, context, send_voice=True)
-        return
-
+    # REQ-006/B6: mismo motivo que en handle_text() — el pre-chequeo de apagado/reinicio
+    # se elimina, `GlassGateway().process()` resuelve el texto transcrito completo.
     msg = GlassMessage(
         user_id=str(user.id),
         user_name=user.first_name or "Usuario",
@@ -620,8 +611,18 @@ async def handle_voice(update, context):
 # ── Acciones del PC ────────────────────────────────────────────────
 
 async def _handle_shutdown(update, context, send_voice: bool = False):
+    # REQ-005: se enruta por el punto central (require_confirmation), no por el pre-chequeo
+    # is_action_allowed(): así la decisión respeta CHANNEL_ALLOWED_LEVELS *y* queda el
+    # intento registrado en la auditoría. Para YELLOW desde Telegram el gate deniega antes
+    # de llegar a pedir confirmación por consola, que acá sería inalcanzable para el usuario.
     from core.security_manager import security_manager, ChannelType
-    if not security_manager.is_action_allowed("shutdown", ChannelType.TELEGRAM):
+    user = update.effective_user
+    if not security_manager.require_confirmation(
+        "shutdown",
+        ChannelType.TELEGRAM,
+        details="telegram:_handle_shutdown",
+        user_id=str(getattr(user, "id", "desconocido")),
+    ):
         msg = "Lo siento, Señor. Por razones de seguridad no puedo apagar el PC desde Telegram."
         await update.message.reply_text(msg)
         return
@@ -643,8 +644,15 @@ async def _handle_shutdown(update, context, send_voice: bool = False):
 
 
 async def _handle_restart(update, context, send_voice: bool = False):
+    # REQ-005: mismo criterio que _handle_shutdown() — gate central, no pre-chequeo.
     from core.security_manager import security_manager, ChannelType
-    if not security_manager.is_action_allowed("restart", ChannelType.TELEGRAM):
+    user = update.effective_user
+    if not security_manager.require_confirmation(
+        "restart",
+        ChannelType.TELEGRAM,
+        details="telegram:_handle_restart",
+        user_id=str(getattr(user, "id", "desconocido")),
+    ):
         msg = "Lo siento, Señor. Por razones de seguridad no puedo reiniciar el PC desde Telegram."
         await update.message.reply_text(msg)
         return
@@ -780,7 +788,7 @@ def run_telegram_bot():
         from config_manager import get_agent_name
         agent = get_agent_name().upper()
     except Exception:
-        agent = "GLASS"
+        agent = "NODDOO"
 
     print(f"\n{'='*50}")
     print(f"  {agent} - Bot Telegram completo")

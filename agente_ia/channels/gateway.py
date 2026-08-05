@@ -3,10 +3,13 @@ channels/gateway.py
 Gateway central de Glass — aislamiento por usuario + acciones del PC.
 """
 
+import logging
 import os
 from dataclasses import dataclass, field
 from typing import Optional
 from enum import Enum
+
+logger = logging.getLogger(__name__)
 
 
 class MessageType(Enum):
@@ -40,6 +43,12 @@ class GlassResponse:
 class GlassGateway:
 
     def process(self, message: GlassMessage) -> GlassResponse:
+        """REQ-006/CA-01, CA-02: delega a `core/resolution.py:resolve()`, el punto único de
+        resolución compartido con `main.py` y `core/orchestrator.py`. Reemplaza los tres
+        métodos `_try_create_task`/`_try_list_tasks`/`_try_complete_task` que existían acá
+        antes de este REQ (H3: llamaban a `tasks/task_manager.py` directo, sin pasar por
+        ningún gate) — ese caso ahora vive en `core/resolution.py::_try_task_tool`, que
+        resuelve vía `agents/tool_registry.py:execute_tool()` (gateado)."""
         from ai.user_manager import registry
 
         # Sesión aislada por usuario
@@ -54,50 +63,40 @@ class GlassGateway:
             return GlassResponse(text="Dígame, estoy escuchando.", speak=True)
 
         try:
-            # ── Detectar tareas/recordatorios en conversación natural ──
-            task_result = self._try_create_task(message, session)
-            if task_result:
-                return task_result
-
-            # ── Detectar consulta de tareas pendientes/listado ──
-            list_result = self._try_list_tasks(message, session)
-            if list_result:
-                return list_result
-
-            # ── Detectar finalización de tareas ──
-            complete_result = self._try_complete_task(message, session)
-            if complete_result:
-                return complete_result
-
             from intent.classifier import classify_command
             from intent.intentions import Intent
-            from router.dispatcher import dispatch
-            from core.orchestrator import orchestrator
+            from core.resolution import resolve
 
-            intent, params = classify_command(text)
-
-            # Captura de pantalla → enviar como imagen al chat
-            if intent == Intent.TAKE_SCREENSHOT:
-                return self._handle_screenshot(session, text)
-
-            # UNKNOWN → Claude Brain personalizado por usuario
-            if intent == Intent.UNKNOWN or message.msg_type == MessageType.IMAGE:
+            # Mensaje con imagen adjunta → Claude Brain personalizado por usuario, directo
+            # (soporte de imágenes). Es una excepción legítima al orden uniforme de CA-03:
+            # ningún resolver de `resolve()` (routine/autopilot/learned/task_tool/
+            # capability/intent) sabe operar sobre una imagen, todos trabajan sobre `text`,
+            # así que no hay orden que preservar acá — es un tipo de entrada distinto, no
+            # un canal distinto.
+            if message.msg_type == MessageType.IMAGE:
                 result = self._ask_claude_for_user(message, session)
             else:
-                params["channel"] = message.channel
-                result = orchestrator.process_task(
-                    text=text,
-                    channel=message.channel,
-                    user_id=message.user_id
+                # Captura de pantalla → enviar como imagen al chat (se preclasifica solo
+                # para detectar este caso especial, igual que TEACH_COMMAND en main.py;
+                # resolve() no conoce este feature de adjuntar imagen al chat de
+                # Telegram/Discord). El resto del texto —incluido lo que antes hubiera
+                # clasificado como UNKNOWN— pasa por `resolve()` completo: CA-03 exige el
+                # mismo orden de resolución (routine → autopilot → learned → task_tool →
+                # capability → intent → claude) que main.py, así que ya no se salta
+                # directo a Claude solo porque el intent legacy sea UNKNOWN.
+                pre_intent, _pre_params = classify_command(text)
+                if pre_intent == Intent.TAKE_SCREENSHOT:
+                    return self._handle_screenshot(session, text)
+
+                resolution = resolve(
+                    text, message.channel, message.user_id,
+                    claude_fn=lambda t: self._ask_claude_for_user(message, session),
                 )
+                result = resolution.text
 
             # Memoria aislada del usuario
             session.save_memory(text, result)
-
-            try:
-                self._save_semantic(session, text, result)
-            except Exception:
-                pass
+            self._save_semantic(session, text, result)
 
             return GlassResponse(text=result, speak=True)
 
@@ -106,121 +105,6 @@ class GlassGateway:
                 text=f"Lo siento, he encontrado un inconveniente: {str(e)[:80]}",
                 speak=True
             )
-
-    def _try_create_task(self, message: GlassMessage, session) -> 'GlassResponse | None':
-        """
-        Detecta si el mensaje del usuario es una solicitud de tarea/recordatorio.
-        Si lo es, crea la tarea y retorna una GlassResponse con la confirmación.
-        Si no, retorna None para que el flujo normal continúe.
-        """
-        text_lower = message.text.lower().strip()
-
-        # Triggers que indican intención de tarea
-        task_triggers = [
-            "recuérdame", "recuerdame", "recordarme", "recordatorio",
-            "agrega tarea", "agregar tarea", "nueva tarea", "crear tarea",
-            "no olvidar", "no olvides", "pendiente:", "tarea:"
-        ]
-
-        # Triggers que podrían ser tarea pero necesitan confirmación
-        # (como "tengo que" o "debo") — estos los dejamos para el LLM
-        is_explicit_task = any(trigger in text_lower for trigger in task_triggers)
-        if not is_explicit_task:
-            return None
-
-        try:
-            from tasks.task_manager import task_manager
-            result = task_manager.create_from_natural(
-                message.text,
-                user_id=message.user_id,
-                channel=message.channel
-            )
-            if result:
-                confirmation = task_manager.format_task_created(result)
-                # Guardar en memoria del usuario
-                session.save_memory(message.text, confirmation)
-                return GlassResponse(text=confirmation, speak=True)
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning(f"Error creando tarea: {e}")
-
-        return None
-
-    def _try_list_tasks(self, message: GlassMessage, session) -> 'GlassResponse | None':
-        """Detecta si el usuario pide ver sus tareas."""
-        text_lower = message.text.lower().strip()
-        triggers = ["mis tareas", "tareas pendientes", "tareas programadas", "listado de tareas", "lista de tareas", "ver tareas", "qué tareas", "que tareas", "dime mis tareas", "cuáles son mis tareas", "cuales son mis tareas"]
-        
-        if any(trigger in text_lower for trigger in triggers):
-            try:
-                from tasks.task_manager import task_manager
-                summary = task_manager.get_task_summary(message.user_id)
-                session.save_memory(message.text, summary)
-                return GlassResponse(text=summary, speak=True)
-            except Exception as e:
-                import logging
-                logging.getLogger(__name__).warning(f"Error listando tareas: {e}")
-        return None
-
-    def _try_complete_task(self, message: GlassMessage, session) -> 'GlassResponse | None':
-        """Detecta si el usuario está indicando que completó una tarea."""
-        text_lower = message.text.lower().strip()
-        triggers = ["ya complete la tarea", "ya completé la tarea", "tarea terminada", "tarea completada", "marcar tarea", "ya termine la tarea", "ya terminé la tarea", "listo complete la tarea", "listo termine la tarea"]
-        
-        is_complete = any(trigger in text_lower for trigger in triggers)
-        if not is_complete:
-            # Revisa variaciones con "listo" y "tarea"
-            if ("tarea" in text_lower or "recordatorio" in text_lower) and ("listo" in text_lower or "hecho" in text_lower or "completad" in text_lower or "terminad" in text_lower):
-                is_complete = True
-                
-        if not is_complete:
-            return None
-            
-        try:
-            import re
-            from tasks.task_manager import task_manager
-            
-            # Buscar si el usuario mencionó un ID (ej: "tarea 5")
-            match = re.search(r'(?:tarea|numero|número|id)\s*#?(\d+)', text_lower)
-            task_id = int(match.group(1)) if match else None
-            
-            if task_id is not None:
-                success = task_manager.complete_task(task_id, message.user_id)
-                if success:
-                    resp = f"☑️ *Excelente, Señor.* He marcado la tarea #{task_id} como completada."
-                else:
-                    resp = f"No encontré ninguna tarea pendiente con el ID #{task_id}, Señor."
-                session.save_memory(message.text, resp)
-                return GlassResponse(text=resp, speak=True)
-                
-            # Si no hay ID, buscar cuántas pendientes tiene
-            pending_tasks = task_manager.list_tasks(message.user_id, status="pending")
-            
-            if not pending_tasks:
-                resp = "No tiene ninguna tarea pendiente en este momento, Señor."
-                session.save_memory(message.text, resp)
-                return GlassResponse(text=resp, speak=True)
-                
-            if len(pending_tasks) == 1:
-                # ¡Magia! Solo hay una, completarla automáticamente
-                task = pending_tasks[0]
-                task_manager.complete_task(task["id"], message.user_id)
-                resp = f"☑️ *¡Trabajo terminado!* He deducido que se refería a la tarea *'{task['title']}'* y la he marcado como completada."
-                session.save_memory(message.text, resp)
-                return GlassResponse(text=resp, speak=True)
-                
-            # Si hay más de una, pedir aclaración
-            resp = "He notado que tiene varias tareas pendientes, Señor. ¿Podría indicarme el número de la tarea que completó? (Ej: 'listo tarea 2')\n\nSus tareas pendientes:\n"
-            for t in pending_tasks:
-                resp += f"• #{t['id']} - {t['title']}\n"
-            session.save_memory(message.text, resp)
-            return GlassResponse(text=resp, speak=True)
-            
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning(f"Error completando tarea: {e}")
-            
-        return None
 
     def _ask_claude_for_user(self, message: GlassMessage, session) -> str:
         text = message.text
@@ -285,5 +169,5 @@ class GlassGateway:
             from ai.memory_manager import memory
             content = f"Pregunta: {text} | Respuesta: {result}"
             memory.store(content, user_id=session.user_id, category="semantic", importance=0.5)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Error guardando memoria semántica: {e}")

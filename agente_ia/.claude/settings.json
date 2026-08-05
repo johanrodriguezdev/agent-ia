@@ -28,15 +28,33 @@
       "Bash(Write-Output \"OK\")",
       "Bash(Write-Host \"OK\")",
       "Bash(echo \"EXIT:$?\")",
-      "Bash(exit 0)"
+      "Bash(exit 0)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "Bash(find /c/Users/johan -maxdepth 4 -iname \"*openclaw*\" -not -path \"*/node_modules/*\" 2>/dev/null)",
+      "Read(//c/Users/johan/**)",
+      "Bash(cd /c/Users/johan/Downloads/openclaw-main && find . -maxdepth 2 -not -path \"*/node_modules/*\" -not -path \"*/.git/*\" | sort)",
+      "Read(//c/Users/johan/Downloads/openclaw-main/**)",
+      "Bash(ls -la \"/c/Users/johan/Downloads/openclaw-main\" | head -50)",
+      "Bash(ls -la \"/c/Users/johan/Downloads/openclaw-main.zip\")",
+      "Read(//c/Users/johan/Downloads/**)",
+      "Bash(unzip -q openclaw-main.zip -d openclaw-main-extracted)",
+      "Bash(node -e \"console.log\\(JSON.stringify\\(JSON.parse\\(require\\('fs'\\).readFileSync\\('extensions/anthropic/package.json'\\)\\).openclaw,null,2\\)\\)\")",
+      "Bash(node -e ' *)",
+      "Bash(node -e \"const p=JSON.parse\\(require\\('fs'\\).readFileSync\\('package.json'\\)\\);console.log\\(JSON.stringify\\(p.engines\\)\\); console.log\\('devDeps count', Object.keys\\(p.devDependencies||{}\\).length\\)\")",
+      "Bash(ls \"C:\\\\Users\\\\johan\\\\.claude\\\\projects\\\\c--Users-johan-Documentos-Apps-Agent-IA\\\\memory\\\\\" 2>/dev/null; echo ---; cat \"C:\\\\Users\\\\johan\\\\.claude\\\\projects\\\\c--Users-johan-Documentos-Apps-Agent-IA\\\\memory\\\\MEMORY.md\" 2>/dev/null)",
+      "Read(//c/Users/johan/.claude/projects/c--Users-johan-Documentos-Apps-Agent-IA/memory\" 2>/dev/null; echo ---; cat C:Usersjohan.claudeprojectsc--Users-johan-Documentos-Apps-Agent-IAmemoryMEMORY.md 2>/dev/**)",
+      "Bash(ls '/c/Users/johan/.claude/projects/c--Users-johan-Documentos-Apps-Agent-IA/memory/' 2>&1)",
+      "Read(//c/Users/johan/.claude/projects/c--Users-johan-Documentos-Apps-Agent-IA/**)",
+      "Read(//c/Users/johan/.claude/projects/**)",
+      "Bash(node .claude/scripts/update-tracker.mjs --siguiente-id)",
+      "Bash(node .claude/scripts/update-tracker.mjs --id REQ-005 --crear --Descripcion \"Deny-list de acciones peligrosas aplicada en codigo \\(no solo en documentacion/reglas\\): punto central de O.R.I.O.N. que bloquee explicitamente, por codigo, la ejecucion de acciones de maximo riesgo \\(equivalentes al nivel Rojo de security-levels.md\\) sin importar el skill/handler/canal que las invoque, inspirado en DEFAULT_GATEWAY_HTTP_TOOL_DENY de OpenClaw\" --Categoria \"SEGURIDAD\")",
+      "Bash(cd \"C:\\\\Users\\\\johan\\\\Documentos\\\\Apps\\\\Agent IA\\\\agente_ia\" && mkdir -p workspace/adjuntos/REQ-005/origen workspace/adjuntos/REQ-005/spec workspace/adjuntos/REQ-005/propuestas workspace/adjuntos/REQ-005/pruebas && ls workspace/adjuntos/REQ-005)"
     ],
     "additionalDirectories": [
       "c:\\Users\\johan\\Documentos\\Apps\\Agent IA\\agente_ia\\workspace",
-      "c:\\Users\\johan\\.claude\\projects\\c--Users-johan-Documentos-Apps-Agent-IA\\memory"
+      "c:\\Users\\johan\\.claude\\projects\\c--Users-johan-Documentos-Apps-Agent-IA\\memory",
+      "C:\\Users\\johan\\Documentos\\Apps\\Agent IA\\agente_ia\\workspace\\adjuntos\\REQ-005"
     ]
-  },
-  "hooks": {
-    "PreToolUse": "node .claude/scripts/guard-git-commit.mjs",
-    "PostToolUse": "node .claude/scripts/remind-rules.mjs"
   }
 }

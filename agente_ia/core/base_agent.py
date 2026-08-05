@@ -2,6 +2,8 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Dict, List, Callable, Any
 
+from core.security_manager import ActionDenied
+
 logger = logging.getLogger(__name__)
 
 class AgentTool:
@@ -70,7 +72,7 @@ class DynamicAgentFactory:
     def _generate_prompt(self, task: str, tools: List[AgentTool]) -> str:
         tool_list = "\n".join(f"- {t.name}: {t.description}" for t in tools)
         return (
-            f"Eres un agente especializado de O.R.I.O.N..\n\n"
+            f"Eres un agente especializado de Noddoo.\n\n"
             f"Tu tarea: {task}\n\n"
             f"Herramientas disponibles:\n{tool_list}\n\n"
             f"Responde de manera concisa y directa. Si no puedes completar la tarea, "
@@ -92,12 +94,19 @@ class _DynamicAgentInstance(BaseAgent):
         return 0.8
 
     def execute(self, task: str, context: dict = None) -> str:
-        logger.info(f"Agente '{self.name}' ejecutando: {task[:80]}")
-        for tool in self.tools:
-            try:
-                result = tool.execute({"task": task, "context": context or {}})
-                if result and "Error" not in result[:10]:
-                    return result
-            except Exception as e:
-                logger.debug(f"Tool '{tool.name}' no aplicable: {e}")
-        return f"No pude completar la tarea '{task[:60]}' con las herramientas disponibles."
+        """REQ-007/CA-01: ya no itera `self.tools` en un `for` de orden fijo — delega el
+        razonamiento real (decide->ejecuta->evalúa, dirigido por LLM) a
+        `core/reasoning_loop.py::run()`. `self.tools` queda como atributo estructural sin
+        uso funcional acá: la fuente de tools del loop es siempre
+        `agents/tool_registry.py` (ver `core/reasoning_loop.py::_build_tool_list()`), no
+        esta lista — se conserva por ser dependencia dura de `skills/skill_manager.py`
+        (no modificable en este REQ) y de `tests/test_agents.py` (REQ-002).
+        """
+        logger.info(f"Agente '{self.name}' delega a reasoning_loop: {task[:80]}")
+        context = context or {}
+        channel = context.get("channel")
+        user_id = context.get("user_id", "default")
+
+        from core.reasoning_loop import run as reasoning_run
+
+        return reasoning_run(task, channel, user_id)

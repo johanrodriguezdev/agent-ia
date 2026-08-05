@@ -161,7 +161,7 @@ class TaskScheduler:
             import subprocess
             ps_script = (
                 f'[Windows.UI.Notifications.ToastNotificationManager,'
-                f' Windows.UI.Notifications, ContentType=WindowsRuntime]::CreateToastNotifier("O.R.I.O.N.").Show('
+                f' Windows.UI.Notifications, ContentType=WindowsRuntime]::CreateToastNotifier("Noddoo").Show('
                 f'(New-Object Windows.UI.Notifications.ToastNotification('
                 f'[Windows.Data.Xml.Dom.XmlDocument]::LoadXml('
                 f"'<toast><visual><binding template=\"ToastText02\"><text id=\"1\">⏰ RECORDATORIO</text>"

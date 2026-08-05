@@ -30,3 +30,17 @@ intent/saved_model.pkl
 # Directorios del sistema
 Thumbs.db
 .DS_Store
+
+# Material de referencia externo (no forma parte de O.R.I.O.N., ~444 MB)
+openclaw-main/
+
+# workspace/ SI se versiona: contiene la evidencia del pipeline de REQs
+# (specs, arquitecturas, auditorias, resultados de pruebas y contextos).
+# Ese rastro es la justificacion de cada decision y debe vivir en la historia
+# de git. Solo se excluyen adjuntos binarios pesados que puedan caer ahi.
+workspace/**/*.zip
+workspace/**/*.7z
+workspace/**/*.tar.gz
+workspace/**/*.mp4
+workspace/**/*.mov
+workspace/**/*.pdf

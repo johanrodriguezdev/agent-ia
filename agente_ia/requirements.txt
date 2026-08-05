@@ -68,4 +68,7 @@ edge-tts==7.1.0
 
 # Carga de variables de entorno desde .env
 python-dotenv==1.0.1
+
+# --- Testing (REQ-008): ejercita widgets PyQt6 en pytest sin ventana real ---
+pytest-qt
 # ================================================================

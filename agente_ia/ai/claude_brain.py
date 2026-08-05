@@ -15,9 +15,9 @@ def _get_agent_name() -> str:
         config_path = os.path.join(os.path.dirname(__file__), "..", "config.json")
         with open(config_path, "r", encoding="utf-8") as f:
             config = json.load(f)
-            return config.get("agent_name", "glass")
+            return config.get("agent_name", "noddoo")
     except Exception:
-        return "glass"
+        return "noddoo"
 
 
 def _build_system_prompt(

@@ -13,7 +13,9 @@ logger = logging.getLogger(__name__)
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), "config.json")
 
 DEFAULT_CONFIG = {
-    "agent_name": "glass"
+    "agent_name": "noddoo",
+    "agent_pronunciation": "nodo",
+    "display_name": ""
 }
 
 _ENV_KEY_MAP = {
@@ -27,18 +29,26 @@ _ENV_KEY_MAP = {
 
 
 def load_config():
+    # ✅ BUG CORREGIDO (REQ-008): las dos ramas de abajo devolvían el objeto
+    # DEFAULT_CONFIG por referencia. Cualquier caller que mutara el dict retornado
+    # (p. ej. set_display_name()) corrompía el default global compartido por el resto
+    # del proceso. Se retorna siempre una copia.
     if not os.path.exists(CONFIG_FILE):
         save_config(DEFAULT_CONFIG)
-        return DEFAULT_CONFIG
+        return dict(DEFAULT_CONFIG)
     try:
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
             config = json.load(f)
             if "agent_name" not in config:
                 config["agent_name"] = DEFAULT_CONFIG["agent_name"]
+            if "agent_pronunciation" not in config:
+                config["agent_pronunciation"] = DEFAULT_CONFIG["agent_pronunciation"]
+            if "display_name" not in config:
+                config["display_name"] = DEFAULT_CONFIG["display_name"]
             return config
     except (json.JSONDecodeError, IOError):
         save_config(DEFAULT_CONFIG)
-        return DEFAULT_CONFIG
+        return dict(DEFAULT_CONFIG)
 
 
 def save_config(config):
@@ -61,12 +71,28 @@ def _get_config_value(key: str, default: str = "") -> str:
 
 def get_agent_name() -> str:
     config = load_config()
-    return config.get("agent_name", "glass")
+    return config.get("agent_name", "noddoo")
 
 
 def set_agent_name(new_name: str):
     config = load_config()
     config["agent_name"] = new_name.strip().lower()
+    save_config(config)
+
+
+def get_display_name() -> str:
+    """Return the configured display name for the GUI greeting (REQ-008/CA-04).
+
+    Acceso de configuración puro — la política de fallback (config → variable de
+    entorno del SO → sin nombre) vive en `ui/widgets/center_panel.py`, no acá.
+    """
+    config = load_config()
+    return config.get("display_name", "")
+
+
+def set_display_name(name: str):
+    config = load_config()
+    config["display_name"] = name.strip()
     save_config(config)
 
 

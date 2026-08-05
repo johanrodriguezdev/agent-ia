@@ -5,6 +5,7 @@ Cada acción es una función con nombre, descripción y categoría para que el
 planificador pueda seleccionarlas correctamente.
 """
 
+import logging
 import subprocess
 import time
 import pyautogui
@@ -12,6 +13,11 @@ import os
 import shutil
 from pathlib import Path
 from datetime import datetime
+from typing import Optional
+
+from core.security_manager import security_manager, format_details
+
+logger = logging.getLogger(__name__)
 
 
 # ─────────────────────────────────────────────
@@ -97,6 +103,29 @@ def open_browser() -> str:
         return "Navegador abierto con Google."
     except Exception as e:
         return f"No pude abrir el navegador: {e}"
+
+
+def open_spotify() -> str:
+    """Abre la aplicación de escritorio de Spotify si existe en una ruta conocida de
+    instalación; si no, abre https://open.spotify.com en el navegador por defecto
+    (REQ-008/CA-08). Sin login ni control de reproducción — mínimo viable."""
+    posibles = [
+        os.path.join(os.environ.get("APPDATA", ""), "Spotify", "Spotify.exe"),
+        r"C:\Program Files\Spotify\Spotify.exe",
+        r"C:\Program Files (x86)\Spotify\Spotify.exe",
+    ]
+    try:
+        for path in posibles:
+            if path and os.path.isfile(path):
+                subprocess.Popen([path])
+                time.sleep(1.0)
+                return "Spotify abierto."
+        import webbrowser
+        webbrowser.open("https://open.spotify.com")
+        return "Spotify no está instalado; abrí open.spotify.com en el navegador."
+    except Exception as e:
+        logger.error(f"Error al abrir Spotify: {e}")
+        return f"No pude abrir Spotify: {e}"
 
 
 # ─────────────────────────────────────────────
@@ -213,6 +242,7 @@ ACTION_REGISTRY: dict[str, dict] = {
     "open_explorer":      {"fn": open_explorer,        "desc": "Abre el Explorador de Windows.", "category": "app"},
     "open_calculator":    {"fn": open_calculator,      "desc": "Abre la Calculadora.", "category": "app"},
     "open_browser":       {"fn": open_browser,         "desc": "Abre el navegador web.", "category": "app"},
+    "open_spotify":       {"fn": open_spotify,         "desc": "Abre Spotify (app de escritorio o open.spotify.com).", "category": "app"},
     "close_window":       {"fn": close_window,         "desc": "Cierra la ventana activa.", "category": "app"},
 
     # Escritura directa (sin pyautogui)
@@ -243,3 +273,20 @@ def get_action(name: str):
 def list_action_names() -> list[str]:
     """Lista todos los nombres de acciones disponibles."""
     return list(ACTION_REGISTRY.keys())
+
+def execute_action(name: str, params: Optional[dict] = None, channel=None, user_id: str = "default") -> str:
+    """Único punto de ejecución gateado del registro: resuelve la acción por nombre,
+    exige confirmación de seguridad y solo entonces invoca la función subyacente."""
+    info = ACTION_REGISTRY.get(name)
+    if not info:
+        return f"Acción '{name}' no reconocida."
+    if not security_manager.require_confirmation(
+        name,
+        channel,
+        details=format_details(f"action_registry:{name}", params),
+        user_id=user_id,
+    ):
+        return f"⛔ Acción '{name}' no autorizada."
+    fn = info["fn"]
+    params = params or {}
+    return fn(**params) if params else fn()

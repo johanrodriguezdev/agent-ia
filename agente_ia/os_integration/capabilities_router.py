@@ -14,6 +14,7 @@ import json
 import importlib
 import os
 from nlp.parser import clean_text
+from core.security_manager import security_manager, format_details
 
 # Carga el JSON una sola vez al importar el módulo
 _JSON_PATH = os.path.join(os.path.dirname(__file__), "system_capabilities.json")
@@ -42,7 +43,7 @@ def match_capability(user_text: str):
                 return cap
     return None
 
-def execute_capability(cap: dict) -> str:
+def execute_capability(cap: dict, channel=None) -> str:
     """
     Importa dinámicamente el módulo y llama la función indicada en el JSON.
     Mezcla los params por defecto del JSON con posibles extras del contexto.
@@ -50,10 +51,16 @@ def execute_capability(cap: dict) -> str:
     modulo_name = cap.get("modulo", "")
     func_name   = cap.get("funcion", "")
     params      = cap.get("params", {})
-    
+
     if not modulo_name or not func_name:
         return "Capacidad mal configurada en system_capabilities.json."
-    
+
+    action_name = f"{modulo_name}.{func_name}"
+    if not security_manager.require_confirmation(
+        action_name, channel, details=format_details(f"capability:{action_name}", params)
+    ):
+        return f"⛔ Capacidad '{action_name}' no autorizada."
+
     try:
         modulo = importlib.import_module(modulo_name)
         func   = getattr(modulo, func_name)
@@ -66,7 +73,7 @@ def execute_capability(cap: dict) -> str:
     except Exception as e:
         return f"Error al ejecutar la capacidad '{func_name}': {e}"
 
-def try_capability(user_text: str) -> str | None:
+def try_capability(user_text: str, channel=None) -> str | None:
     """
     Función de conveniencia: intenta hacer match y ejecutar en un solo paso.
     Retorna el resultado como string, o None si no hay coincidencia.
@@ -74,5 +81,5 @@ def try_capability(user_text: str) -> str | None:
     """
     cap = match_capability(user_text)
     if cap:
-        return execute_capability(cap)
+        return execute_capability(cap, channel=channel)
     return None

@@ -64,7 +64,7 @@ def main():
         from config_manager import get_agent_name
         agent = get_agent_name().upper()
     except Exception:
-        agent = "O.R.I.O.N."
+        agent = "Noddoo"
 
     print(f"\n{'='*50}")
     print(f"  {agent} - Iniciando canales de comunicación")

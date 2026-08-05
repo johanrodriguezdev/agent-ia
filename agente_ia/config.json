@@ -1,6 +1,6 @@
 {
-    "agent_name": "O.R.I.O.N.",
-    "agent_pronunciation": "Orion",
+    "agent_name": "Noddoo",
+    "agent_pronunciation": "Nodo",
     "ai_provider": "deepseek",
     "ai_model": "deepseek-chat",
     "vision_provider": "",
