@@ -230,6 +230,30 @@ class UnifiedMemory:
         except Exception as e:
             logger.error(f"Error guardando resumen: {e}")
 
+    def get_recent(self, user_id: str = "default", limit: int = 4,
+                    category: str = "interaction") -> List[MemoryItem]:
+        """Return the `limit` most recent memories for `user_id`, ordered by recency only.
+
+        Sin filtro de query ni umbral de importancia (REQ-008/CA-09) — a diferencia de
+        `search_semantic()`/`search_keyword()`/`get_important_memories()`. Filtra por
+        `category="interaction"` por defecto para no duplicar la copia `"semantic"` que
+        `main.py` guarda del mismo turno (líneas 166-172 de `main.py`).
+        """
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                rows = conn.execute(
+                    """SELECT id, user_id, text, importance, category, timestamp, archived, source
+                       FROM memories WHERE user_id=? AND archived=0 AND category=?
+                       ORDER BY timestamp DESC LIMIT ?""",
+                    (user_id, category, limit)
+                ).fetchall()
+            return [MemoryItem(id=r[0], user_id=r[1], text=r[2], importance=r[3],
+                               category=r[4], timestamp=r[5], archived=bool(r[6]), source=r[7])
+                    for r in rows]
+        except Exception as e:
+            logger.error(f"Error obteniendo recuerdos recientes: {e}")
+            return []
+
     def get_recent_summaries(self, user_id: str, limit: int = 3) -> List[str]:
         try:
             with sqlite3.connect(DB_PATH) as conn:

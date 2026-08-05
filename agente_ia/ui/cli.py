@@ -4,6 +4,13 @@ from ui.personality import format_response
 from config_manager import get_agent_name
 
 class CLI:
+    def __init__(self, gui_active: bool = False):
+        """REQ-009/CA-06, CA-07: `gui_active=True` oculta la opción "3" del menú (la GUI
+        tiene su propio toggle de modo manos libres — evita que ambos caminos compitan
+        por `sr.Microphone()`). Default `False` conserva el comportamiento headless
+        exactamente igual al de antes de este REQ."""
+        self._gui_active = gui_active
+
     def get_input_method(self) -> str:
         agent_name = get_agent_name().upper()
         print("\n" + "="*30)
@@ -11,7 +18,8 @@ class CLI:
         print("="*30)
         print("1) Escribir comando por texto")
         print("2) Dictar comando por voz")
-        print("3) Modo manos libres (Wake Word)")
+        if not self._gui_active:
+            print("3) Modo manos libres (Wake Word)")
         print("q) Salir")
         print("="*30)
         choice = input("Selecciona una opción: ")

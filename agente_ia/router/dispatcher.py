@@ -8,9 +8,14 @@ Enruta cada intención al handler correcto.
    en lugar de mostrar el mensaje genérico de error.
 """
 
+import logging
+
 from intent.intentions import Intent
 from executor import handlers
 from executor import system_action_handlers
+from core.security_manager import security_manager, format_details, ActionDenied
+
+logger = logging.getLogger(__name__)
 
 def dispatch(intent: Intent, params: dict) -> str:
     routes = {
@@ -42,12 +47,39 @@ def dispatch(intent: Intent, params: dict) -> str:
         Intent.UNKNOWN:       handlers.handle_unknown,
     }
 
+    action_name = intent.value if hasattr(intent, "value") else str(intent)
+
+    # Gate ÚNICO para los dos caminos de ejecución (skill moderna y handler legacy).
+    # Se evalúa ANTES de elegir camino, a propósito: su decisión es la autoridad. Ninguna
+    # ruta —incluida la de excepción de abajo— puede ejecutar nada si acá se denegó, ni
+    # volver a preguntar si acá ya se confirmó.
+    if not security_manager.require_confirmation(
+        action_name,
+        params.get("channel"),
+        details=format_details(f"dispatch:{action_name}", params),
+    ):
+        raise ActionDenied(action_name, params.get("channel"), "denegado por security_manager")
+
+    skill_manager = None
     try:
-        from skills.skill_manager import skill_manager
-        if skill_manager.handles_intent(intent):
-            return skill_manager.execute(intent, params)
+        from skills.skill_manager import skill_manager as _skill_manager
+        skill_manager = _skill_manager
     except Exception as e:
-        print(f"[Dispatcher] Error ejecutando skill modular: {e}")
+        logger.error(f"subsistema de skills no disponible, se usa el handler legacy: {e}")
+
+    if skill_manager is not None:
+        try:
+            if skill_manager.handles_intent(intent):
+                return skill_manager.execute(intent, params)
+        except Exception as e:
+            # Fallback deliberado: una skill rota no debe dejar al usuario sin la función,
+            # que es la razón por la que este camino de excepción existe. Lo que NO hace es
+            # volver a pedir confirmación: la decisión del gate de arriba ya rige para esta
+            # invocación, y si hubiera denegado ya habríamos retornado.
+            logger.error(
+                f"skill de '{action_name}' falló tras pasar el gate, "
+                f"se cae al handler legacy: {e}"
+            )
 
     handler = routes.get(intent, handlers.handle_unknown)
     return handler(params)
@@ -61,7 +93,7 @@ def dispatch_as_tool(params: dict) -> str:
 
     try:
         intent, intent_params = classifier(text)
-        intent_params["channel"] = params.get("channel", "desktop")
+        intent_params["channel"] = params.get("channel")
         return dispatch(intent, intent_params)
     except Exception as e:
         return f"Error en dispatch: {e}"

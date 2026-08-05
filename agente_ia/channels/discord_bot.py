@@ -1,13 +1,13 @@
 """
 channels/discord_bot.py
-Bot de Discord para Glass.
+Bot de Discord para Noddoo.
 
 Capacidades:
   - Mensajes de texto en cualquier canal donde esté invitado
-  - Comandos slash: /glass /memoria /limpiar /ayuda
-  - Mencionar al bot (@Glass tu pregunta)
+  - Comandos slash: /noddoo /memoria /limpiar /ayuda
+  - Mencionar al bot (@Noddoo tu pregunta)
   - Mensajes de voz (archivos de audio adjuntos)
-  - Respuestas en embeds elegantes con el estilo de Glass
+  - Respuestas en embeds elegantes con el estilo de Noddoo
   - Multiservidor — cada servidor tiene su contexto
 
 Instalación:
@@ -47,9 +47,9 @@ def _get_agent_name() -> str:
     from config_manager import load_config
     try:
         cfg = load_config()
-        return cfg.get("agent_name", "glass").upper()
+        return cfg.get("agent_name", "noddoo").upper()
     except Exception:
-        return "GLASS"
+        return "NODDOO"
 
 
 def _process_message(user_id: str, user_name: str, text: str, image_path: str = None) -> str:
@@ -153,16 +153,16 @@ def run_discord_bot():
         # Responder con embed elegante
         embed = discord.Embed(
             description=result[:4096],
-            color=0x0096FF  # Azul estilo Glass
+            color=0x0096FF  # Azul estilo Noddoo
         )
         embed.set_footer(text=f"{agent} Assistant")
         await message.reply(embed=embed)
 
     # ── Comandos slash ─────────────────────────────────────────────
 
-    @bot.tree.command(name="orion", description=f"Habla con {agent}")
+    @bot.tree.command(name="noddoo", description=f"Habla con {agent}")
     @app_commands.describe(mensaje=f"Tu pregunta o comando para {agent}")
-    async def slash_glass(interaction: discord.Interaction, mensaje: str):
+    async def slash_noddoo(interaction: discord.Interaction, mensaje: str):
         await interaction.response.defer()
         result = _process_message(
             str(interaction.user.id),
@@ -197,12 +197,12 @@ def run_discord_bot():
         )
         embed.add_field(
             name="Cómo usar",
-            value=f"• Menciona al bot: `@{agent} tu pregunta`\n• Usa `/glass tu pregunta`",
+            value=f"• Menciona al bot: `@{agent} tu pregunta`\n• Usa `/noddoo tu pregunta`",
             inline=False
         )
         embed.add_field(
             name="Comandos slash",
-            value="`/orion` — hacer una pregunta\n`/limpiar` — reiniciar conversación\n`/ayuda` — este menú",
+            value="`/noddoo` — hacer una pregunta\n`/limpiar` — reiniciar conversación\n`/ayuda` — este menú",
             inline=False
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)

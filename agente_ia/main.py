@@ -5,22 +5,34 @@ logger = setup_logging()
 
 from core.orchestrator import orchestrator
 from core.proactive_engine import proactive_engine
-from core.base_agent import AgentTool
-from router.dispatcher import dispatch, dispatch_as_tool
+from core.security_manager import ChannelType
+from core.confirmation import register_confirmation_adapter
+from core.resolution import resolve
+from router.dispatcher import dispatch
 from skills.skill_manager import skill_manager
 from intent.classifier import classify_command
+from agents.skill_tools import register_dispatcher_tool, register_skill_tools
 
 orchestrator.register_legacy_dispatcher(dispatch)
 orchestrator.register_classifier(classify_command)
 
-orchestrator.register_tool(AgentTool(
-    name="dispatcher",
-    description="Ejecuta comandos directos del sistema: abrir apps, controlar volumen, hora, etc.",
-    function=dispatch_as_tool
-))
 
-for tool in skill_manager.get_agent_tools():
-    orchestrator.register_tool(tool)
+def _desktop_confirm(action_name: str, message: str) -> bool:
+    """Único adaptador de confirmación real de REQ-006 (CA-10). Reproduce exactamente la
+    UX que `security_manager.require_confirmation()` tenía hardcodeada antes de este REQ
+    (mismo prompt, misma comparación de respuesta) — ahora vive acá porque `main.py` es el
+    único punto de entrada con una consola bloqueante disponible."""
+    response = input(message)
+    return response.strip().lower() in ("sí", "si", "yes", "s")
+
+
+register_confirmation_adapter(ChannelType.DESKTOP, _desktop_confirm)
+
+# REQ-007/CA-14: migrado de AgentTool (orchestrator.register_tool) a ToolSpec
+# (agents/tool_registry.py) — el catálogo de tools ahora es consumido por
+# core/reasoning_loop.py, no por AgentOrchestrator.
+register_dispatcher_tool()
+register_skill_tools(skill_manager)
 
 proactive_engine.set_notify_callback(lambda msg: logger.info(f"[Proactivo] {msg}"))
 
@@ -31,7 +43,12 @@ class _ProactiveAssistant:
         self.tools = []
 
     def can_handle(self, task: str) -> float:
-        return 0.0 if "briefing" in task.lower() or "recordatorio" in task.lower() else 0.0
+        # REQ-006/CA-12: antes ambas ramas retornaban 0.0 (bug), así que este agente nunca
+        # se podía seleccionar por score aunque el trigger proactivo lo invocara. Ver
+        # `core/proactive_engine.py::_check_triggers()`, que hoy llama a `trigger.agent.execute()`
+        # directo sin pasar por `can_handle()` — este fix deja la clasificación correcta
+        # lista para cuando algo sí la consulte (p.ej. un futuro selector de agentes).
+        return 0.6 if ("briefing" in task.lower() or "recordatorio" in task.lower()) else 0.0
 
     def execute(self, task: str, context: dict = None) -> str:
         from core.orchestrator import orchestrator
@@ -51,8 +68,8 @@ from voice.wake_word import listen_for_wake_word
 from ui.personality import get_random_greeting
 from config_manager import get_agent_name
 
-def main(boot_mode=None):
-    ui = CLI()
+def main(boot_mode=None, gui_active=False):
+    ui = CLI(gui_active=gui_active)
     
     # Iniciar engine proactivo
     proactive_engine.start()
@@ -101,105 +118,46 @@ def main(boot_mode=None):
                 
             # === BLOQUE DE EJECUCIÓN ===
             ui.display_output(f"Comando detectado: '{command}'", read_aloud=False)
-            
-            # -1. RUTINAS DIRECTAS (antes que todo, ejecuta sin simulación)
-            try:
-                from learning.routines_engine import try_routine
-                routine_result = try_routine(command)
-                if routine_result:
-                    ui.display_output(routine_result, read_aloud=True)
-                    ui.display_output("Rutina ejecutada. ¿Algo más, Señor?", read_aloud=True)
-                    from ai.memory_manager import memory
-                    memory.store(f"{command} | {routine_result}", category="interaction")
-                    if choice == '3': continue
-                    else: break
-            except Exception as _r_err:
-                ui.display_output(f"Error en rutinas: {_r_err}", read_aloud=True)
 
-            # 0. AUTOPILOT
-            _autopilot_triggers = ["autopilot", "ejecuta tarea", "crea un", "redacta", "haz un"]
-            _cmd_lower = command.strip().lower()
-            if any(t in _cmd_lower for t in _autopilot_triggers):
-                try:
-                    from agents.task_planner import TaskPlanner
-                    from agents.task_executor import TaskExecutor
-                    planner  = TaskPlanner()
-                    executor = TaskExecutor()
-                    plan = planner.generate_plan(command)
-                    if plan:
-                        ui.display_output(f"He generado una secuencia de {len(plan)} pasos, Señor.", read_aloud=True)
-                        ui.display_output("Iniciando ejecución de protocolos...", read_aloud=True)
-                        
-                        def on_step(idx, result):
-                            ui.display_output(f"Protocolo {idx+1} completado: {result}", read_aloud=True)
-                        
-                        summary = executor.execute(plan, on_step_done=on_step)
-                        ui.display_output(f"Secuencia finalizada, Señor. {summary}", read_aloud=True)
-                        ui.display_output("¿Desea que realice algo más por usted?", read_aloud=True)
-                        
-                        from ai.memory_manager import memory
-                        memory.store(f"{command} | {summary}", category="interaction")
-                        if choice == '3': continue
-                        else: break
-                    else:
-                        ui.display_output("No he podido formular un plan complejo. Intentaré ejecutarlo como tarea simple, Señor.", read_aloud=True)
-                except Exception as _ap_err:
-                    ui.display_output(f"Señor, el Autopilot ha tenido una falla: {_ap_err}", read_aloud=True)
-            
-            # Comandos aprendidos
-            from learning.command_learning import run_custom_command
-            
-            def execute_simulated_action(action_text):
-                ui.display_output(f"Iniciando sub-proceso: '{action_text}'", read_aloud=True)
-                act_intent, act_params = classify_command(action_text)
-                act_result = dispatch(act_intent, act_params)
-                ui.display_output(act_result, read_aloud=True)
-                
-            if run_custom_command(command, execute_simulated_action):
-                ui.display_output("Rutina completada perfectamente. ¿Algo más, Señor?", read_aloud=True)
-                if choice == '3': continue
-                else: break
+            # REQ-006/CA-01, CA-03: canal real de esta captura (nunca inferido de texto
+            # libre) — voz si vino de reconocimiento de voz (choice '2'/'3'), desktop si
+            # vino de texto. El resto de la resolución vive en core/resolution.py:resolve(),
+            # el punto único de resolución que reemplaza la cascada de 6 capas que existía
+            # acá antes de este REQ (rutinas → autopilot → aprendidos → capacidades →
+            # intent/dispatch → Claude).
+            channel = ChannelType.VOICE if choice in ('2', '3') else ChannelType.DESKTOP
 
-            # Capacidades directas del sistema operativo (JSON)
-            try:
-                from os_integration.capabilities_router import try_capability
-                cap_result = try_capability(command)
-                if cap_result is not None:
-                    ui.display_output(cap_result, read_aloud=True)
-                    ui.display_output("Realizado. ¿Requiere algo más, Señor?", read_aloud=True)
-                    from ai.memory_manager import memory
-                    memory.store(f"{command} | {cap_result}", category="interaction")
-                    if choice == '3': continue
-                    else: break
-            except Exception:
-                pass
-                
-            try:
-                from ui.gui import update_gui_state
-                update_gui_state("PROCESSING")
-            except Exception:
-                logger.debug("GUI no disponible en este modo")
-                
-            intent, params = classify_command(command)
-            
+            # TEACH_COMMAND requiere un intercambio interactivo de varios turnos (pedir la
+            # frase de activación y luego las acciones) que no puede resolverse en una sola
+            # llamada síncrona a resolve() — se preclasifica solo para detectar este caso
+            # especial, igual que channels/gateway.py preclasifica para detectar
+            # TAKE_SCREENSHOT.
             from intent.intentions import Intent
-            if intent == Intent.TEACH_COMMAND:
+            _pre_intent, _pre_params = classify_command(command)
+            if _pre_intent == Intent.TEACH_COMMAND:
                 ui.display_output("Por supuesto, Señor. ¿Cuál será la frase de activación?", read_aloud=True)
                 phrase = ui.get_voice_command() if choice in ['2', '3'] else ui.get_text_command()
                 if not phrase: continue
-                
+
                 ui.display_output("Entendido. ¿Qué acciones debo ejecutar en secuencia? Júntelas con la palabra 'y'.", read_aloud=True)
                 actions_text = ui.get_voice_command() if choice in ['2', '3'] else ui.get_text_command()
                 if not actions_text: continue
-                    
+
                 from learning.command_learning import save_custom_command
                 actions_list = [a.strip() for a in actions_text.replace(" y ", ",").replace(" luego ", ",").split(",")]
                 save_custom_command(phrase, actions_list)
                 ui.display_output(f"Protocolo '{phrase}' cargado y listo para usar, Señor.", read_aloud=True)
                 if choice == '3': continue
                 else: break
-            
-            result = dispatch(intent, params)
+
+            try:
+                from ui.gui import update_gui_state
+                update_gui_state("PROCESSING")
+            except Exception:
+                logger.debug("GUI no disponible en este modo")
+
+            resolution = resolve(command, channel)
+            result = resolution.text
 
             # ✅ BUG CORREGIDO: display_output solo una vez aquí
             ui.display_output(result, read_aloud=True)
@@ -230,17 +188,20 @@ if __name__ == "__main__":
 
     if not headless:
         try:
-            from ui.gui import QApplication, JarvisGUI
+            from ui.gui import QApplication, JarvisMainWindow
             app = QApplication(sys.argv)
-            window = JarvisGUI()
-            window.show()
+            window = JarvisMainWindow()
+            window.showMaximized()
         except Exception as e:
             print(f"[GUI] No disponible, modo headless: {e}")
             headless = True
 
     def jarvis_runner():
         try:
-            main()
+            # REQ-009/CA-06, CA-07: propaga si la sesión corre con GUI activa (closure
+            # sobre `headless`, ya calculado arriba) para que `ui/cli.py` oculte la
+            # opción "3" cuando hay GUI, sin introducir ningún estado compartido nuevo.
+            main(gui_active=(not headless))
         except KeyboardInterrupt:
             print("\nDetenido por el usuario (Ctrl + C).")
         except Exception as e:

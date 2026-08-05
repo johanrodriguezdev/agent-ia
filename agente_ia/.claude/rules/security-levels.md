@@ -64,6 +64,20 @@ logger.warning(f"Acción amarilla ejecutada: {accion} | usuario: {user} | confir
 logger.critical(f"Acción roja ejecutada: {accion} | usuario: {user} | permiso_explicito: {permiso}")
 ```
 
+## REQ-005 — deny-list Rojo aplicada en código
+Desde REQ-005, las 10 categorías 🔴 Rojo de este documento (las 4 ya implementadas más las 6 sin
+implementación real: `send_email_as_user`, `post_social_media`, `elevated_system_command`,
+`install_uninstall_software`, `modify_system_env_vars`, `grant_third_party_access`) están
+registradas como `RiskLevel.RED` en `core/security_manager.py` y bloqueadas por defecto por
+`require_confirmation()`, incluso si ninguna función las implementa todavía. El sistema pasa a ser
+**fail-closed**: cualquier acción no clasificada explícitamente se bloquea (antes se permitía por
+defecto). El gate se ejecuta en el punto de entrada de cada camino de ejecución real
+(`dispatch()`, `SkillManager.execute()`, `get_agent_tools()`, `agents/action_registry.execute_action()`,
+`os_integration/capabilities_router.execute_capability()`), nunca dentro del cuerpo de la skill o
+handler, y nunca lee `params` de la invocación para decidir el canal — solo el canal real pasado
+explícitamente por el caller. Ver `workspace/adjuntos/REQ-005/` para el detalle completo (spec,
+arquitectura, auditoría de seguridad).
+
 ## Verificación en QA
 - [ ] Toda acción destructiva tiene su nivel clasificado
 - [ ] Las acciones Amarillo piden confirmación antes de ejecutar

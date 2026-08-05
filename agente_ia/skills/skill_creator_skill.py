@@ -1,16 +1,16 @@
 """
 skills/skill_creator_skill.py
 ═══════════════════════════════════════════════════════════
- SkillCreator — La habilidad máxima de O.R.I.O.N..
+ SkillCreator — La habilidad máxima de Noddoo.
  Permite CREAR, MODIFICAR, EVALUAR y OPTIMIZAR skills
  autónomamente sin intervención del usuario.
 
  Flujo completo:
    1. Usuario pide crear/modificar una skill
-   2. O.R.I.O.N. genera el código Python usando el LLM
+   2. Noddoo genera el código Python usando el LLM
    3. Se valida la sintaxis antes de guardar
    4. Se guarda en skills/ y se recarga en caliente
-   5. O.R.I.O.N. confirma que la nueva habilidad está activa
+   5. Noddoo confirma que la nueva habilidad está activa
 ═══════════════════════════════════════════════════════════
 """
 
@@ -21,7 +21,6 @@ import sys
 import logging
 from typing import Dict, List, Tuple, Any
 from skills.base_skill import BaseSkill
-from core.security_manager import security_manager, ChannelType
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +34,7 @@ from skills.base_skill import BaseSkill
 class {class_name}(BaseSkill):
     """
     {description}
-    Creada automáticamente por SkillCreator de O.R.I.O.N..
+    Creada automáticamente por SkillCreator de Noddoo.
     """
 
     @property
@@ -57,7 +56,7 @@ class {class_name}(BaseSkill):
         return {{}}
 
     def execute(self, intent: str, params: Dict[str, Any]) -> str:
-        # === CÓDIGO GENERADO POR O.R.I.O.N. ===
+        # === CÓDIGO GENERADO POR NODDOO ===
         {execute_body}
 '''
 
@@ -71,7 +70,7 @@ class SkillCreatorSkill(BaseSkill):
 
     @property
     def description(self) -> str:
-        return "Crea, modifica, evalúa y optimiza nuevas habilidades de O.R.I.O.N. de forma autónoma."
+        return "Crea, modifica, evalúa y optimiza nuevas habilidades de Noddoo de forma autónoma."
 
     def get_intents(self) -> List[str]:
         return ["CREATE_SKILL", "MODIFY_SKILL", "LIST_SKILLS", "DELETE_SKILL"]
@@ -100,18 +99,20 @@ class SkillCreatorSkill(BaseSkill):
         return {"raw_text": text, "intent": intent}
 
     def execute(self, intent: str, params: Dict[str, Any]) -> str:
-        channel = params.get("channel", ChannelType.DESKTOP)
+        """Crear, modificar o eliminar una skill según el intent recibido.
+
+        INVARIANTE DE SEGURIDAD (REQ-005): este método NO se auto-protege. Asume estar
+        gateado por el punto central (`security_manager.require_confirmation()`), que
+        `skills/skill_manager.py:execute()` y `_make_gated_tool_fn()` ejecutan con los
+        intents `CREATE_SKILL`/`MODIFY_SKILL`/`DELETE_SKILL` (YELLOW) antes de
+        invocarlo. No llamarlo directamente sin pasar por `skill_manager`: quedaría sin
+        confirmación. (`LIST_SKILLS` es GREEN y no requiere confirmación.)
+        """
         if intent == "CREATE_SKILL":
-            if not security_manager.require_confirmation("create_skill", channel, "crear una nueva skill automáticamente"):
-                return "Creación de skill cancelada, Señor."
             return self._create_skill(params.get("raw_text", ""))
         elif intent == "MODIFY_SKILL":
-            if not security_manager.require_confirmation("modify_skill", channel, "modificar una skill existente"):
-                return "Modificación de skill cancelada, Señor."
             return self._modify_skill(params.get("raw_text", ""))
         elif intent == "DELETE_SKILL":
-            if not security_manager.require_confirmation("delete_skill", channel, "eliminar una skill permanentemente"):
-                return "Eliminación de skill cancelada, Señor."
             return self._delete_skill(params.get("raw_text", ""))
         return "No entendí qué operación realizar sobre las skills, Señor."
 
@@ -123,7 +124,7 @@ class SkillCreatorSkill(BaseSkill):
         try:
             from ai.llm_provider import generate_response
 
-            system_prompt = f"""Eres un experto en Python y en la arquitectura de O.R.I.O.N..
+            system_prompt = f"""Eres un experto en Python y en la arquitectura de Noddoo.
 Tu tarea es generar código Python COMPLETO y FUNCIONAL para una nueva skill.
 
 REGLAS ESTRICTAS:
@@ -202,7 +203,7 @@ El código debe ser completamente funcional y no tener errores de sintaxis.
         already_existed = os.path.exists(skill_path)
 
         with open(skill_path, 'w', encoding='utf-8') as f:
-            f.write(f'# Skill generada automáticamente por SkillCreator de O.R.I.O.N.\n')
+            f.write(f'# Skill generada automáticamente por SkillCreator de Noddoo\n')
             f.write(f'# Petición original: {original_request[:100]}\n')
             f.write(f'# ─────────────────────────────────────────────────────────\n\n')
             f.write(code)
@@ -249,7 +250,7 @@ El código debe ser completamente funcional y no tener errores de sintaxis.
 
         from ai.llm_provider import generate_response
 
-        system_prompt = """Eres un experto Python. El usuario quiere modificar una skill existente de O.R.I.O.N..
+        system_prompt = """Eres un experto Python. El usuario quiere modificar una skill existente de Noddoo.
 Recibirás el código actual y las instrucciones de modificación.
 Responde ÚNICAMENTE con el código Python COMPLETO modificado entre triple backticks.
 Mantén la estructura BaseSkill intacta. No expliques nada."""
@@ -275,7 +276,7 @@ Mantén la estructura BaseSkill intacta. No expliques nada."""
             if not skills:
                 return "Señor, actualmente no hay skills modulares cargadas."
 
-            lines = ["📦 **Skills instaladas en O.R.I.O.N.:**\n"]
+            lines = ["📦 **Skills instaladas en Noddoo:**\n"]
             for skill in skills:
                 intents = skill.get_intents()
                 lines.append(

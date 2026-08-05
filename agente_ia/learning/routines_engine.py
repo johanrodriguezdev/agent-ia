@@ -1,6 +1,6 @@
 import json
 import os
-from agents.action_registry import ACTION_REGISTRY
+from agents.action_registry import ACTION_REGISTRY, execute_action
 
 ROUTINES_FILE = os.path.join(os.path.dirname(__file__), "routines.json")
 
@@ -28,7 +28,7 @@ def match_routine(user_text: str) -> dict | None:
                 return {"name": name, **routine}
     return None
 
-def execute_routine_actions(actions: list[dict]) -> str:
+def execute_routine_actions(actions: list[dict], channel=None) -> str:
     results = []
     for step in actions:
         action_name = step.get("action", "")
@@ -38,19 +38,18 @@ def execute_routine_actions(actions: list[dict]) -> str:
             results.append(f"  ❌ '{action_name}': acción no registrada")
             continue
         try:
-            fn = info["fn"]
-            output = fn(**params) if params else fn()
+            output = execute_action(action_name, params, channel=channel)
             results.append(f"  ✅ {output}")
         except Exception as e:
             results.append(f"  ❌ '{action_name}': {e}")
     return "\n".join(results)
 
-def try_routine(user_text: str) -> str | None:
+def try_routine(user_text: str, channel=None) -> str | None:
     match = match_routine(user_text)
     if not match:
         return None
     actions = match.get("actions", [])
     if not actions:
         return None
-    details = execute_routine_actions(actions)
+    details = execute_routine_actions(actions, channel=channel)
     return f"Rutina '{match['name']}' ejecutada:\n{details}"

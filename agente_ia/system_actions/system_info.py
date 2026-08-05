@@ -5,11 +5,14 @@ Usa psutil, platform y subprocess para datos 100% reales.
 Sin emojis para compatibilidad con terminales cp1252 de Windows.
 """
 
+import logging
 import platform
 import subprocess
 import os
 from pathlib import Path
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 def _has_psutil() -> bool:
@@ -154,3 +157,65 @@ def get_environment_variable(var: str) -> str:
 
 def get_windows_username() -> str:
     return f"Usuario actual de Windows: {os.environ.get('USERNAME', 'Desconocido')}"
+
+
+# ─────────────────────────────────────────────
+#  Variantes numéricas (REQ-008/CA-06) — consumo directo por widgets de GUI,
+#  no strings formateados para voz/chat. No bloqueantes: usadas dentro de un
+#  QTimer del hilo de la GUI (ver ui/widgets/system_status_card.py).
+# ─────────────────────────────────────────────
+
+def get_cpu_percent() -> float:
+    """Return current CPU usage percentage. 0.0 if psutil is unavailable or fails."""
+    if not _has_psutil():
+        return 0.0
+    import psutil
+    try:
+        # interval=None: lectura no bloqueante (compara contra la última llamada).
+        return float(psutil.cpu_percent(interval=None))
+    except Exception as e:
+        logger.error(f"Error obteniendo porcentaje de CPU: {e}")
+        return 0.0
+
+
+def get_ram_percent() -> float:
+    """Return current RAM usage percentage. 0.0 if psutil is unavailable or fails."""
+    if not _has_psutil():
+        return 0.0
+    import psutil
+    try:
+        return float(psutil.virtual_memory().percent)
+    except Exception as e:
+        logger.error(f"Error obteniendo porcentaje de RAM: {e}")
+        return 0.0
+
+
+def get_disk_percent(drive: str = "C:\\") -> float:
+    """Return disk usage percentage for `drive`. 0.0 if the lookup fails."""
+    import shutil
+    try:
+        usage = shutil.disk_usage(drive)
+        if not usage.total:
+            return 0.0
+        return float((usage.used / usage.total) * 100)
+    except Exception as e:
+        logger.error(f"Error obteniendo porcentaje de disco '{drive}': {e}")
+        return 0.0
+
+
+def get_network_io_counters() -> tuple[int, int]:
+    """Return raw cumulative (bytes_sent, bytes_recv) counters. (0, 0) on failure.
+
+    Devuelve el contador crudo acumulado, no un porcentaje ni un delta — el
+    cálculo de tasa entre dos lecturas vive en el widget consumidor, para que
+    esta función siga siendo pura y testeable sin estado oculto entre llamadas.
+    """
+    if not _has_psutil():
+        return (0, 0)
+    import psutil
+    try:
+        counters = psutil.net_io_counters()
+        return (int(counters.bytes_sent), int(counters.bytes_recv))
+    except Exception as e:
+        logger.error(f"Error obteniendo contadores de red: {e}")
+        return (0, 0)

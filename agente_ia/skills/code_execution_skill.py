@@ -6,7 +6,6 @@ import logging
 from typing import Dict, List, Tuple, Any
 from skills.base_skill import BaseSkill
 from ai.llm_provider import generate_response
-from core.security_manager import security_manager, ChannelType
 
 logger = logging.getLogger(__name__)
 
@@ -45,13 +44,17 @@ class CodeExecutionSkill(BaseSkill):
         return params
 
     def execute(self, intent: str, params: Dict[str, Any]) -> str:
+        """Generar y ejecutar un script Python para resolver la tarea pedida.
+
+        INVARIANTE DE SEGURIDAD (REQ-005): este método NO se auto-protege. Asume estar
+        gateado por el punto central (`security_manager.require_confirmation()`), que
+        `skills/skill_manager.py:execute()` y `_make_gated_tool_fn()` ejecutan con el
+        intent `EXECUTE_CODE` (YELLOW) antes de invocarlo. No llamarlo directamente
+        sin pasar por `skill_manager`: quedaría sin confirmación.
+        """
         task = params.get("task", "")
         if not task:
             return "Señor, por favor sea más específico con lo que desea que programe y ejecute."
-
-        channel = params.get("channel", ChannelType.DESKTOP)
-        if not security_manager.require_confirmation("execute_code", channel, f"ejecutar código IA para: {task[:80]}"):
-            return "Ejecución de código cancelada, Señor."
 
         system_prompt = (
             "Eres el núcleo lógico de un agente de IA autónomo (Estilo OpenClaw/Devin). "

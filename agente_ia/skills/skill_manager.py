@@ -1,9 +1,10 @@
 import os
 import importlib.util
 import inspect
-from typing import Dict, List, Tuple
+from typing import Callable, Dict, List, Tuple
 from skills.base_skill import BaseSkill
 from core.base_agent import AgentTool
+from core.security_manager import security_manager, format_details
 
 
 class SkillManager:
@@ -61,6 +62,17 @@ class SkillManager:
         return intent in self._intent_to_skill
 
     def execute(self, intent: str, params: dict) -> str:
+        """Ejecutar la skill registrada para `intent`.
+
+        INVARIANTE DE SEGURIDAD (REQ-005): este método NO se auto-protege. Asume estar
+        gateado por el punto central (`security_manager.require_confirmation()`), que se
+        evalúa una sola vez en `router/dispatcher.py:dispatch()` —su único llamador— antes
+        de elegir entre el camino de skill y el de handler legacy. El gate se movió allá
+        para que la decisión sea la misma para ambos caminos y no se pida confirmación dos
+        veces cuando una skill falla y se cae al fallback. No invocar este método
+        directamente desde código nuevo sin pasar por `dispatch()`: quedaría sin
+        confirmación.
+        """
         skill = self._intent_to_skill.get(intent)
         if skill:
             return skill.execute(intent, params)
@@ -79,10 +91,23 @@ class SkillManager:
                 tool = AgentTool(
                     name=f"skill_{intent.lower()}",
                     description=f"{skill.name}: {skill.description}",
-                    function=lambda params, s=skill, i=intent: s.execute(i, params)
+                    function=_make_gated_tool_fn(skill, intent)
                 )
                 tools.append(tool)
         return tools
+
+
+def _make_gated_tool_fn(skill: BaseSkill, intent: str) -> Callable[[dict], str]:
+    def _run(params: dict) -> str:
+        channel = params.get("channel") or (params.get("context") or {}).get("channel")
+        if not security_manager.require_confirmation(
+            intent,
+            channel,
+            details=format_details(f"agent_tool:{skill.name}:{intent}", params),
+        ):
+            return "⛔ Acción no autorizada."
+        return skill.execute(intent, params)
+    return _run
 
 
 skill_manager = SkillManager()

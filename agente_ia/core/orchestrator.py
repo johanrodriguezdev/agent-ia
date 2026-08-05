@@ -1,7 +1,8 @@
 import logging
+import re
 import time
 from typing import Dict, List, Optional
-from core.base_agent import BaseAgent, AgentTool, DynamicAgentFactory
+from core.base_agent import BaseAgent, DynamicAgentFactory
 from core.agent_context import agent_context_manager
 
 logger = logging.getLogger(__name__)
@@ -9,18 +10,18 @@ logger = logging.getLogger(__name__)
 MAX_CHAIN_DEPTH = 5
 AGENT_TIMEOUT = 30
 
+_DECOMPOSE_TRIGGERS = [
+    "y", "luego", "después", "además", "también",
+    "al mismo tiempo", "mientras", "and", "then",
+]
+
 
 class AgentOrchestrator:
     def __init__(self):
         self._factory = DynamicAgentFactory()
-        self._tools: List[AgentTool] = []
         self._legacy_dispatcher = None
         self._classifier = None
         self._claude_brain = None
-
-    def register_tool(self, tool: AgentTool):
-        self._tools.append(tool)
-        logger.info(f"Tool registrada en orquestador: {tool.name}")
 
     def register_legacy_dispatcher(self, dispatch_func):
         self._legacy_dispatcher = dispatch_func
@@ -33,20 +34,24 @@ class AgentOrchestrator:
         self._claude_brain = claude_func
 
     def process_task(self, text: str, channel: str = "desktop", user_id: str = "default") -> str:
+        """REQ-006/CA-01: delega al punto único de resolución (`core/resolution.py`) en vez
+        de la cascada `_try_quick_dispatch` → `_process_with_agents` que tenía antes de este
+        REQ. `_try_quick_dispatch`, `_process_with_agents` y el resto de métodos de esta
+        clase se conservan sin cambios: `_try_quick_dispatch` sigue siendo invocado
+        directamente por callers que necesitan clasificar/despachar con un
+        classifier/dispatcher inyectado sin pasar por `resolve()` (ver
+        `tests/test_security_manager.py::test_extract_params_channel_key_ignored_by_gate`),
+        y `_process_with_agents`/`_execute_single_agent`/`_execute_agent_chain` quedan
+        disponibles para uso directo por quien los necesite explícitamente."""
         start = time.time()
         logger.info(f"Orquestador procesando tarea (canal={channel}, user={user_id}): {text[:80]}")
 
-        quick_result = self._try_quick_dispatch(text, channel, user_id)
-        if quick_result is not None:
-            elapsed = time.time() - start
-            logger.info(f"Tarea resuelta via dispatch rápido en {elapsed:.2f}s")
-            return quick_result
-
-        result = self._process_with_agents(text, channel, user_id)
+        from core.resolution import resolve
+        result = resolve(text, channel, user_id, claude_fn=self.fallback_to_claude)
 
         elapsed = time.time() - start
-        logger.info(f"Tarea completada en {elapsed:.2f}s via agentes")
-        return result
+        logger.info(f"Tarea resuelta via '{result.matched_by}' en {elapsed:.2f}s")
+        return result.text
 
     def _try_quick_dispatch(self, text: str, channel: str, user_id: str) -> Optional[str]:
         if not self._classifier or not self._legacy_dispatcher:
@@ -85,20 +90,20 @@ class AgentOrchestrator:
         return self._execute_agent_chain(subtasks, channel, user_id)
 
     def _decompose(self, text: str) -> List[str]:
-        simple_triggers = [
-            "y", "luego", "después", "además", "también",
-            "al mismo tiempo", "mientras", "and", "then",
-        ]
-        for trigger in simple_triggers:
-            if trigger in text.lower():
-                parts = [p.strip() for p in text.split(trigger) if p.strip()]
-                if len(parts) >= 2:
+        """CA-12: fix del bug de substring (p.ej. "y" matcheando dentro de "hoy") — usa
+        `\\b` word boundary vía regex y un safety net (`len(p) > 3`) para no partir en
+        fragmentos vacíos o triviales."""
+        for trigger in _DECOMPOSE_TRIGGERS:
+            pattern = r'\b' + re.escape(trigger) + r'\b'
+            if re.search(pattern, text, re.IGNORECASE):
+                parts = [p.strip() for p in re.split(pattern, text, flags=re.IGNORECASE) if p.strip()]
+                if len(parts) >= 2 and all(len(p) > 3 for p in parts):
                     logger.info(f"Tarea descompuesta en {len(parts)} sub-tareas vía '{trigger}'")
                     return parts
         return [text]
 
     def _execute_single_agent(self, task: str, channel: str, user_id: str) -> str:
-        agent = self._factory.create_agent(task, self._tools)
+        agent = self._factory.create_agent(task, [])
         agent_context_manager.update_context(agent.name, user_id, {
             "role": "user", "content": task
         })
@@ -124,7 +129,7 @@ class AgentOrchestrator:
             if previous_result:
                 enriched_task = f"{subtask}\n\nResultado previo: {previous_result}"
 
-            agent = self._factory.create_agent(enriched_task, self._tools)
+            agent = self._factory.create_agent(enriched_task, [])
             context_data = {
                 "channel": channel,
                 "user_id": user_id,

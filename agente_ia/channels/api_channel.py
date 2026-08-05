@@ -36,7 +36,7 @@ class _APIHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         if parsed.path == "/health":
-            self._send_json({"status": "ok", "service": "O.R.I.O.N. API"})
+            self._send_json({"status": "ok", "service": "Noddoo API"})
         elif parsed.path == "/tasks":
             from tasks.task_manager import task_manager
             user_id = parse_qs(parsed.query).get("user_id", ["default"])[0]

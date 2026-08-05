@@ -1,195 +1,201 @@
 """
 gui.py
-Interfaz grafica futurista inspirada en JARVIS (Iron Man).
-Muestra un nucleo energetico animado que reacciona a los estados del sistema.
-Mejorado con HUD futurista, rejillas y efectos de brillo (glow).
+Interfaz gráfica de escritorio "JARVIS" (REQ-008): ventana maximizada con barra de
+título nativa del SO, navegación lateral, saludo dinámico, visualizador de voz central
+y panel derecho con estado del sistema / accesos rápidos / actividad reciente / clima.
+
+Reemplaza el HUD flotante `JarvisGUI(QWidget)` anterior por `JarvisMainWindow(QMainWindow)`.
+Mantiene `GLOBAL_STATE`/`update_gui_state()` a nivel de módulo, sin cambios de firma ni de
+import path — `main.py:154` sigue haciendo `from ui.gui import update_gui_state` igual que
+antes (ver arquitectura-008.md, "Por qué mantener el polling de 100 ms").
 """
 
+import logging
 import sys
-import math
-from PyQt6.QtWidgets import QApplication, QWidget, QSystemTrayIcon, QMenu
-from PyQt6.QtCore import Qt, QTimer, QPointF, QRectF
-from PyQt6.QtGui import QPainter, QColor, QPen, QRadialGradient, QFont, QPaintEvent, QPolygonF, QBrush, QIcon, QPixmap
+import threading
+
+from PyQt6.QtCore import Qt, QRunnable, QThreadPool, QTimer
+from PyQt6.QtGui import QColor, QIcon, QPixmap
+from PyQt6.QtWidgets import (
+    QApplication, QHBoxLayout, QMainWindow, QMenu, QSystemTrayIcon, QVBoxLayout, QWidget,
+)
+
 from config_manager import get_agent_name
+from core.security_manager import ChannelType
+from ui.gui_workers import run_async
+from ui.widgets.center_panel import CenterPanel
+from ui.widgets.header_bar import HeaderBar
+from ui.widgets.right_panel import RightPanel
+from ui.widgets.sidebar import Sidebar
+
+logger = logging.getLogger(__name__)
 
 # Variable Global Hilo-Segura compartida con la logica background
 GLOBAL_STATE = "IDLE"
+
+# REQ-009: canal de estado del modo manos libres (wake word), independiente de
+# GLOBAL_STATE — nunca se pisan ni se confunden (CA-02). Valores: "INACTIVE" /
+# "LISTENING_WAKE" / "AWAKE".
+WAKE_STATE = "INACTIVE"
+
 
 def update_gui_state(new_state: str):
     global GLOBAL_STATE
     GLOBAL_STATE = new_state
 
-class JarvisGUI(QWidget):
+
+def update_wake_state(new_state: str):
+    global WAKE_STATE
+    WAKE_STATE = new_state
+
+
+class WakeWordWorker(QRunnable):
+    """REQ-009/CA-03, CA-05, CA-09, CA-10 — corre `listen_for_wake_word()` (bloqueante) en
+    un hilo de `QThreadPool`, en loop hasta parada cooperativa o excepción.
+
+    `self.stop_event` es un `threading.Event` seguro entre hilos: `JarvisMainWindow`
+    lo setea desde el hilo principal para pedir la parada (best-effort, ~6-7s de
+    latencia); este worker lo revisa indirectamente vía `listen_for_wake_word()`, que
+    retorna `None` cuando fue señalado.
+    """
+
     def __init__(self):
         super().__init__()
-        self.current_state = "IDLE"
-        self.animation_angle = 0.0
-        self.pulse_radius = 0.0
-        self.pulse_direction = 1
-        self.scan_line_y = 0
-        self.old_pos = None
-        self.init_ui()
+        self.stop_event = threading.Event()
 
-    def init_ui(self):
-        agent_name = get_agent_name().upper()
-        self.setWindowTitle(f"{agent_name} Core HUD")
-        self.setFixedSize(400, 400)
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+    def run(self) -> None:
+        from voice.wake_word import listen_for_wake_word
 
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self.animate)
-        self.timer.start(33)
+        try:
+            while not self.stop_event.is_set():
+                update_wake_state("LISTENING_WAKE")
+                result = listen_for_wake_word(
+                    stop_event=self.stop_event, wake_state_callback=update_wake_state
+                )
+                if result is None:
+                    # Parada cooperativa (stop_event) o KeyboardInterrupt (False también
+                    # sale del loop para no dejar el toggle "trabado" en ON).
+                    break
+                if result is False:
+                    break
+        except Exception as e:
+            logger.error(f"Error en WakeWordWorker (listen_for_wake_word): {e}")
+        finally:
+            update_wake_state("INACTIVE")
 
-        self.state_poll = QTimer(self)
-        self.state_poll.timeout.connect(self.poll_state)
-        self.state_poll.start(100)
 
-        self._setup_tray_icon(agent_name)
+class JarvisMainWindow(QMainWindow):
+    """Ventana principal "JARVIS". Barra de título nativa (sin `FramelessWindowHint`),
+    abierta con `showMaximized()` desde `main.py` (CA-01)."""
 
-    def poll_state(self):
-        global GLOBAL_STATE
-        if self.current_state != GLOBAL_STATE:
-            self.current_state = GLOBAL_STATE
-            self.pulse_radius = 0.0
-            self.update()
+    def __init__(self):
+        super().__init__()
+        self._current_state = "IDLE"
+        self._current_wake_state = "INACTIVE"
+        self._wake_worker: WakeWordWorker | None = None
+        self._agent_name = get_agent_name().upper()
+        self._init_ui()
 
-    def animate(self):
-        # Velocidad de rotacion segun estado
-        rot_speed = 2
-        if self.current_state == "PROCESSING": rot_speed = 10
-        elif self.current_state == "LISTENING": rot_speed = 5
-        elif self.current_state == "RESPONDING": rot_speed = 4
-            
-        self.animation_angle += rot_speed
-        if self.animation_angle >= 360: self.animation_angle = 0
+    def _init_ui(self) -> None:
+        self.setWindowTitle(f"{self._agent_name} — Panel de control")
+        self.setMinimumSize(1024, 640)
 
-        # Pulsacion del nucleo
-        pulse_speed = 0.8
-        max_pulse = 12
-        if self.current_state == "LISTENING":
-            pulse_speed = 2.0
-            max_pulse = 25
-        elif self.current_state == "PROCESSING":
-            pulse_speed = 3.0
-            max_pulse = 15
-            
-        self.pulse_radius += pulse_speed * self.pulse_direction
-        if self.pulse_radius > max_pulse: self.pulse_direction = -1
-        elif self.pulse_radius < 0: self.pulse_direction = 1
+        central = QWidget()
+        self.setCentralWidget(central)
 
-        # Linea de escaneo HUD
-        self.scan_line_y += 5
-        if self.scan_line_y > self.height(): self.scan_line_y = 0
+        root_layout = QHBoxLayout(central)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
 
-        self.update() 
+        self.sidebar = Sidebar()
+        # "Inicio" es la única vista existente en este REQ; su selección no requiere
+        # ninguna acción porque ya es la vista mostrada (los otros 6 ítems están
+        # deshabilitados — ver ui/widgets/sidebar.py).
+        root_layout.addWidget(self.sidebar)
 
-    def paintEvent(self, event: QPaintEvent):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        center_column = QVBoxLayout()
+        center_column.setContentsMargins(0, 0, 0, 0)
+        center_column.setSpacing(0)
 
-        center = QPointF(self.width() / 2, self.height() / 2)
-        base_radius = 90
+        self.header_bar = HeaderBar()
+        center_column.addWidget(self.header_bar)
 
-        # Colores segun estado
-        colors = {
-            "IDLE":       {"core": (0, 100, 255), "glow": (0, 50, 200, 60),  "ring": (0, 150, 255, 180)},
-            "LISTENING":  {"core": (0, 255, 200), "glow": (0, 200, 255, 100), "ring": (255, 255, 255, 220)},
-            "PROCESSING": {"core": (200, 0, 255), "glow": (150, 0, 255, 120), "ring": (255, 100, 255, 240)},
-            "RESPONDING": {"core": (50, 150, 255), "glow": (100, 100, 255, 150), "ring": (200, 200, 255, 255)}
-        }
-        
-        cfg = colors.get(self.current_state, colors["IDLE"])
-        core_c = QColor(*cfg["core"])
-        glow_c = QColor(*cfg["glow"])
-        ring_c = QColor(*cfg["ring"])
+        self.center_panel = CenterPanel()
+        self.center_panel.command_submitted.connect(self._handle_command)
+        self.center_panel.hands_free_toggled.connect(self._on_hands_free_toggled)
+        center_column.addWidget(self.center_panel, 1)
 
-        # 1. Dibujar Rejilla Hexagonal de fondo (Sutil)
-        self.draw_hex_grid(painter, ring_c)
+        root_layout.addLayout(center_column, 1)
 
-        # 2. Dibujar Glow Circular de fondo
-        actual_r = base_radius + self.pulse_radius
-        grad = QRadialGradient(center, actual_r * 1.5)
-        grad.setColorAt(0, glow_c)
-        grad.setColorAt(0.7, QColor(0, 0, 0, 0))
-        painter.setBrush(grad)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(center, actual_r * 1.5, actual_r * 1.5)
+        self.right_panel = RightPanel()
+        root_layout.addWidget(self.right_panel)
 
-        # 3. Dibujar Anillos Externos HUD
-        self.draw_hud_rings(painter, center, base_radius, ring_c)
+        self.setStyleSheet("QMainWindow { background-color: #070b14; }")
 
-        # 4. Dibujar Nucleo de Energia
-        painter.setBrush(core_c)
-        painter.setPen(QPen(ring_c, 2))
-        painter.drawEllipse(center, 30, 30)
-        
-        # Brillo interno del nucleo
-        inner_grad = QRadialGradient(center, 30)
-        inner_grad.setColorAt(0, Qt.GlobalColor.white)
-        inner_grad.setColorAt(0.5, core_c)
-        inner_grad.setColorAt(1, QColor(0,0,0,0))
-        painter.setBrush(inner_grad)
-        painter.drawEllipse(center, 25, 25)
+        self._state_poll = QTimer(self)
+        self._state_poll.timeout.connect(self._poll_state)
+        self._state_poll.start(100)
 
-        # 5. Linea de escaneo vertical
-        painter.setPen(QPen(QColor(ring_c.red(), ring_c.green(), ring_c.blue(), 40), 1))
-        painter.drawLine(0, self.scan_line_y, self.width(), self.scan_line_y)
+        self._setup_tray_icon()
 
-        # 6. Texto de Estado
-        painter.setFont(QFont("Segoe UI Light", 14, QFont.Weight.Bold))
-        painter.setPen(ring_c)
-        painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignBottom, f"SYSTEM: {self.current_state}")
+    def _poll_state(self) -> None:
+        global GLOBAL_STATE, WAKE_STATE
+        if self._current_state != GLOBAL_STATE:
+            self._current_state = GLOBAL_STATE
+            self.center_panel.set_state(self._current_state)
+            self.header_bar.set_state(self._current_state)
 
-    def draw_hud_rings(self, painter, center, radius, color):
-        # Anillo de Rotacion Principal
-        pen = QPen(color, 3)
-        painter.setPen(pen)
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        
-        # Arcos segmentados
-        for i in range(4):
-            start = int(self.animation_angle + (i * 90)) * 16
-            painter.drawArc(int(center.x() - radius), int(center.y() - radius), 
-                            int(radius*2), int(radius*2), start, 45*16)
-            
-        # Anillo Fino de coordenadas
-        pen.setWidth(1)
-        pen.setColor(QColor(color.red(), color.green(), color.blue(), 80))
-        painter.setPen(pen)
-        painter.drawEllipse(center, radius + 15, radius + 15)
-        
-        # Marcas de HUD
-        for i in range(12):
-            angle = math.radians(i * 30 + self.animation_angle * 0.5)
-            p1 = center + QPointF(math.cos(angle)*(radius+15), math.sin(angle)*(radius+15))
-            p2 = center + QPointF(math.cos(angle)*(radius+25), math.sin(angle)*(radius+25))
-            painter.drawLine(p1, p2)
+        if self._current_wake_state != WAKE_STATE:
+            self._current_wake_state = WAKE_STATE
+            self.center_panel.set_wake_state(self._current_wake_state)
+            self.header_bar.set_wake_state(self._current_wake_state)
+            if self._current_wake_state == "INACTIVE":
+                # REQ-009: el worker (si lo había) ya terminó su ciclo — liberar la
+                # referencia para permitir un nuevo ON (ver mitigación de doble clic).
+                self._wake_worker = None
 
-    def draw_hex_grid(self, painter, color):
-        pen = QPen(QColor(color.red(), color.green(), color.blue(), 20), 1)
-        painter.setPen(pen)
-        size = 20
-        h = math.sqrt(3) * size
-        for x in range(0, self.width() + size, int(size * 1.5)):
-            for y in range(0, self.height() + int(h), int(h)):
-                offset = (h / 2) if (x // (size * 1.5)) % 2 else 0
-                self.draw_hexagon(painter, QPointF(x, y + offset), size)
+    def _on_hands_free_toggled(self, checked: bool) -> None:
+        """REQ-009/CA-03, CA-05 — enciende/apaga el modo manos libres desde la GUI."""
+        if checked:
+            if self._wake_worker is not None:
+                # Ya hay un worker activo (incluso deteniéndose) — ignorar el clic para
+                # evitar dos WakeWordWorker compitiendo por sr.Microphone() (caso borde
+                # de doble clic de SPEC-009).
+                return
+            self._wake_worker = WakeWordWorker()
+            QThreadPool.globalInstance().start(self._wake_worker)
+        else:
+            self._stop_wake_word_worker()
 
-    def draw_hexagon(self, painter, center, size):
-        poly = QPolygonF()
-        for i in range(6):
-            angle = math.radians(60 * i)
-            poly.append(center + QPointF(size * math.cos(angle), size * math.sin(angle)))
-        painter.drawPolygon(poly)
+    def _stop_wake_word_worker(self) -> None:
+        """REQ-009/CA-05, CA-09 — pide parada cooperativa (best-effort) del worker activo."""
+        if self._wake_worker is not None:
+            self._wake_worker.stop_event.set()
 
-    # Mouse events para mover la ventana
-    def _setup_tray_icon(self, agent_name: str):
+    def _handle_command(self, text: str) -> None:
+        """CA-12: la barra de comando reutiliza `core/resolution.py:resolve()` — nunca se
+        llama directo desde el hilo de la GUI, siempre vía `run_async()` (puede implicar
+        red/Claude)."""
+        from core.resolution import resolve
+
+        run_async(resolve, self._on_command_done, self._on_command_error, text, ChannelType.DESKTOP,
+                  user_id="default")
+
+    def _on_command_done(self, resolution) -> None:
+        result_text = resolution.text
+        self.center_panel.show_response(result_text)
+        from ai.memory_manager import memory
+        memory.store(f"{resolution.matched_by} | {result_text}", category="interaction")
+
+    def _on_command_error(self, message: str) -> None:
+        self.center_panel.show_response(f"Error: {message}")
+
+    def _setup_tray_icon(self) -> None:
         self.tray_icon = QSystemTrayIcon(self)
         pixmap = QPixmap(16, 16)
         pixmap.fill(QColor(0, 100, 255))
         self.tray_icon.setIcon(QIcon(pixmap))
-        self.tray_icon.setToolTip(f"{agent_name} — HUD")
+        self.tray_icon.setToolTip(f"{self._agent_name} — Panel de control")
 
         menu = QMenu()
         show_action = menu.addAction("Mostrar/Ocultar")
@@ -200,38 +206,33 @@ class JarvisGUI(QWidget):
         self.tray_icon.activated.connect(self._on_tray_activated)
         self.tray_icon.show()
 
-    def _toggle_visible(self):
+        # REQ-009/CA-09: cierre real del proceso (menú de bandeja "Salir") pide la parada
+        # cooperativa del worker de wake word, si estaba activo. Best-effort, no bloquea
+        # el quit() (ver arquitectura-009.md, "Limpieza del worker... no en closeEvent").
+        QApplication.instance().aboutToQuit.connect(self._stop_wake_word_worker)
+
+    def _toggle_visible(self) -> None:
         self.setVisible(not self.isVisible())
 
-    def _on_tray_activated(self, reason):
+    def _on_tray_activated(self, reason) -> None:
         if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
             self._toggle_visible()
 
-    def closeEvent(self, event):
+    def closeEvent(self, event) -> None:
+        """CA-13: portado sin cambios de comportamiento respecto al `JarvisGUI` anterior —
+        cerrar minimiza a la bandeja en vez de terminar el proceso."""
         event.ignore()
         self.hide()
         self.tray_icon.showMessage(
-            "O.R.I.O.N.",
+            "Noddoo",
             "Continuo ejecutándome en segundo plano.",
             QSystemTrayIcon.MessageIcon.Information,
-            2000
+            2000,
         )
 
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.old_pos = event.globalPosition().toPoint()
-
-    def mouseMoveEvent(self, event):
-        if self.old_pos is not None:
-            delta = event.globalPosition().toPoint() - self.old_pos
-            self.move(self.pos() + delta)
-            self.old_pos = event.globalPosition().toPoint()
-
-    def mouseReleaseEvent(self, event):
-        self.old_pos = None
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    window = JarvisGUI()
-    window.show()
+    window = JarvisMainWindow()
+    window.showMaximized()
     sys.exit(app.exec())

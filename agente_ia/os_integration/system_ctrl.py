@@ -4,8 +4,6 @@ import logging
 from pathlib import Path
 import pyautogui
 
-from core.security_manager import security_manager, ChannelType
-
 logger = logging.getLogger(__name__)
 
 def get_current_time() -> str:
@@ -40,23 +38,16 @@ def take_screenshot() -> str:
         logger.error(f"Error al tomar captura: {e}")
         return f"Error al tomar captura: {e}"
 
-def _resolve_channel(channel=None):
-    if channel is None:
-        return ChannelType.DESKTOP
-    if isinstance(channel, ChannelType):
-        return channel
-    channel_map = {
-        "desktop": ChannelType.DESKTOP,
-        "telegram": ChannelType.TELEGRAM,
-        "discord": ChannelType.DISCORD,
-        "voice": ChannelType.VOICE,
-    }
-    return channel_map.get(str(channel).lower(), ChannelType.DESKTOP)
-
 def shutdown_pc(channel=None) -> str:
-    ch = _resolve_channel(channel)
-    if not security_manager.require_confirmation("shutdown", ch, "apagar el PC"):
-        return "Apagado cancelado, Señor."
+    """Apagar el PC.
+
+    INVARIANTE DE SEGURIDAD (REQ-005): esta función NO se auto-protege. Asume estar
+    gateada por el punto central (`security_manager.require_confirmation()`), que se
+    ejecuta en `router/dispatcher.py:dispatch()` o en `skills/skill_manager.py:execute()`
+    antes de llegar acá. No invocarla directamente desde código nuevo sin pasar por uno
+    de esos caminos: quedaría sin confirmación. El parámetro `channel` se conserva por
+    compatibilidad de firma con los callers actuales.
+    """
     try:
         os.system("shutdown /s /t 5")
         logger.warning("Apagado del sistema iniciado por el usuario")
@@ -66,6 +57,15 @@ def shutdown_pc(channel=None) -> str:
         return "No se pudo invocar el apagado."
 
 def close_app(app_name: str, channel=None) -> str:
+    """Cerrar una aplicación por nombre.
+
+    INVARIANTE DE SEGURIDAD (REQ-005): esta función NO se auto-protege. Asume estar
+    gateada por el punto central (`security_manager.require_confirmation()`), que se
+    ejecuta en `router/dispatcher.py:dispatch()` antes de llamar al handler legacy que
+    llega acá. No invocarla directamente desde código nuevo sin pasar por ese camino:
+    quedaría sin confirmación. El parámetro `channel` se conserva por compatibilidad de
+    firma con los callers actuales.
+    """
     import subprocess
     if not app_name:
         return "No me indicó qué programa cerrar, Señor."
@@ -91,9 +91,6 @@ def close_app(app_name: str, channel=None) -> str:
     process_name = app_aliases.get(app_lower, None)
     if not process_name:
         process_name = app_lower if app_lower.endswith(".exe") else f"{app_lower}.exe"
-    ch = _resolve_channel(channel)
-    if not security_manager.require_confirmation("close_app", ch, f"cerrar {app_name} ({process_name})"):
-        return f"Cierre de '{app_name}' cancelado, Señor."
     try:
         check = subprocess.run(
             ["tasklist", "/FI", f"IMAGENAME eq {process_name}"],

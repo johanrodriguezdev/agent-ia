@@ -5,7 +5,7 @@ el estado compartido entre pasos (ej: texto generado → escribir en app).
 """
 
 import time
-from agents.action_registry import get_action
+from agents.action_registry import get_action, execute_action
 
 
 class StepResult:
@@ -27,14 +27,16 @@ class TaskExecutor:
     Mantiene un estado interno que permite pasar resultados de un paso al siguiente.
     """
 
-    def execute(self, plan: list[dict], on_step_done=None) -> str:
+    def execute(self, plan: list[dict], on_step_done=None, channel=None) -> str:
         """
         Ejecuta todos los pasos del plan.
-        
+
         Args:
             plan:         Lista de steps del TaskPlanner.
             on_step_done: Callback opcional que recibe (step_index, step_result) en tiempo real.
-        
+            channel:      Canal real de la invocación (desktop/telegram/discord/voice/etc.),
+                           propagado al gate de seguridad de cada paso.
+
         Retorna:
             Resumen completo de la ejecución como string.
         """
@@ -65,11 +67,9 @@ class TaskExecutor:
             if use_stored and use_stored in shared_context:
                 params["text"] = shared_context[use_stored]
 
-            fn = action_info["fn"]
-
             try:
                 print(f"  ▶ Paso {i}/{len(plan)}: {action_name}  params={params}")
-                output = fn(**params) if params else fn()
+                output = execute_action(action_name, params, channel=channel)
 
                 # Si el paso necesita guardar su resultado
                 if store_as:
@@ -98,13 +98,12 @@ class TaskExecutor:
 
         return "\n".join(lines)
 
-    def execute_single(self, action_name: str, params: dict = {}) -> str:
+    def execute_single(self, action_name: str, params: dict = {}, channel=None) -> str:
         """Ejecuta una sola acción del registro directamente."""
         action_info = get_action(action_name)
         if not action_info:
             return f"La acción '{action_name}' no existe en el registro."
         try:
-            fn = action_info["fn"]
-            return fn(**params) if params else fn()
+            return execute_action(action_name, params, channel=channel)
         except Exception as e:
             return f"Error al ejecutar '{action_name}': {e}"
