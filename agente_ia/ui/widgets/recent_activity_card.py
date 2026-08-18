@@ -7,9 +7,12 @@ vía `ai/memory_manager.py:UnifiedMemory.get_recent()`. Se puebla una vez en `__
 
 from typing import List
 
+from string import Template
+
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout
 
 from ai.memory_manager import MemoryItem, memory
+from ui.theme import Palette, qss_tokens, register_themed
 
 _EMPTY_STATE_TEXT = "Sin actividad reciente todavía."
 
@@ -20,7 +23,11 @@ class RecentActivityCard(QFrame):
         self.setObjectName("Card")
         self._items_layout = None
         self._build_ui()
-        self.set_items(memory.get_recent(user_id="default", limit=4))
+        # REQ-013/§3.4: con el feed conversacional cada turno escribe DOS filas
+        # (usuario + asistente). `role="user"` deja una entrada por turno y, gracias al
+        # predicado `(role = ? OR role IS NULL)`, conserva las filas legacy y las que
+        # escribe `main.py`, que no tienen rol.
+        self.set_items(memory.get_recent(user_id="default", limit=4, role="user"))
 
     def _build_ui(self) -> None:
         outer = QVBoxLayout(self)
@@ -34,8 +41,11 @@ class RecentActivityCard(QFrame):
         self._items_layout = QVBoxLayout()
         self._items_layout.setSpacing(6)
         outer.addLayout(self._items_layout)
+        register_themed(self)
 
-        self.setStyleSheet(_CARD_QSS)
+    def apply_theme(self, palette: Palette) -> None:
+        """REQ-013/CA-01 - reestiliza la tarjeta con la paleta activa."""
+        self.setStyleSheet(_qss(palette))
 
     def set_items(self, items: List[MemoryItem]) -> None:
         """`items`: lista de `MemoryItem`. Lista vacía -> estado vacío explícito, nunca
@@ -78,10 +88,15 @@ def _format_time(timestamp: str) -> str:
     return timestamp[11:16]
 
 
-_CARD_QSS = """
-#Card { background-color: #111a2c; border-radius: 14px; }
-#CardTitle { color: #ffffff; font-size: 14px; font-weight: 600; }
-#RecentActivityText { color: #c3c9d6; font-size: 12px; }
-#RecentActivityTime { color: #5a6478; font-size: 11px; }
-#RecentActivityEmpty { color: #5a6478; font-size: 12px; }
-"""
+# REQ-013: `string.Template` con `$token`, NUNCA `str.format()` (ver `ui/theme.py`).
+_QSS_TEMPLATE = Template("""
+#Card { background-color: $bg_elevated; border-radius: 14px; }
+#CardTitle { color: $text_primary; font-size: 14px; font-weight: 600; }
+#RecentActivityText { color: $text_secondary; font-size: 12px; }
+#RecentActivityTime { color: $text_muted; font-size: 11px; }
+#RecentActivityEmpty { color: $text_muted; font-size: 12px; }
+""")
+
+
+def _qss(palette: Palette) -> str:
+    return _QSS_TEMPLATE.substitute(qss_tokens(palette))

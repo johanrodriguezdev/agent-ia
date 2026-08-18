@@ -7,11 +7,14 @@ arquitectura-008.md) + 4 filas CPU/RAM/Disco/Red con datos reales de
 ejecutado directo en el hilo de la GUI (syscalls locales rápidas, no I/O de red).
 """
 
+from string import Template
+
 from PyQt6.QtCore import QRectF, Qt, QTimer
 from PyQt6.QtGui import QColor, QFont, QPainter, QPaintEvent, QPen
 from PyQt6.QtWidgets import QFrame, QGridLayout, QLabel, QVBoxLayout, QWidget
 
 from system_actions import system_info
+from ui.theme import DARK_PALETTE, Palette, qss_tokens, register_themed
 
 _REFRESH_MS = 2000
 _NAMES = {"cpu": "CPU", "ram": "Memoria", "disk": "Disco", "net": "Red"}
@@ -24,6 +27,18 @@ class CircularProgress(QWidget):
         super().__init__(parent)
         self.setFixedSize(120, 120)
         self._percent = 0.0
+        # REQ-013/CA-04: el anillo se pinta a mano, no por QSS, asi que sus colores
+        # tambien vienen de la paleta (si no, quedaria ilegible en tema claro).
+        self._track_color = QColor(DARK_PALETTE.border)
+        self._arc_color = QColor(DARK_PALETTE.accent)
+        self._text_color = QColor(DARK_PALETTE.text_primary)
+
+    def set_colors(self, track: str, arc: str, text: str) -> None:
+        """Recolorea el anillo desde la paleta activa."""
+        self._track_color = QColor(track)
+        self._arc_color = QColor(arc)
+        self._text_color = QColor(text)
+        self.update()
 
     def set_percent(self, value: float) -> None:
         self._percent = max(0.0, min(100.0, value))
@@ -34,17 +49,17 @@ class CircularProgress(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         rect = QRectF(10, 10, self.width() - 20, self.height() - 20)
 
-        bg_pen = QPen(QColor(30, 40, 60), 8)
+        bg_pen = QPen(self._track_color, 8)
         painter.setPen(bg_pen)
         painter.drawEllipse(rect)
 
-        fg_pen = QPen(QColor(79, 195, 255), 8)
+        fg_pen = QPen(self._arc_color, 8)
         fg_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         painter.setPen(fg_pen)
         span = int(-360 * 16 * (self._percent / 100.0))
         painter.drawArc(rect, 90 * 16, span)
 
-        painter.setPen(QColor(255, 255, 255))
+        painter.setPen(self._text_color)
         painter.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
         painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, f"{int(round(self._percent))}%")
 
@@ -84,7 +99,12 @@ class SystemStatusCard(QFrame):
             row.addWidget(label, i, 1)
 
         outer.addLayout(row)
-        self.setStyleSheet(_CARD_QSS)
+        register_themed(self)
+
+    def apply_theme(self, palette: Palette) -> None:
+        """REQ-013/CA-01 - QSS de la tarjeta + colores del anillo pintado a mano."""
+        self.setStyleSheet(_qss(palette))
+        self._ring.set_colors(palette.border, palette.accent, palette.text_primary)
 
     @staticmethod
     def _format_row(key: str, value: float) -> str:
@@ -122,8 +142,13 @@ class SystemStatusCard(QFrame):
         return max(0.0, min(100.0, (delta / (200 * 1024)) * 100))
 
 
-_CARD_QSS = """
-#Card { background-color: #111a2c; border-radius: 14px; }
-#CardTitle { color: #ffffff; font-size: 14px; font-weight: 600; }
-#SystemStatusRow { color: #c3c9d6; font-size: 12px; }
-"""
+# REQ-013: `string.Template` con `$token`, NUNCA `str.format()` (ver `ui/theme.py`).
+_QSS_TEMPLATE = Template("""
+#Card { background-color: $bg_elevated; border-radius: 14px; }
+#CardTitle { color: $text_primary; font-size: 14px; font-weight: 600; }
+#SystemStatusRow { color: $text_secondary; font-size: 12px; }
+""")
+
+
+def _qss(palette: Palette) -> str:
+    return _QSS_TEMPLATE.substitute(qss_tokens(palette))

@@ -1,18 +1,26 @@
 """
 ui/widgets/sidebar.py
-Sidebar izquierdo (~250px) del mockup JARVIS (REQ-008/CA-02, CA-05): logo + nombre de
-agente dinámico, navegación de 7 ítems (solo "Inicio" funcional) e indicador
+Sidebar izquierdo (280px) del panel (REQ-008/CA-02, CA-05 · REQ-013/CA-05, CA-08): logo +
+nombre de agente dinámico, navegación de 7 ítems, lista de conversaciones e indicador
 "Sistema activo".
+
+REQ-013: el ancho pasa de 250 a 280px (títulos de conversación legibles), "Conversaciones"
+queda habilitado y debajo de la navegación aparece `ConversationList`. Los otros 5 ítems
+siguen deshabilitados (CA-08). El sidebar solo re-emite: no consulta la base de datos.
 """
+
+from string import Template
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QFrame, QLabel, QPushButton, QVBoxLayout
 
 from config_manager import get_agent_name
+from ui.theme import Palette, qss_tokens, register_themed
+from ui.widgets.conversation_list import ConversationList
 
 _NAV_ITEMS = [
     ("inicio", "🏠  Inicio", True),
-    ("conversaciones", "💬  Conversaciones", False),
+    ("conversaciones", "💬  Conversaciones", True),
     ("memoria", "🧠  Memoria", False),
     ("tareas", "✅  Tareas", False),
     ("archivos", "📁  Archivos", False),
@@ -22,16 +30,21 @@ _NAV_ITEMS = [
 
 
 class Sidebar(QFrame):
-    """Sidebar izquierdo. Señal `nav_selected(str)` emitida solo por el ítem "Inicio"
-    (REQ-008/CA-05: los otros 6 ítems son visibles pero no funcionales —
-    `setEnabled(False)`, sin handler conectado, tal como aprueba arquitectura-008.md)."""
+    """Sidebar izquierdo. `nav_selected(str)` la emiten los ítems habilitados ("Inicio" y,
+    desde REQ-013, "Conversaciones"); los otros 5 son visibles pero no funcionales —
+    `setEnabled(False)`, sin handler conectado (REQ-008/CA-05, REQ-013/CA-08)."""
 
     nav_selected = pyqtSignal(str)
+    # REQ-013: re-emisiones de `ConversationList` — `ui/gui.py` se conecta al Sidebar y
+    # no necesita conocer el widget interno.
+    conversation_selected = pyqtSignal(str)
+    new_conversation_requested = pyqtSignal()
+    more_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("Sidebar")
-        self.setFixedWidth(250)
+        self.setFixedWidth(280)
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -55,7 +68,20 @@ class Sidebar(QFrame):
                 btn.clicked.connect(lambda _checked, k=key: self.nav_selected.emit(k))
             layout.addWidget(btn)
 
-        layout.addStretch(1)
+        separator = QFrame()
+        separator.setObjectName("SidebarSeparator")
+        separator.setFrameShape(QFrame.Shape.HLine)
+        layout.addSpacing(12)
+        layout.addWidget(separator)
+        layout.addSpacing(8)
+
+        self._conversations = ConversationList()
+        self._conversations.conversation_selected.connect(self.conversation_selected.emit)
+        self._conversations.new_conversation_requested.connect(
+            self.new_conversation_requested.emit
+        )
+        self._conversations.more_requested.connect(self.more_requested.emit)
+        layout.addWidget(self._conversations, 1)
 
         status_dot = QLabel("●  Sistema activo")
         status_dot.setObjectName("SidebarStatusActive")
@@ -65,18 +91,44 @@ class Sidebar(QFrame):
         status_sub.setObjectName("SidebarStatusSub")
         layout.addWidget(status_sub)
 
-        self.setStyleSheet(_SIDEBAR_QSS)
+        register_themed(self)
+
+    # --------------------------------------------------------- conversaciones
+    def set_conversations(self, items, append: bool = False) -> None:
+        """REQ-013/CA-05 - delega en `ConversationList` (datos ya cargados fuera del
+        hilo de la GUI por `ui/gui.py`)."""
+        self._conversations.set_conversations(items, append=append)
+
+    def set_active_conversation(self, conversation_id) -> None:
+        self._conversations.set_active(conversation_id)
+
+    def set_has_more(self, has_more: bool) -> None:
+        self._conversations.set_has_more(has_more)
+
+    def conversation_count(self) -> int:
+        return self._conversations.count()
+
+    def apply_theme(self, palette: Palette) -> None:
+        """REQ-013/CA-01 — reestiliza la barra completa (la lista de conversaciones se
+        estiliza sola, es un widget registrado aparte)."""
+        self.setStyleSheet(_qss(palette))
 
 
-_SIDEBAR_QSS = """
-#Sidebar { background-color: #0d1220; border-right: 1px solid #1a2333; }
-#SidebarLogo { color: #ffffff; font-size: 18px; font-weight: 600; letter-spacing: 2px; }
+# REQ-013: `string.Template` con `$token`, NUNCA `str.format()` (ver `ui/theme.py`).
+_QSS_TEMPLATE = Template("""
+#Sidebar { background-color: $bg_surface; border-right: 1px solid $border_subtle; }
+#SidebarLogo { color: $text_primary; font-size: 18px; font-weight: 600; letter-spacing: 2px; }
 #SidebarNavButton {
-    color: #8a93a6; background-color: transparent; border: none;
+    color: $text_secondary; background-color: transparent; border: none;
     text-align: left; padding: 10px 12px; border-radius: 8px; font-size: 13px;
 }
-#SidebarNavButton:enabled { color: #ffffff; background-color: rgba(79, 195, 255, 0.12); }
-#SidebarNavButton:disabled { color: #555f73; }
-#SidebarStatusActive { color: #33d17a; font-size: 12px; }
-#SidebarStatusSub { color: #5a6478; font-size: 11px; }
-"""
+#SidebarNavButton:enabled { color: $text_primary; background-color: $accent_soft; }
+#SidebarNavButton:disabled { color: $text_disabled; }
+#SidebarSeparator { background-color: $border_subtle; max-height: 1px; min-height: 1px; }
+#SidebarStatusActive { color: $success; font-size: 12px; }
+#SidebarStatusSub { color: $text_muted; font-size: 11px; }
+""")
+
+
+def _qss(palette: Palette) -> str:
+    return _QSS_TEMPLATE.substitute(qss_tokens(palette))

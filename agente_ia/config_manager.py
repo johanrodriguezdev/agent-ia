@@ -15,7 +15,9 @@ CONFIG_FILE = os.path.join(os.path.dirname(__file__), "config.json")
 DEFAULT_CONFIG = {
     "agent_name": "noddoo",
     "agent_pronunciation": "nodo",
-    "display_name": ""
+    "display_name": "",
+    "weather_city": "",
+    "ui_theme": "dark",
 }
 
 _ENV_KEY_MAP = {
@@ -45,6 +47,10 @@ def load_config():
                 config["agent_pronunciation"] = DEFAULT_CONFIG["agent_pronunciation"]
             if "display_name" not in config:
                 config["display_name"] = DEFAULT_CONFIG["display_name"]
+            if "weather_city" not in config:
+                config["weather_city"] = DEFAULT_CONFIG["weather_city"]
+            if "ui_theme" not in config:
+                config["ui_theme"] = DEFAULT_CONFIG["ui_theme"]
             return config
     except (json.JSONDecodeError, IOError):
         save_config(DEFAULT_CONFIG)
@@ -93,6 +99,42 @@ def get_display_name() -> str:
 def set_display_name(name: str):
     config = load_config()
     config["display_name"] = name.strip()
+    save_config(config)
+
+
+def get_weather_city() -> str:
+    """Return the configured city for the GUI weather panel (REQ-012/CA-01).
+
+    Acceso de configuración puro — igual que `get_display_name()`. El fallback a
+    geolocalización por IP cuando no hay ciudad configurada vive en
+    `os_integration/weather_data.py` (`city=""`), no acá.
+    """
+    config = load_config()
+    return config.get("weather_city", "")
+
+
+def set_weather_city(city: str) -> None:
+    config = load_config()
+    config["weather_city"] = city.strip()
+    save_config(config)
+
+
+def get_ui_theme() -> str:
+    """Return the persisted UI theme name for the desktop panel (REQ-013/CA-02).
+
+    Acceso de configuración puro — igual que `get_display_name()`/`get_weather_city()`.
+    La validación del nombre contra el catálogo de temas vive en
+    `ui/theme.py:resolve_theme_name()`, no acá: un `config.json` editado a mano puede
+    contener cualquier cosa y esta capa no decide política.
+    """
+    config = load_config()
+    return config.get("ui_theme", DEFAULT_CONFIG["ui_theme"])
+
+
+def set_ui_theme(theme: str) -> None:
+    """Persist the UI theme preference (REQ-013/CA-02)."""
+    config = load_config()
+    config["ui_theme"] = theme.strip().lower()
     save_config(config)
 
 

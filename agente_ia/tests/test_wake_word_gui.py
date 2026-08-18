@@ -15,6 +15,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import ai.memory_manager as memory_module
 import ui.gui as gui_module
 import ui.widgets.recent_activity_card as recent_activity_module
 import ui.widgets.weather_card as weather_card_module
@@ -30,6 +31,8 @@ def no_external_io(monkeypatch):
     de tests/test_gui_widgets.py, REQ-008)."""
     monkeypatch.setattr(weather_card_module, "run_async", lambda *a, **k: None)
     monkeypatch.setattr(recent_activity_module.memory, "get_recent", lambda **kwargs: [])
+    # REQ-013: `JarvisMainWindow.__init__` pide el listado de conversaciones al arrancar.
+    monkeypatch.setattr(memory_module.memory, "list_conversations", lambda **kwargs: [])
 
 
 @pytest.fixture
@@ -121,9 +124,11 @@ def test_toggle_on_starts_worker_without_blocking(qtbot, no_external_io, no_real
 
     window._on_hands_free_toggled(True)
 
-    assert len(no_real_threadpool) == 1
-    assert isinstance(no_real_threadpool[0], WakeWordWorker)
-    assert window._wake_worker is no_real_threadpool[0]
+    # REQ-013/CA-22: `__init__` agenda además un `CallableWorker` con el listado de
+    # conversaciones, así que la aserción se acota a los workers de wake word.
+    wake_workers = [w for w in no_real_threadpool if isinstance(w, WakeWordWorker)]
+    assert len(wake_workers) == 1
+    assert window._wake_worker is wake_workers[0]
 
 
 def test_double_click_toggle_does_not_start_two_workers(qtbot, no_external_io, no_real_threadpool):
@@ -133,7 +138,8 @@ def test_double_click_toggle_does_not_start_two_workers(qtbot, no_external_io, n
     window._on_hands_free_toggled(True)
     window._on_hands_free_toggled(True)
 
-    assert len(no_real_threadpool) == 1
+    # REQ-013/CA-22: ver nota del test anterior sobre el `CallableWorker` del listado.
+    assert len([w for w in no_real_threadpool if isinstance(w, WakeWordWorker)]) == 1
 
 
 # ---------------------------------------------------------------------------
