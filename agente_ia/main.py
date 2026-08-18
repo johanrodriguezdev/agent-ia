@@ -185,13 +185,18 @@ if __name__ == "__main__":
     import threading
 
     headless = "--headless" in sys.argv
+    tray_mode = "--tray" in sys.argv          # REQ-011 — arranque minimizado a bandeja
 
     if not headless:
         try:
             from ui.gui import QApplication, JarvisMainWindow
             app = QApplication(sys.argv)
             window = JarvisMainWindow()
-            window.showMaximized()
+            if not tray_mode:
+                window.showMaximized()
+            # tray_mode=True: JarvisMainWindow ya corrió _setup_tray_icon() dentro de
+            # _init_ui() (incondicional, ver ui/gui.py) — la bandeja queda funcional sin
+            # haber llamado show()/showMaximized() (CA-03, CA-04 de SPEC-011).
         except Exception as e:
             print(f"[GUI] No disponible, modo headless: {e}")
             headless = True

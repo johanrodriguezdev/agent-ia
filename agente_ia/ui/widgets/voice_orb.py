@@ -14,12 +14,7 @@ from PyQt6.QtCore import QPointF, Qt, QTimer
 from PyQt6.QtGui import QColor, QPainter, QPaintEvent, QPen, QRadialGradient
 from PyQt6.QtWidgets import QWidget
 
-_STATE_COLORS = {
-    "IDLE":       {"core": (0, 100, 255), "glow": (0, 50, 200, 60),   "ring": (0, 150, 255, 180)},
-    "LISTENING":  {"core": (0, 255, 200), "glow": (0, 200, 255, 100), "ring": (255, 255, 255, 220)},
-    "PROCESSING": {"core": (200, 0, 255), "glow": (150, 0, 255, 120), "ring": (255, 100, 255, 240)},
-    "RESPONDING": {"core": (50, 150, 255), "glow": (100, 100, 255, 150), "ring": (200, 200, 255, 255)},
-}
+from ui.theme import DARK_PALETTE, register_themed
 
 
 class VoiceOrb(QWidget):
@@ -34,10 +29,19 @@ class VoiceOrb(QWidget):
         self.animation_angle = 0.0
         self.pulse_radius = 0.0
         self.pulse_direction = 1
+        # REQ-013/CA-04: los colores dejan de ser una constante de módulo y pasan a venir
+        # de la paleta activa. El juego oscuro es idéntico al que había antes del REQ.
+        self._state_colors = DARK_PALETTE.orb_colors
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._animate)
         self._timer.start(33)
+        register_themed(self)
+
+    def apply_theme(self, palette) -> None:
+        """REQ-013/CA-01 — repinta el orbe con los colores del tema recibido."""
+        self._state_colors = palette.orb_colors
+        self.update()
 
     def set_state(self, state: str) -> None:
         if state != self.current_state:
@@ -76,7 +80,7 @@ class VoiceOrb(QWidget):
         center = QPointF(self.width() / 2, self.height() / 2)
         base_radius = 60
 
-        cfg = _STATE_COLORS.get(self.current_state, _STATE_COLORS["IDLE"])
+        cfg = self._state_colors.get(self.current_state, self._state_colors["IDLE"])
         core_c = QColor(*cfg["core"])
         glow_c = QColor(*cfg["glow"])
         ring_c = QColor(*cfg["ring"])

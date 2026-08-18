@@ -13,11 +13,14 @@ habría sido una capa de envoltura redundante sobre tarjetas que ya son `QFrame`
 completos. Documentado en desarrollo-log-008.md.
 """
 
+from string import Template
+
 from PyQt6.QtWidgets import QFrame, QScrollArea, QVBoxLayout, QWidget
 
 from ui.widgets.quick_actions_card import QuickActionsCard
 from ui.widgets.recent_activity_card import RecentActivityCard
 from ui.widgets.system_status_card import SystemStatusCard
+from ui.theme import Palette, qss_tokens, register_themed
 from ui.widgets.weather_card import WeatherCard
 
 
@@ -60,4 +63,24 @@ class RightPanel(QFrame):
 
         layout.addStretch(1)
         scroll.setWidget(content)
-        self.setStyleSheet("#RightPanel { background-color: transparent; }")
+        register_themed(self)
+
+    def apply_theme(self, palette: Palette) -> None:
+        """REQ-013/CA-01 - estiliza el contenedor y su scroll. Las 4 tarjetas se
+        registran solas en el `ThemeManager`, no se propaga nada a mano."""
+        self.setStyleSheet(_qss(palette))
+
+
+# REQ-013: `string.Template` con `$token`, NUNCA `str.format()` (ver `ui/theme.py`).
+_QSS_TEMPLATE = Template("""
+#RightPanel { background-color: transparent; }
+QScrollArea { background-color: transparent; border: none; }
+QScrollBar:vertical { background: transparent; width: 8px; margin: 0px; }
+QScrollBar::handle:vertical { background: $scroll_handle; border-radius: 4px; min-height: 24px; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
+""")
+
+
+def _qss(palette: Palette) -> str:
+    return _QSS_TEMPLATE.substitute(qss_tokens(palette))

@@ -7,10 +7,14 @@ al construirse — I/O de red real, nunca en el hilo de la GUI.
 
 from typing import Optional
 
+from string import Template
+
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout
 
+import config_manager
 from os_integration.weather_data import WeatherData, get_weather_structured
 from ui.gui_workers import run_async
+from ui.theme import Palette, qss_tokens, register_themed
 
 _UNAVAILABLE_TEXT = "Clima no disponible."
 
@@ -50,11 +54,15 @@ class WeatherCard(QFrame):
         self._datetime_label.setObjectName("WeatherDateTime")
         right.addWidget(self._datetime_label)
         outer.addLayout(right)
+        register_themed(self)
 
-        self.setStyleSheet(_CARD_QSS)
+    def apply_theme(self, palette: Palette) -> None:
+        """REQ-013/CA-01 - reestiliza la tarjeta con la paleta activa."""
+        self.setStyleSheet(_qss(palette))
 
     def _fetch(self) -> None:
-        run_async(get_weather_structured, self._on_done, self._on_error)
+        city = config_manager.get_weather_city()
+        run_async(get_weather_structured, self._on_done, self._on_error, city)
 
     def _on_done(self, data: Optional[WeatherData]) -> None:
         self.set_data(data)
@@ -76,11 +84,16 @@ class WeatherCard(QFrame):
         self._datetime_label.setText(f"{data.time_str}  ·  {data.date_str}")
 
 
-_CARD_QSS = """
-#Card { background-color: #111a2c; border-radius: 14px; }
-#CardTitle { color: #ffffff; font-size: 14px; font-weight: 600; }
-#WeatherTemp { color: #ffffff; font-size: 26px; font-weight: 300; }
-#WeatherCondition { color: #8a93a6; font-size: 12px; }
-#WeatherCity { color: #c3c9d6; font-size: 12px; }
-#WeatherDateTime { color: #5a6478; font-size: 11px; }
-"""
+# REQ-013: `string.Template` con `$token`, NUNCA `str.format()` (ver `ui/theme.py`).
+_QSS_TEMPLATE = Template("""
+#Card { background-color: $bg_elevated; border-radius: 14px; }
+#CardTitle { color: $text_primary; font-size: 14px; font-weight: 600; }
+#WeatherTemp { color: $text_primary; font-size: 26px; font-weight: 300; }
+#WeatherCondition { color: $text_secondary; font-size: 12px; }
+#WeatherCity { color: $text_secondary; font-size: 12px; }
+#WeatherDateTime { color: $text_muted; font-size: 11px; }
+""")
+
+
+def _qss(palette: Palette) -> str:
+    return _QSS_TEMPLATE.substitute(qss_tokens(palette))

@@ -4,5 +4,8 @@
     "ai_provider": "deepseek",
     "ai_model": "deepseek-chat",
     "vision_provider": "",
-    "fallback_provider": ""
+    "fallback_provider": "",
+    "display_name": "",
+    "weather_city": "",
+    "ui_theme": "dark"
 }

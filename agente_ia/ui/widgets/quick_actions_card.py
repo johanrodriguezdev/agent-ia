@@ -7,11 +7,14 @@ invoca la función subyacente directo, para que el gate de seguridad fail-closed
 `core/security_manager.py` se ejecute igual que en cualquier otro canal.
 """
 
+from string import Template
+
 from PyQt6.QtWidgets import QFrame, QGridLayout, QLabel, QPushButton, QVBoxLayout
 
 from agents.action_registry import execute_action
 from core.security_manager import ChannelType
 from ui.gui_workers import run_async
+from ui.theme import Palette, qss_tokens, register_themed
 
 _QUICK_ACTIONS = [
     ("open_explorer", "📁", "Explorador"),
@@ -51,8 +54,11 @@ class QuickActionsCard(QFrame):
         self._status_label.setObjectName("QuickActionsStatus")
         self._status_label.setWordWrap(True)
         outer.addWidget(self._status_label)
+        register_themed(self)
 
-        self.setStyleSheet(_CARD_QSS)
+    def apply_theme(self, palette: Palette) -> None:
+        """REQ-013/CA-01 - reestiliza la tarjeta con la paleta activa."""
+        self.setStyleSheet(_qss(palette))
 
     def _run_action(self, action_name: str) -> None:
         run_async(
@@ -71,13 +77,18 @@ class QuickActionsCard(QFrame):
         self._status_label.setText(f"Error: {message}")
 
 
-_CARD_QSS = """
-#Card { background-color: #111a2c; border-radius: 14px; }
-#CardTitle { color: #ffffff; font-size: 14px; font-weight: 600; }
+# REQ-013: `string.Template` con `$token`, NUNCA `str.format()` (ver `ui/theme.py`).
+_QSS_TEMPLATE = Template("""
+#Card { background-color: $bg_elevated; border-radius: 14px; }
+#CardTitle { color: $text_primary; font-size: 14px; font-weight: 600; }
 #QuickActionButton {
-    color: #c3c9d6; background-color: #0d1524; border: 1px solid #1e2a42;
+    color: $text_secondary; background-color: $bg_input; border: 1px solid $border;
     border-radius: 10px; padding: 10px 4px; font-size: 11px;
 }
-#QuickActionButton:hover { background-color: #14203a; }
-#QuickActionsStatus { color: #5a6478; font-size: 11px; }
-"""
+#QuickActionButton:hover { background-color: $bg_hover; color: $text_primary; }
+#QuickActionsStatus { color: $text_muted; font-size: 11px; }
+""")
+
+
+def _qss(palette: Palette) -> str:
+    return _QSS_TEMPLATE.substitute(qss_tokens(palette))

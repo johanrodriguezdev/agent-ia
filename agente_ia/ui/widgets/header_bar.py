@@ -6,8 +6,12 @@ sin handler real (Asumido de SPEC-008 — no existe un sistema de notificaciones
 REQ; ver arquitectura-008.md).
 """
 
+from string import Template
+
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton
+
+from ui.theme import Palette, qss_tokens, register_themed, theme_manager
 
 _STATE_LABELS = {
     "IDLE": "Modo activo",
@@ -29,6 +33,14 @@ _WAKE_STATE_ICONS = {
     "AWAKE": "🟢",
 }
 
+# REQ-013/CA-01: icono y tooltip del selector de tema. La clave es el tema ACTIVO; el
+# texto describe hacia dónde lleva el clic.
+_THEME_TOGGLE_ICON = {"dark": "☀", "light": "🌙"}
+_THEME_TOGGLE_TOOLTIP = {
+    "dark": "Cambiar a tema claro",
+    "light": "Cambiar a tema oscuro",
+}
+
 
 class HeaderBar(QFrame):
     """Header superior. `set_state()` refleja el mismo estado global de 4 valores que
@@ -43,6 +55,15 @@ class HeaderBar(QFrame):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 8, 16, 8)
         layout.addStretch(1)
+
+        # A la IZQUIERDA de `_mode_pill`: los tres indicadores de estado de voz quedan
+        # agrupados y el control de preferencia queda separado de ellos (arquitectura §2).
+        self._theme_toggle = QPushButton()
+        self._theme_toggle.setObjectName("ThemeToggle")
+        self._theme_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._theme_toggle.clicked.connect(self._on_theme_toggle_clicked)
+        self._sync_theme_toggle()
+        layout.addWidget(self._theme_toggle)
 
         self._mode_pill = QLabel(f"〜  {_STATE_LABELS['IDLE']}  ›")
         self._mode_pill.setObjectName("ModePill")
@@ -60,7 +81,23 @@ class HeaderBar(QFrame):
         bell.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(bell)
 
-        self.setStyleSheet(_HEADER_QSS)
+        register_themed(self)
+
+    def apply_theme(self, palette: Palette) -> None:
+        """REQ-013/CA-01 — reestiliza el header y resincroniza el icono del selector."""
+        self.setStyleSheet(_qss(palette))
+        self._sync_theme_toggle()
+
+    def _on_theme_toggle_clicked(self) -> None:
+        """Delega en el `ThemeManager`; el icono se actualiza por la señal `theme_changed`
+        (vía `apply_theme`), no acá — así queda sincronizado aunque el tema cambie desde
+        otro lugar."""
+        theme_manager.toggle()
+
+    def _sync_theme_toggle(self) -> None:
+        name = theme_manager.current_name()
+        self._theme_toggle.setText(_THEME_TOGGLE_ICON.get(name, "☀"))
+        self._theme_toggle.setToolTip(_THEME_TOGGLE_TOOLTIP.get(name, ""))
 
     def set_state(self, state: str) -> None:
         label = _STATE_LABELS.get(state, _STATE_LABELS["IDLE"])
@@ -78,22 +115,34 @@ class HeaderBar(QFrame):
         self._wake_indicator.style().polish(self._wake_indicator)
 
 
-_HEADER_QSS = """
+# REQ-013: `string.Template` con `$token`, NUNCA `str.format()` — el QSS está lleno de
+# llaves `{ }` (ver el docstring de `ui/theme.py`).
+_QSS_TEMPLATE = Template("""
 #HeaderBar { background-color: transparent; }
+#ThemeToggle {
+    color: $text_secondary; background-color: $bg_elevated; border: 1px solid $border;
+    border-radius: 16px; min-width: 32px; max-width: 32px;
+    min-height: 32px; max-height: 32px; margin-right: 8px; font-size: 14px;
+}
+#ThemeToggle:hover { color: $accent; background-color: $bg_hover; }
 #ModePill {
-    color: #4fc3ff; background-color: rgba(20, 40, 70, 0.6);
-    border: 1px solid #234; border-radius: 16px; padding: 6px 16px; font-size: 12px;
+    color: $accent; background-color: $accent_soft;
+    border: 1px solid $border; border-radius: 16px; padding: 6px 16px; font-size: 12px;
 }
 #NotificationBell {
-    color: #8a93a6; background-color: #121a2b; border-radius: 16px;
+    color: $text_secondary; background-color: $bg_elevated; border-radius: 16px;
     min-width: 32px; max-width: 32px; min-height: 32px; max-height: 32px;
     margin-left: 8px;
 }
 #WakeIndicator {
-    color: #8a93a6; background-color: #121a2b; border-radius: 16px;
+    color: $text_secondary; background-color: $bg_elevated; border-radius: 16px;
     min-width: 32px; max-width: 32px; min-height: 32px; max-height: 32px;
     margin-left: 8px; font-size: 14px;
 }
-#WakeIndicator[wakeState="LISTENING_WAKE"] { color: #4fc3ff; background-color: rgba(20, 40, 70, 0.6); }
-#WakeIndicator[wakeState="AWAKE"] { color: #00e08a; background-color: rgba(0, 60, 40, 0.6); }
-"""
+#WakeIndicator[wakeState="LISTENING_WAKE"] { color: $accent; background-color: $accent_soft; }
+#WakeIndicator[wakeState="AWAKE"] { color: $success; background-color: $bg_hover; }
+""")
+
+
+def _qss(palette: Palette) -> str:
+    return _QSS_TEMPLATE.substitute(qss_tokens(palette))

@@ -10,7 +10,71 @@ verificado en sesiones previas: no cuelga, no depende de red/mic). Se importa un
 a nivel de módulo para no repetir ese costo por test.
 """
 
+from unittest.mock import MagicMock, patch
+
 import main
+import ui.gui  # noqa: F401 — asegura que "ui.gui" ya está en sys.modules antes de parcharlo
+
+
+# ---------------------------------------------------------------------------
+# REQ-011/CA-03 — arranque `--tray`: nunca se llama show()/showMaximized() sobre
+# JarvisMainWindow.
+#
+# El bloque `if __name__ == "__main__":` de main.py no fue extraído a una función
+# testeable (ver propuestas/desarrollo-log-011.md — fuera del alcance recibido por
+# orion-dev), así que `orion-tester` prueba el código real ejecutando exactamente el
+# texto fuente de ese bloque vía `exec()` (leído del archivo en cada test, nunca
+# copiado/reescrito a mano, para no divergir de la implementación real). Se evita
+# `runpy.run_path(main.py)` a propósito: reejecutaría también todo el código de
+# import de main.py (registro de skills/orchestrator/tools), duplicando ese registro
+# sobre los singletons globales ya poblados por el `import main` de arriba y
+# contaminando el resto de la suite. `threading.Thread` se mockea para que el hilo
+# `jarvis_runner` (que termina en `os._exit(0)`) nunca llegue a ejecutarse de verdad.
+# ---------------------------------------------------------------------------
+
+def _extraer_bloque_main() -> str:
+    with open(main.__file__, encoding="utf-8") as f:
+        source = f.read()
+    marker = 'if __name__ == "__main__":'
+    idx = source.index(marker)
+    cuerpo = source[idx:].splitlines()[1:]
+    return "\n".join(linea[4:] if linea.startswith("    ") else linea for linea in cuerpo)
+
+
+def _ejecutar_bloque_main(argv, mock_window):
+    fake_gui = MagicMock()
+    fake_gui.QApplication.return_value = MagicMock()
+    fake_gui.JarvisMainWindow.return_value = mock_window
+
+    namespace = {"__name__": "__main__", "main": main.main}
+    with patch("sys.argv", argv), \
+         patch.dict("sys.modules", {"ui.gui": fake_gui}), \
+         patch("threading.Thread") as mock_thread_cls, \
+         patch("sys.exit") as mock_exit:
+        mock_thread_cls.return_value = MagicMock()
+        exec(compile(_extraer_bloque_main(), main.__file__, "exec"), namespace)
+    return mock_exit
+
+
+def test_main_tray_mode_no_llama_show_ca03():
+    mock_window = MagicMock()
+
+    _ejecutar_bloque_main(["main.py", "--tray"], mock_window)
+
+    mock_window.showMaximized.assert_not_called()
+    mock_window.show.assert_not_called()
+
+
+def test_main_sin_tray_si_llama_showmaximized():
+    """Contraste con CA-03: confirma que el condicional realmente depende de `--tray`
+    y no que showMaximized() dejó de llamarse en general (regresión sobre el arranque
+    GUI normal, ya cubierto informalmente por uso manual pero no antes por un test)."""
+    mock_window = MagicMock()
+
+    _ejecutar_bloque_main(["main.py"], mock_window)
+
+    mock_window.showMaximized.assert_called_once()
+    mock_window.show.assert_not_called()
 
 
 def test_proactive_assistant_can_handle_briefing():
