@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="es" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self';">
+<title>Panel de control</title>
+<link rel="stylesheet" href="css/fonts.css">
+<link rel="stylesheet" href="css/reset.css">
+<link rel="stylesheet" href="css/theme.css">
+<link rel="stylesheet" href="css/layout.css">
+<link rel="stylesheet" href="css/sidebar.css">
+<link rel="stylesheet" href="css/chat.css">
+<link rel="stylesheet" href="css/composer.css">
+<link rel="stylesheet" href="css/modal.css">
+<link rel="stylesheet" href="css/panels.css">
+<link rel="stylesheet" href="css/settings_panel.css">
+<link rel="stylesheet" href="css/animations.css">
+<link rel="stylesheet" href="css/pygments-dark.css" id="pygments-dark-link">
+<link rel="stylesheet" href="css/pygments-light.css" id="pygments-light-link">
+<!-- theme.js habilita/deshabilita uno u otro según data-theme — ambos declaran las mismas
+     clases .codehilite/.token, así que solo uno debe estar activo a la vez (ver theme.js). -->
+</head>
+<body>
+<div id="app-shell">
+
+  <div id="window-chrome">
+    <div id="drag-region">
+      <span id="agent-name-label"></span>
+    </div>
+    <div id="window-controls">
+      <button type="button" id="btn-minimize" class="window-btn" aria-label="Minimizar">&#8211;</button>
+      <button type="button" id="btn-maximize" class="window-btn" aria-label="Maximizar">&#9723;</button>
+      <button type="button" id="btn-close" class="window-btn window-btn-close" aria-label="Cerrar">&#10005;</button>
+    </div>
+  </div>
+
+  <div id="app-body">
+
+    <aside id="sidebar">
+      <div id="sidebar-header">
+        <span id="sidebar-logo"></span>
+      </div>
+      <div id="sidebar-toolbar" class="icon-pill">
+        <button type="button" id="sidebar-collapse-toggle" class="pill-btn"
+                aria-label="Colapsar panel lateral" title="Colapsar panel lateral">&#171;</button>
+        <button type="button" id="sidebar-search-toggle" class="pill-btn"
+                aria-label="Buscar conversaciones" title="Buscar conversaciones">&#128269;</button>
+        <button type="button" id="new-conversation-btn" class="pill-btn"
+                aria-label="Nuevo chat" title="Nuevo chat">+</button>
+      </div>
+      <div id="sidebar-search-row" hidden>
+        <input type="search" id="sidebar-search-input" aria-label="Buscar conversaciones"
+               placeholder="Buscar conversaciones…">
+      </div>
+      <button type="button" id="tasks-btn" class="sidebar-action-btn" title="Tareas">
+        <span class="icon" aria-hidden="true">&#128203;</span>
+        <span class="label">Tareas</span>
+      </button>
+      <button type="button" id="projects-btn" class="sidebar-action-btn" title="Proyectos">
+        <span class="icon" aria-hidden="true">&#128193;</span>
+        <span class="label">Proyectos</span>
+      </button>
+      <button type="button" id="settings-btn" class="sidebar-action-btn" title="Configuración">
+        <span class="icon" aria-hidden="true">&#9881;</span>
+        <span class="label">Configuración</span>
+      </button>
+      <div id="conversation-list" role="list"></div>
+      <button type="button" id="load-more-btn" class="sidebar-action-btn sidebar-load-more" hidden>
+        Ver más
+      </button>
+      <div id="sidebar-footer">
+        <label id="theme-toggle-row">
+          <span>Tema</span>
+          <button type="button" id="theme-toggle-btn" aria-label="Cambiar tema">&#9788;</button>
+        </label>
+      </div>
+    </aside>
+
+    <main id="main-column">
+
+      <div id="chat-area">
+        <div id="empty-state">
+          <div id="empty-state-avatar" aria-hidden="true"></div>
+          <h1 id="empty-state-greeting"></h1>
+          <p id="empty-state-subtitle">¿En qué puedo ayudarte hoy?</p>
+        </div>
+        <div id="messages" role="log" aria-live="polite"></div>
+        <div id="typing-indicator" hidden>
+          <span></span><span></span><span></span>
+        </div>
+      </div>
+
+      <div id="composer">
+        <div id="chips-row"></div>
+        <div id="composer-input-row">
+          <button type="button" id="attach-btn" class="composer-icon-btn" aria-label="Adjuntar archivo" title="Adjuntar archivo">&#128206;</button>
+          <textarea id="composer-input" rows="1" placeholder="Escribe un mensaje…"></textarea>
+          <button type="button" id="wake-toggle-btn" class="composer-icon-btn" aria-label="Modo manos libres" title="Modo manos libres" data-wake-state="INACTIVE">&#127908;</button>
+          <button type="button" id="send-btn" class="composer-icon-btn composer-send-btn" aria-label="Enviar mensaje" title="Enviar mensaje">&#10148;</button>
+        </div>
+        <div id="attachment-chip" hidden>
+          <span id="attachment-chip-name"></span>
+          <button type="button" id="attachment-chip-remove" aria-label="Quitar adjunto">&#10005;</button>
+        </div>
+      </div>
+
+    </main>
+
+  </div>
+
+</div>
+
+<div id="confirm-modal-root"></div>
+<div id="panel-modal-root"></div>
+
+<script src="vendor/qwebchannel.js"></script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

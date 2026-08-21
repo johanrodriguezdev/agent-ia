@@ -21,6 +21,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from core.security_manager import (
+    CHANNEL_ACTION_EXCEPTIONS,
+    CHANNEL_ALLOWED_LEVELS,
     ChannelType,
     RiskLevel,
     format_details,
@@ -601,3 +603,247 @@ def test_telegram_power_actions_are_yellow_and_blocked_for_telegram():
         assert security_manager._actions.get(action_name) == RiskLevel.YELLOW
         assert security_manager.is_action_allowed(action_name, ChannelType.TELEGRAM) is False
         assert security_manager.is_action_allowed(action_name, ChannelType.DESKTOP) is True
+
+
+# --- REQ-016/CA-08, CA-18, CA-33 — delete_task/delete_project: mismo patrón YELLOW que
+# delete_conversation (§6 de arquitectura-016.md). -------------------------------------
+
+
+def test_delete_task_esta_clasificada_como_yellow():
+    assert security_manager.classify_action("delete_task") == RiskLevel.YELLOW
+
+
+def test_delete_project_esta_clasificada_como_yellow():
+    assert security_manager.classify_action("delete_project") == RiskLevel.YELLOW
+
+
+def test_delete_task_requiere_confirmacion_en_canal_desktop(monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda *_a, **_kw: "no")
+    assert security_manager.require_confirmation("delete_task", "desktop") is False
+
+    monkeypatch.setattr("builtins.input", lambda *_a, **_kw: "si")
+    assert security_manager.require_confirmation("delete_task", "desktop") is True
+
+
+def test_delete_project_requiere_confirmacion_en_canal_desktop(monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda *_a, **_kw: "no")
+    assert security_manager.require_confirmation("delete_project", "desktop") is False
+
+    monkeypatch.setattr("builtins.input", lambda *_a, **_kw: "si")
+    assert security_manager.require_confirmation("delete_project", "desktop") is True
+
+
+def test_check_coverage_no_reporta_delete_task_ni_delete_project_como_sin_clasificar():
+    missing = security_manager.check_coverage(["delete_task", "delete_project"])
+    assert missing == []
+
+
+# --- REQ-019 — override de configuración de usuario (solo subir, nunca bajar) ---------
+#
+# Los tests que inyectan directamente en `security_manager._config_overrides` sobre el
+# singleton compartido de pytest limpian la entrada al finalizar (try/finally), siguiendo
+# la Recomendación 5 de security-audit-019.md (1ra pasada) — evita contaminación entre
+# tests que reutilizan el mismo singleton dentro de la misma sesión.
+
+
+def test_ca01_risk_level_order_es_verde_menor_amarillo_menor_rojo():
+    from core.security_manager import _RISK_LEVEL_ORDER
+
+    assert _RISK_LEVEL_ORDER[RiskLevel.GREEN] < _RISK_LEVEL_ORDER[RiskLevel.YELLOW]
+    assert _RISK_LEVEL_ORDER[RiskLevel.YELLOW] < _RISK_LEVEL_ORDER[RiskLevel.RED]
+
+
+def test_ca02_override_no_puede_bajar_yellow_a_green(monkeypatch):
+    action_name = "__test_ca02_yellow_action__"
+    security_manager._config_overrides[action_name] = RiskLevel.GREEN
+    try:
+        # Simula el re-registro que ocurre en el arranque real (register_action() se
+        # llama con el nivel de CÓDIGO, YELLOW; el override GREEN debe quedar sin efecto).
+        security_manager.register_action(action_name, RiskLevel.YELLOW)
+        assert security_manager.classify_action(action_name) == RiskLevel.YELLOW
+
+        monkeypatch.setattr("builtins.input", lambda *_a, **_kw: "si")
+        assert security_manager.require_confirmation(action_name, "desktop") is True
+    finally:
+        security_manager._config_overrides.pop(action_name, None)
+        security_manager._base_levels.pop(action_name, None)
+        security_manager._actions.pop(action_name, None)
+
+
+def test_ca03_override_no_puede_bajar_red(monkeypatch):
+    # No se usa una acción de prueba nueva: se verifica sobre `format_disk`, una RED real
+    # de REQ-005, con un override GREEN inyectado — mismo patrón sugerido por
+    # arquitectura-019.md ("Pruebas sugeridas", CA-03).
+    security_manager._config_overrides["format_disk"] = RiskLevel.GREEN
+    try:
+        security_manager.register_action("format_disk", RiskLevel.RED)  # re-registro de arranque
+        assert security_manager.classify_action("format_disk") == RiskLevel.RED
+
+        monkeypatch.delenv("ORION_AUTH_PIN", raising=False)
+        assert security_manager.require_confirmation("format_disk", "desktop") is False
+    finally:
+        security_manager._config_overrides.pop("format_disk", None)
+        # No se limpia _base_levels/_actions["format_disk"]: register_action() con RED no
+        # cambia su clasificación real (sigue RED antes y después de este test).
+
+
+@pytest.mark.parametrize(
+    "base, override_attempt",
+    [
+        (RiskLevel.YELLOW, RiskLevel.GREEN),
+        (RiskLevel.RED, RiskLevel.GREEN),
+        (RiskLevel.RED, RiskLevel.YELLOW),
+    ],
+)
+def test_override_nunca_baja_el_nivel_red_yellow_green(base, override_attempt):
+    """Estructural RED/YELLOW/GREEN (no solo RED, a diferencia de
+    `test_register_action_cannot_downgrade_red`) — pedido explícito por SPEC-019 y
+    reafirmado por la nota no bloqueante (3) del handoff de `orion-security`."""
+    action_name = "__test_override_downgrade__"
+    security_manager._config_overrides[action_name] = override_attempt
+    try:
+        security_manager.register_action(action_name, base)
+        assert security_manager.classify_action(action_name) == base
+    finally:
+        security_manager._config_overrides.pop(action_name, None)
+        security_manager._base_levels.pop(action_name, None)
+        security_manager._actions.pop(action_name, None)
+
+
+def test_ca04_intento_de_bajada_via_merge_queda_auditado(isolated_audit_db):
+    action_name = "__test_ca04_audit__"
+    security_manager._config_overrides[action_name] = RiskLevel.GREEN
+    try:
+        security_manager.register_action(action_name, RiskLevel.YELLOW)
+    finally:
+        security_manager._config_overrides.pop(action_name, None)
+        security_manager._base_levels.pop(action_name, None)
+        security_manager._actions.pop(action_name, None)
+
+    rows = _read_audit_rows(isolated_audit_db)
+    assert any(row[1] == action_name and "bajada" in row[4] for row in rows)
+
+
+def test_ca04_log_override_attempt_registra_rechazo_de_guardado(isolated_audit_db):
+    security_manager.log_override_attempt(
+        "open_chrome", requested_level=RiskLevel.GREEN, current_level=RiskLevel.YELLOW,
+        accepted=False,
+    )
+    rows = _read_audit_rows(isolated_audit_db)
+    assert any(
+        row[1] == "open_chrome" and "rechazad" in row[4]
+        for row in rows
+    )
+
+
+def test_ca06_load_and_parse_overrides_ignora_nivel_invalido(monkeypatch):
+    from core.security_manager import _load_and_parse_overrides
+    import core.security_config as security_config_module
+
+    monkeypatch.setattr(security_config_module, "load_security_overrides", lambda: {"x": "purple"})
+    result = _load_and_parse_overrides()
+    assert "x" not in result
+
+
+def test_ca06_load_and_parse_overrides_no_propaga_excepcion_de_security_config(monkeypatch):
+    """Segunda capa de defensa (arquitectura-019.md §11.1) — incluso si
+    `core.security_config.load_security_overrides()` lanzara una excepción (en vez de
+    devolver `{}` como debería), `_load_and_parse_overrides()` no debe propagarla."""
+    from core.security_manager import _load_and_parse_overrides
+    import core.security_config as security_config_module
+
+    def boom():
+        raise RuntimeError("fallo simulado de security_config")
+
+    monkeypatch.setattr(security_config_module, "load_security_overrides", boom)
+    result = _load_and_parse_overrides()
+    assert result == {}
+
+
+def test_ca07_merge_no_depende_del_canal():
+    """El nivel efectivo (post-merge) es el mismo sin importar el canal —
+    `CHANNEL_ALLOWED_LEVELS` decide después, dentro de `require_confirmation()`, nunca en
+    el propio merge de `_merge_with_override()`."""
+    action_name = "__test_override_channel__"
+    security_manager._config_overrides[action_name] = RiskLevel.YELLOW
+    try:
+        security_manager.register_action(action_name, RiskLevel.GREEN)
+        for _channel in ("desktop", "telegram", "discord", "voice", "api"):
+            assert security_manager.classify_action(action_name) == RiskLevel.YELLOW
+    finally:
+        security_manager._config_overrides.pop(action_name, None)
+        security_manager._base_levels.pop(action_name, None)
+        security_manager._actions.pop(action_name, None)
+
+
+def test_classify_action_base_devuelve_nivel_de_codigo_puro():
+    assert security_manager.classify_action_base("format_disk") == RiskLevel.RED
+    assert security_manager.classify_action_base("__accion_jamas_registrada__") is None
+
+
+def test_classify_action_base_no_se_ve_afectado_por_override():
+    action_name = "__test_base_vs_effective__"
+    security_manager._config_overrides[action_name] = RiskLevel.YELLOW
+    try:
+        security_manager.register_action(action_name, RiskLevel.GREEN)
+        assert security_manager.classify_action_base(action_name) == RiskLevel.GREEN
+        assert security_manager.classify_action(action_name) == RiskLevel.YELLOW
+    finally:
+        security_manager._config_overrides.pop(action_name, None)
+        security_manager._base_levels.pop(action_name, None)
+        security_manager._actions.pop(action_name, None)
+
+
+# --- REQ-018/CA-02, CA-03, CA-11 — excepción quirúrgica canal+acción para delete_task en --
+# --- Telegram, sin abrir el resto de las acciones YELLOW ni tocar CHANNEL_ALLOWED_LEVELS --
+
+
+def test_ca02_delete_task_telegram_registrado_en_channel_action_exceptions():
+    assert (ChannelType.TELEGRAM, "delete_task") in CHANNEL_ACTION_EXCEPTIONS
+
+
+def test_ca02_is_action_allowed_delete_task_telegram_true_tras_excepcion():
+    assert security_manager.is_action_allowed("delete_task", ChannelType.TELEGRAM) is True
+
+
+def test_ca03_todas_las_yellow_restantes_siguen_bloqueadas_en_telegram():
+    """REQ-018/Hallazgo C (security-audit-018.md) — la lista de acciones YELLOW a verificar
+    se deriva DINÁMICAMENTE del registro real de security_manager en el momento de
+    ejecutarse (en vez de copiarla a mano), para que este test no se desincronice en
+    silencio si en el futuro se registra una acción YELLOW nueva (p. ej. vía el override de
+    REQ-019) sin agregarla a CHANNEL_ACTION_EXCEPTIONS."""
+    todas_las_yellow = [
+        name for name, level in security_manager._actions.items()
+        if level == RiskLevel.YELLOW
+    ]
+    yellow_a_verificar = [n for n in todas_las_yellow if n != "delete_task"]
+    # Guardrail del propio test: si esto queda vacío, el test dejó de probar algo real.
+    assert len(yellow_a_verificar) >= 15
+
+    for action_name in yellow_a_verificar:
+        assert security_manager.is_action_allowed(action_name, ChannelType.TELEGRAM) is False, (
+            f"'{action_name}' quedó alcanzable en Telegram — CHANNEL_ACTION_EXCEPTIONS "
+            f"debería contener únicamente (ChannelType.TELEGRAM, 'delete_task')"
+        )
+
+
+def test_ca11_channel_allowed_levels_telegram_sin_cambios():
+    """CHANNEL_ALLOWED_LEVELS no se toca — la excepción de CA-02 es una estructura nueva y
+    separada, nunca un reemplazo."""
+    assert CHANNEL_ALLOWED_LEVELS[ChannelType.TELEGRAM] == [RiskLevel.GREEN]
+
+
+def test_ca11_delete_task_sigue_clasificada_yellow():
+    assert security_manager.classify_action("delete_task") == RiskLevel.YELLOW
+
+
+def test_ca11_task_complete_create_list_siguen_green():
+    for action_name in ("task_complete", "task_create", "task_list"):
+        assert security_manager.classify_action(action_name) == RiskLevel.GREEN
+
+
+def test_regresion_proactive_trigger_desktop_is_action_allowed_sin_cambios():
+    """Único otro caller real de is_action_allowed() (core/proactive_engine.py:90) — acción
+    GREEN, canal DESKTOP, sin intersección con la excepción nueva. Confirma que CA-02 es
+    aditivo, no cambia ningún comportamiento existente."""
+    assert security_manager.is_action_allowed("proactive_trigger", ChannelType.DESKTOP) is True

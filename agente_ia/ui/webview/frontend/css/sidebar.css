@@ -1,0 +1,250 @@
+/* ui/webview/frontend/css/sidebar.css
+   REQ-015/CA-06..CA-11 — sidebar de conversaciones. 260px, colapsable a 60px con
+   transición de 200ms (mismo criterio ya validado en REQ-013/014, CA-06).
+*/
+
+#sidebar {
+  width: 260px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--bg-secondary);
+  border-right: 1px solid var(--border);
+  transition: width 200ms ease;
+  overflow: hidden;
+}
+
+#sidebar.collapsed {
+  width: 60px;
+}
+
+#sidebar.collapsed .label,
+#sidebar.collapsed #conversation-list,
+#sidebar.collapsed #sidebar-footer,
+#sidebar.collapsed .sidebar-load-more {
+  display: none;
+}
+
+/* Addendum REQ-016 (verificación visual pre-prueba-manual del orquestador) — `#sidebar-logo`
+   ("NODDOO", `letter-spacing:2px`, `overflow:hidden`) no cabe en los 60px de `.collapsed` y se
+   recorta a mitad de carácter (ilegible, ver captura real). Va contra el pedido explícito de
+   Johan de que "la barra se vea más profesional al contraerse" (REQ-016). Se oculta por
+   completo, mismo criterio que ya aplica la regla de arriba para `.label` — el toolbar en
+   píldora con sus iconos (CA-01/CA-22) ya se ve bien colapsado sin el logo. No se reemplaza por
+   un ícono nuevo: no fue pedido y agrega alcance no aprobado en arquitectura-016.md. */
+#sidebar.collapsed #sidebar-logo {
+  display: none;
+}
+
+#sidebar-header {
+  display: flex;
+  align-items: center;
+  padding: 16px;
+}
+
+#sidebar-logo {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* REQ-016/CA-01, CA-02: header en píldora unificada — colapsar/buscar/nuevo chat.
+   `#sidebar-collapse-toggle` ya no tiene su propio bloque de layout: vive dentro de la
+   píldora y su estilo lo da `.pill-btn`, igual que los otros 2 controles (ver decisión de
+   implementación en desarrollo-log-016.md — la regla ID previa ganaba por especificidad
+   sobre `.pill-btn` y rompía la unificación visual que pide CA-01). */
+#sidebar-toolbar.icon-pill {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: 0 12px 12px;
+  padding: 4px;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.pill-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  border: none;
+  background: transparent;
+  border-radius: 999px;
+  color: var(--text-secondary);
+  transition: background-color 150ms, color 150ms;
+}
+
+/* CA-02: cada uno de los 3 controles distingue hover/activo por separado — mismo selector
+   ya usado para .composer-icon-btn:hover, sin inventar un mecanismo nuevo. */
+.pill-btn:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.pill-btn.active {
+  background-color: var(--bg-hover);
+  color: var(--text-accent);
+}
+
+#sidebar-search-row {
+  margin: 0 12px 12px;
+}
+
+#sidebar-search-input {
+  width: 100%;
+  border: 1px solid var(--border);
+  background-color: var(--bg-input);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+#sidebar-search-input:focus {
+  outline: none;
+  border-color: var(--text-accent);
+}
+
+.sidebar-action-btn {
+  margin: 0 12px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  background-color: transparent;
+  color: var(--text-primary);
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 13px;
+  transition: background-color 150ms, border-color 150ms;
+}
+
+.sidebar-action-btn:hover {
+  background-color: var(--bg-hover);
+  border-color: var(--text-accent);
+}
+
+#conversation-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 8px;
+}
+
+.conv-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: background-color 150ms, color 150ms;
+}
+
+.conv-item:hover {
+  background-color: var(--bg-hover);
+  /* CA-36: `--text-secondary` sobre `--bg-hover` da 4.47:1 en dark (por debajo de AA
+     4.5:1 para el texto normal de 13px del título) — se sube a `--text-primary` en
+     hover, que además refuerza la afordancia visual de "ítem interactivo". */
+  color: var(--text-primary);
+}
+
+.conv-item.active {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.conv-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.conv-meta {
+  font-size: 11px;
+  color: var(--text-secondary);
+  flex: none;
+}
+
+.conv-delete-btn {
+  visibility: hidden;
+  flex: none;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 6px;
+  width: 22px;
+  height: 22px;
+  font-size: 12px;
+  transition: background-color 150ms, color 150ms;
+}
+
+.conv-item:hover .conv-delete-btn {
+  visibility: visible;
+}
+
+.conv-delete-btn:hover {
+  background-color: var(--danger);
+  color: #ffffff;
+}
+
+.sidebar-load-more {
+  margin: 8px 12px;
+  text-align: center;
+  color: var(--text-accent);
+  border-style: dashed;
+}
+
+#sidebar-footer {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+
+#theme-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+#theme-toggle-btn {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-primary);
+  border-radius: 6px;
+  width: 26px;
+  height: 26px;
+  transition: background-color 150ms;
+}
+
+#theme-toggle-btn:hover {
+  background-color: var(--bg-hover);
+}
+
+/* REQ-016/CA-22: iconos centrados en colapsado — incluye el toolbar en píldora y los 2
+   botones nuevos (Tareas/Proyectos). Gap confirmado por baseline-016.md: hoy no existe
+   ninguna regla que centre íconos en `.collapsed`. */
+#sidebar.collapsed .sidebar-action-btn,
+#sidebar.collapsed .pill-btn {
+  justify-content: center;
+}
+
+#sidebar.collapsed #sidebar-toolbar.icon-pill {
+  flex-direction: column;
+  border-radius: 16px;
+}
+
+#sidebar.collapsed #sidebar-search-row {
+  display: none;   /* mismo criterio que #conversation-list/#sidebar-footer ya ocultos en .collapsed */
+}

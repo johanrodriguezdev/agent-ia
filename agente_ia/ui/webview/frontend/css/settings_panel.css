@@ -1,0 +1,121 @@
+/* ui/webview/frontend/css/settings_panel.css
+   REQ-019/§4.3 — pantalla "Configuración". Archivo nuevo (no extiende panels.css) porque
+   el layout es estructuralmente distinto: panels.css es para listas de una columna
+   (Tareas/Proyectos), esta pantalla es nav-lateral + tarjetas (2 columnas) — mismo patrón
+   de referencia visual "WorkBuddy AI" documentado en SPEC-019.
+
+   Reutiliza .modal-overlay/.modal-box de modal.css como raíz (variante .modal-box-settings,
+   análoga a .modal-box-wide ya existente en panels.css), montado sobre #panel-modal-root
+   (nunca #confirm-modal-root, mismo criterio §0.3 de arquitectura-016.md). Respeta el theme
+   claro/oscuro existente (variables --text-primary/--border/--bg-input/etc. ya usadas en
+   panels.css) y el contraste WCAG AA ya validado (CA-30 de SPEC-016) — sin paleta nueva. */
+
+.modal-box-settings {
+  width: 620px;
+  max-width: calc(100vw - 48px);
+}
+
+.settings-layout {
+  display: flex;
+  gap: 20px;
+  min-height: 280px;
+}
+
+.settings-nav {
+  flex: none;
+  width: 160px;
+  border-right: 1px solid var(--border);
+  padding-right: 12px;
+}
+
+.settings-nav ul {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-nav-item {
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.settings-nav-item.active {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.settings-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-banner {
+  font-size: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.settings-banner-error {
+  background-color: var(--danger);
+  color: #ffffff;
+}
+
+.settings-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-row:last-child {
+  border-bottom: none;
+}
+
+.settings-row-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.settings-row-label {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.settings-row-desc {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.settings-row-select {
+  flex: none;
+  border: 1px solid var(--border);
+  background-color: var(--bg-input);
+  color: var(--text-primary);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.settings-row-select:disabled {
+  opacity: 0.6;
+}

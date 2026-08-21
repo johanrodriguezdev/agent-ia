@@ -2,8 +2,8 @@
 ui/gui_workers.py
 Helper de concurrencia (REQ-008) para operaciones de I/O de un solo disparo disparadas
 por eventos de UI — clima, accesos rápidos, barra de comando. NO reemplaza el mecanismo
-de polling de `GLOBAL_STATE` (ver `ui/gui.py`), que sigue siendo el bridge del estado
-continuo IDLE/LISTENING/PROCESSING/RESPONDING desde el hilo trabajador.
+de polling de `GLOBAL_STATE` (ver `ui/webview/gui_state.py`), que sigue siendo el bridge
+del estado continuo IDLE/LISTENING/PROCESSING/RESPONDING desde el hilo trabajador.
 
 Regla de seguridad (ver arquitectura-008.md): los callbacks `on_done`/`on_error` pasados
 a `run_async()` deben ser siempre métodos vinculados (`bound methods`) de un widget/

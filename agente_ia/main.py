@@ -1,3 +1,32 @@
+# REQ-015 — DEBE ir antes que cualquier otro import (ver desarrollo-log-015.md, hallazgo
+# de la verificación manual de esta reanudación). Varios módulos de `skills`/
+# `os_integration` (p. ej. `screen_analysis_skill.py`, `screenshot_tools.py`) importan
+# `pyautogui`, que en Windows llama `ctypes.windll.user32.SetProcessDPIAware()`
+# ("System DPI Aware", un único factor de escala global) como efecto secundario de su
+# propio import — y ese import ocurre de forma transitiva vía `skill_manager` antes de
+# que exista `QApplication`. Windows solo permite fijar el contexto de DPI awareness del
+# proceso UNA vez: si `pyautogui` gana la carrera, Qt/QtWebEngine ya no puede subir a
+# `DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2` (falla con "Acceso denegado", visible en
+# los logs) y queda un desajuste real entre el `devicePixelRatio` que asume QtWebEngine
+# (1.5 en una pantalla al 150%, confirmado con Chrome DevTools Protocol contra la ventana
+# real) y el tamaño físico real de la ventana (`GetWindowRect`, más chico) — el contenido
+# del WebView se pinta para un lienzo ~1.5x más ancho del que la ventana realmente tiene,
+# y todo lo que cae más allá del borde físico queda recortado (sidebar/saludo cortados en
+# la verificación manual). Fijarlo acá, antes que nada, gana la carrera.
+import sys
+
+if sys.platform == "win32":
+    import ctypes as _ctypes
+    import logging as _early_logging
+
+    try:
+        # DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4 (no expuesto por ctypes.wintypes)
+        _ctypes.windll.user32.SetProcessDpiAwarenessContext(-4)
+    except Exception as e:
+        _early_logging.getLogger(__name__).warning(
+            f"No se pudo fijar DPI awareness Per-Monitor-V2 antes de otros imports: {e}"
+        )
+
 import logging
 
 from core.logger_setup import setup_logging
@@ -5,6 +34,7 @@ logger = setup_logging()
 
 from core.orchestrator import orchestrator
 from core.proactive_engine import proactive_engine
+from tasks.task_scheduler import task_scheduler   # REQ-016/CA-10
 from core.security_manager import ChannelType
 from core.confirmation import register_confirmation_adapter
 from core.resolution import resolve
@@ -73,7 +103,8 @@ def main(boot_mode=None, gui_active=False):
     
     # Iniciar engine proactivo
     proactive_engine.start()
-    
+    task_scheduler.start()   # REQ-016/CA-10 — antes solo arrancaba desde channels/telegram_bot.py
+
     # Saludo inicial al conectar los sistemas
     ui.display_output(get_random_greeting(), read_aloud=True)
     
@@ -86,6 +117,7 @@ def main(boot_mode=None, gui_active=False):
         
         if choice == 'q':
             proactive_engine.stop()
+            task_scheduler.stop()   # simetría con proactive_engine — TaskScheduler.stop() ya existe
             ui.display_output("Apagando todos los sistemas, Señor. ¡Que tenga un excelente día!", read_aloud=True)
             break
             
@@ -151,7 +183,7 @@ def main(boot_mode=None, gui_active=False):
                 else: break
 
             try:
-                from ui.gui import update_gui_state
+                from ui.webview.gui_state import update_gui_state
                 update_gui_state("PROCESSING")
             except Exception:
                 logger.debug("GUI no disponible en este modo")
@@ -189,14 +221,19 @@ if __name__ == "__main__":
 
     if not headless:
         try:
-            from ui.gui import QApplication, JarvisMainWindow
+            from PyQt6.QtWidgets import QApplication
+            from ui.webview.main_window import MainWindow
             app = QApplication(sys.argv)
-            window = JarvisMainWindow()
+            window = MainWindow()
             if not tray_mode:
-                window.showMaximized()
-            # tray_mode=True: JarvisMainWindow ya corrió _setup_tray_icon() dentro de
-            # _init_ui() (incondicional, ver ui/gui.py) — la bandeja queda funcional sin
-            # haber llamado show()/showMaximized() (CA-03, CA-04 de SPEC-011).
+                window.show()
+            # REQ-015: tamaño/posición ya resueltos por `fit_size_to_screen()` dentro del
+            # constructor de `MainWindow` (CA-04) — nunca `showMaximized()` (ver
+            # arquitectura-015.md §5.1, evita los márgenes extra que DWM añade en
+            # maximizado+frameless en Windows).
+            # tray_mode=True: MainWindow ya corrió _setup_tray_icon() dentro de __init__()
+            # (incondicional) — la bandeja queda funcional sin haber llamado show() (CA-03,
+            # CA-04 de SPEC-011).
         except Exception as e:
             print(f"[GUI] No disponible, modo headless: {e}")
             headless = True

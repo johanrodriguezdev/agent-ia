@@ -20,7 +20,7 @@ import logging
 from unittest.mock import MagicMock, patch
 
 import setup_autostart
-import ui.gui as gui_module
+import ui.webview.main_window as main_window_module
 
 
 # ---------------------------------------------------------------------------
@@ -189,11 +189,13 @@ def test_confirmar_rechaza_cualquier_otra_respuesta():
 
 
 # ---------------------------------------------------------------------------
-# CA-08 — sin controles de autostart en ui/gui.py
+# CA-08 — sin controles de autostart en el shell de la GUI
+# REQ-015: `ui/gui.py` fue eliminado (reemplazado por WebView) — el módulo equivalente
+# hoy es `ui/webview/main_window.py`.
 # ---------------------------------------------------------------------------
 
 def test_gui_sin_controles_de_autostart_ca08():
-    with open(gui_module.__file__, encoding="utf-8") as f:
+    with open(main_window_module.__file__, encoding="utf-8") as f:
         source = f.read().lower()
     for keyword in ("autostart", "auto-inicio", "auto_inicio"):
         assert keyword not in source

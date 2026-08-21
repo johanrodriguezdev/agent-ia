@@ -237,6 +237,181 @@ def test_try_claude_sin_claude_fn_cae_en_reasoning_loop(monkeypatch):
     assert result.text == "respuesta del loop"
 
 
+# ─────────────────────────────────────────────
+#  REQ-017 — "completar todas las tareas pendientes" en lote (CA-01 a CA-06 de SPEC-017)
+# ─────────────────────────────────────────────
+
+def test_bulk_complete_prioriza_sobre_list_trigger(monkeypatch):
+    """CA-01: 'completa todas las tareas pendientes' (contiene el substring de
+    _TASK_LIST_TRIGGERS 'tareas pendientes') resuelve vía task_complete_all, NO vía
+    task_list — spy sobre execute_tool."""
+    calls = []
+
+    def fake_execute_tool(name, params, channel, user_id):
+        calls.append(name)
+        return f"resultado:{name}"
+
+    monkeypatch.setattr("agents.tool_registry.execute_tool", fake_execute_tool)
+
+    result = resolve("completa todas las tareas pendientes", ChannelType.DESKTOP, user_id="u1")
+
+    assert calls == ["task_complete_all"], calls
+    assert result.matched_by == "task_tool"
+
+
+def test_bulk_complete_variantes_sin_palabra_tarea(monkeypatch):
+    """CA-01: variantes sin la palabra 'tarea' explícita también disparan
+    task_complete_all — cubre el gap que señaló orion-baseline."""
+    calls = []
+
+    def fake_execute_tool(name, params, channel, user_id):
+        calls.append(name)
+        return f"resultado:{name}"
+
+    monkeypatch.setattr("agents.tool_registry.execute_tool", fake_execute_tool)
+
+    for text in ("ya completé todas las pendientes", "marca todas como completadas"):
+        calls.clear()
+        resolve(text, ChannelType.DESKTOP, user_id="u1")
+        assert calls == ["task_complete_all"], (text, calls)
+
+
+def test_mensaje_bulk_lista_ids_y_titulos(monkeypatch):
+    """CA-02: el texto de respuesta contiene cada '#id - título' de las tareas
+    completadas, no un genérico 'listo'."""
+    from tasks.task_manager import task_manager
+
+    monkeypatch.setattr(task_manager, "list_tasks", lambda *a, **k: [{"id": 5, "title": "comprar pan"}])
+    monkeypatch.setattr(task_manager, "complete_task", lambda *a, **k: True)
+
+    result = resolve("completa todas mis tareas pendientes", ChannelType.DESKTOP, user_id="u1")
+
+    assert "#5 - comprar pan" in result.text
+    assert result.text.strip().lower() != "listo"
+
+
+def test_un_pendiente_sin_id_sin_cambios(monkeypatch):
+    """CA-03: con texto que YA matchea _is_task_complete_phrase() hoy (literal de
+    _TASK_COMPLETE_TRIGGERS, sin 'todas' ni 'tareas pendientes') y 1 sola pendiente:
+    resuelve vía task_complete (no task_complete_all), mismo mensaje que antes de
+    REQ-017."""
+    from tasks.task_manager import task_manager
+
+    monkeypatch.setattr(task_manager, "list_tasks", lambda *a, **k: [{"id": 7, "title": "regar plantas"}])
+    complete_calls = []
+    monkeypatch.setattr(
+        task_manager, "complete_task",
+        lambda task_id, user_id: complete_calls.append((task_id, user_id)) or True,
+    )
+
+    result = resolve("ya completé la tarea", ChannelType.DESKTOP, user_id="u1")
+
+    assert complete_calls == [(7, "u1")]
+    assert "regar plantas" in result.text
+    assert result.matched_by == "task_tool"
+
+
+def test_cero_pendientes_sin_cambios(monkeypatch):
+    """CA-04: texto que matchea _TASK_LIST_TRIGGERS (sin 'todas' ni ID) con 0 pendientes:
+    mensaje sin cambios — sigue resolviendo vía task_list/get_task_summary, no vía el
+    tool nuevo task_complete_all (reutiliza el hallazgo de orion-baseline sobre el
+    mensaje real de get_task_summary)."""
+    from tasks.task_manager import task_manager
+
+    monkeypatch.setattr(
+        task_manager, "get_task_summary",
+        lambda user_id: "No tiene ninguna tarea registrada, Señor. Todo está en orden.",
+    )
+    complete_calls = []
+    monkeypatch.setattr(
+        task_manager, "complete_task", lambda *a, **k: complete_calls.append(1) or True,
+    )
+
+    result = resolve("mis tareas pendientes", ChannelType.DESKTOP, user_id="u1")
+
+    assert complete_calls == []
+    assert result.text == "No tiene ninguna tarea registrada, Señor. Todo está en orden."
+
+
+def test_id_explicito_gana_sobre_todas(monkeypatch):
+    """CA-05, CA-06: 'de todas mis tareas, la #3 ya la hice' y 'de todas mis tareas,
+    completa la #3' (ejemplos literales de SPEC-017.md) resuelven task_complete con
+    task_id=3, NO task_complete_all ni task_list — spy sobre execute_tool."""
+    calls = []
+
+    def fake_execute_tool(name, params, channel, user_id):
+        calls.append((name, params.get("text")))
+        return f"resultado:{name}"
+
+    monkeypatch.setattr("agents.tool_registry.execute_tool", fake_execute_tool)
+
+    for text in ("de todas mis tareas, la #3 ya la hice", "de todas mis tareas, completa la #3"):
+        calls.clear()
+        resolve(text, ChannelType.DESKTOP, user_id="u1")
+        assert len(calls) == 1, (text, calls)
+        name, sent_text = calls[0]
+        assert name == "task_complete", (text, calls)
+        assert sent_text == text
+
+
+def test_mismo_texto_bulk_en_3_canales(monkeypatch):
+    """CA-06: 'completa todas las tareas pendientes' vía resolve() con DESKTOP
+    (user_id='default'), TELEGRAM (user_id='123') y DISCORD (user_id='discord_456'),
+    cada uno con sus propias pendientes mockeadas — mismo matched_by, cada canal
+    completa SOLO las suyas (partición por user_id, documentada como preexistente)."""
+    from tasks.task_manager import task_manager
+
+    pending_by_user = {
+        "default": [{"id": 1, "title": "tarea desktop"}],
+        "123": [{"id": 2, "title": "tarea telegram"}],
+        "discord_456": [{"id": 3, "title": "tarea discord"}],
+    }
+    completed_calls = []
+
+    monkeypatch.setattr(
+        task_manager, "list_tasks",
+        lambda user_id, status="pending", limit=20: pending_by_user.get(user_id, []),
+    )
+    monkeypatch.setattr(
+        task_manager, "complete_task",
+        lambda task_id, user_id: completed_calls.append((task_id, user_id)) or True,
+    )
+
+    text = "completa todas las tareas pendientes"
+    results = {}
+    for channel, user_id in (
+        (ChannelType.DESKTOP, "default"),
+        (ChannelType.TELEGRAM, "123"),
+        (ChannelType.DISCORD, "discord_456"),
+    ):
+        completed_calls.clear()
+        result = resolve(text, channel, user_id=user_id)
+        results[channel] = (result, list(completed_calls))
+
+    matched_by_values = {r.matched_by for r, _ in results.values()}
+    assert matched_by_values == {"task_tool"}, matched_by_values
+
+    assert results[ChannelType.DESKTOP][1] == [(1, "default")]
+    assert results[ChannelType.TELEGRAM][1] == [(2, "123")]
+    assert results[ChannelType.DISCORD][1] == [(3, "discord_456")]
+
+
+def test_bulk_no_intercepta_create(monkeypatch):
+    """Regresión: 'recuérdame completar todas mis tareas mañana' sigue resolviendo
+    task_create (create mantiene prioridad, sin cambios)."""
+    calls = []
+
+    def fake_execute_tool(name, params, channel, user_id):
+        calls.append(name)
+        return f"resultado:{name}"
+
+    monkeypatch.setattr("agents.tool_registry.execute_tool", fake_execute_tool)
+
+    resolve("recuérdame completar todas mis tareas mañana", ChannelType.DESKTOP, user_id="u1")
+
+    assert calls == ["task_create"], calls
+
+
 def test_try_claude_con_claude_fn_no_toca_reasoning_loop(monkeypatch):
     """Con `claude_fn` inyectado (p.ej. `channels/gateway.py`), el comportamiento es
     idéntico al de antes de REQ-007: se llama `claude_fn(text)` directo y

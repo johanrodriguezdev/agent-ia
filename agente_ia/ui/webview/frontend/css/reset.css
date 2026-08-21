@@ -1,0 +1,66 @@
+/* ui/webview/frontend/css/reset.css
+   REQ-015 — reset mínimo, sin normalize.css externo (vanilla, sin dependencias vendorizadas
+   fuera de qwebchannel.js — ver arquitectura-015.md §0.2). */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  /* REQ-016/CA-27: Inter primero, fallback de sistema intacto si el .woff2 no carga
+     (font-display: swap en css/fonts.css evita texto invisible, ver CA-30/§9.2). */
+  font-family: "Inter", -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  /* CA-03: el fondo se declara siempre, nunca queda transparente por accidente — el
+     modelo de caja CSS lo pinta por defecto en todo elemento, a diferencia de Qt/QSS
+     (ver arquitectura-015.md §5.1). */
+  background: transparent;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+textarea, input {
+  font: inherit;
+  color: inherit;
+}
+
+ul, ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+h1, h2, h3, h4, h5, h6, p {
+  margin: 0;
+}
+
+a {
+  color: inherit;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}

@@ -415,16 +415,26 @@ async def cmd_skills(update, context):
 
 async def cmd_tareas(update, context):
     """Muestra las tareas pendientes del usuario."""
-    from tasks.task_manager import task_manager
+    from core.security_manager import ChannelType
+    from agents.tool_registry import execute_tool
+
     user = update.effective_user
-    summary = task_manager.get_task_summary(str(user.id))
+    user_id = str(user.id)
+    # REQ-018/CA-10 — reemplazo limpio: task_list es GREEN, execute_tool() no cambia el
+    # comportamiento observable, solo agrega auditoría en audit.db. Si algún cambio futuro
+    # bloqueara esta acción, ActionDenied llegaría a handle_error() (error handler global,
+    # ya registrado) — fail-safe aceptable, sin try/except especial para este caso.
+    summary = execute_tool("task_list", {"user_id": user_id}, ChannelType.TELEGRAM, user_id=user_id)
     await update.message.reply_text(summary, parse_mode="Markdown")
 
 
 async def cmd_nueva(update, context):
     """Crea una nueva tarea. Uso: /nueva recuérdame mañana a las 9am llamar al banco"""
     from tasks.task_manager import task_manager
+    from core.security_manager import security_manager, ChannelType, format_details
+
     user = update.effective_user
+    user_id = str(user.id)
     text = " ".join(context.args) if context.args else ""
 
     if not text:
@@ -441,7 +451,18 @@ async def cmd_nueva(update, context):
         )
         return
 
-    result = task_manager.create_from_natural(text, str(user.id), "telegram")
+    # REQ-018/CA-10 — mismo gate público que execute_tool() usa internamente, solo para
+    # que la invocación quede auditada en audit.db (GREEN, sin efecto en el resultado ni
+    # bloqueo posible). No se usa execute_tool("task_create", ...) porque
+    # agents/tool_registry.py::_task_create_invoke() no replica el fallback de "tarea
+    # simple" de este comando (ver arquitectura-018.md §3, decisión CA-10).
+    security_manager.require_confirmation(
+        "task_create", ChannelType.TELEGRAM,
+        details=format_details("tool:task_create", {"text": text, "user_id": user_id}),
+        user_id=user_id,
+    )
+
+    result = task_manager.create_from_natural(text, user_id, "telegram")
     if result:
         msg = task_manager.format_task_created(result)
         await update.message.reply_text(msg, parse_mode="Markdown")
@@ -468,7 +489,10 @@ async def cmd_nueva(update, context):
 async def cmd_completar(update, context):
     """Marca una tarea como completada. Uso: /completar [id]"""
     from tasks.task_manager import task_manager
+    from core.security_manager import security_manager, ChannelType, format_details
+
     user = update.effective_user
+    user_id = str(user.id)
 
     if not context.args:
         await update.message.reply_text(
@@ -484,7 +508,17 @@ async def cmd_completar(update, context):
         await update.message.reply_text("El ID de tarea debe ser un número, Señor.")
         return
 
-    success = task_manager.complete_task(task_id, str(user.id))
+    # REQ-018/CA-10 — mismo criterio que cmd_nueva(): auditoría vía require_confirmation()
+    # directo, sin execute_tool() (el tool task_complete espera texto libre + su propio
+    # regex de extracción de ID, con ramas de auto-completar/pedir aclaración que este
+    # comando no tiene hoy — ver arquitectura-018.md §3).
+    security_manager.require_confirmation(
+        "task_complete", ChannelType.TELEGRAM,
+        details=format_details("tool:task_complete", {"text": str(task_id), "user_id": user_id}),
+        user_id=user_id,
+    )
+
+    success = task_manager.complete_task(task_id, user_id)
     if success:
         await update.message.reply_text(
             f"☑️ *Tarea #{task_id} completada.*\n\n"
@@ -500,7 +534,11 @@ async def cmd_completar(update, context):
 async def cmd_eliminar(update, context):
     """Elimina una tarea. Uso: /eliminar [id]"""
     from tasks.task_manager import task_manager
+    from core.security_manager import security_manager, ChannelType
+    from channels.telegram_confirmation_adapter import telegram_confirmation_adapter
+
     user = update.effective_user
+    user_id = str(user.id)
 
     if not context.args:
         await update.message.reply_text(
@@ -516,7 +554,41 @@ async def cmd_eliminar(update, context):
         await update.message.reply_text("El ID de tarea debe ser un número, Señor.")
         return
 
-    success = task_manager.delete_task(task_id, str(user.id))
+    # REQ-018/CA-09, Hallazgo E (security-audit-018.md, re-chequeo) — reserva SÍNCRONA,
+    # en este mismo Task, ANTES de lanzar el hilo worker de asyncio.to_thread(). Es la
+    # verificación atómica y autoritativa: cierra por completo (no solo acota) la ventana
+    # donde un segundo mensaje casi simultáneo del mismo usuario podía llegar antes de que
+    # la entrada existiera en _pending (que antes se insertaba recién dentro de confirm(),
+    # ya en el hilo worker).
+    if not telegram_confirmation_adapter.reserve_pending(user_id):
+        await update.message.reply_text(
+            "Ya tenés una confirmación pendiente, Señor — respondé sí/no primero."
+        )
+        return
+
+    telegram_confirmation_adapter.set_request_context(user_id, update.effective_chat.id)
+
+    # REQ-018/CA-01, CA-08 — require_confirmation() es síncrono y, para 'delete_task' en
+    # Telegram, ahora bloquea (vía el adaptador) hasta 120s esperando la respuesta del
+    # usuario. Corre en un hilo worker (asyncio.to_thread) para no bloquear el loop de
+    # asyncio de python-telegram-bot — otros usuarios siguen operando con normalidad
+    # mientras este usuario tiene una confirmación pendiente (CA-08, Hallazgo A —
+    # requiere .concurrent_updates(True) en run_telegram_bot(), ver más abajo).
+    confirmed = await asyncio.to_thread(
+        security_manager.require_confirmation,
+        "delete_task",
+        ChannelType.TELEGRAM,
+        details=f"task_id={task_id}",
+        user_id=user_id,
+    )
+
+    if not confirmed:
+        await update.message.reply_text(
+            f"Eliminación de la tarea #{task_id} cancelada, Señor."
+        )
+        return
+
+    success = task_manager.delete_task(task_id, user_id)
     if success:
         await update.message.reply_text(
             f"🗑 *Tarea #{task_id} eliminada, Señor.*",
@@ -529,6 +601,32 @@ async def cmd_eliminar(update, context):
 
 
 # ── Handlers de mensajes ───────────────────────────────────────────
+
+async def _intercept_confirmacion_pendiente(update, context):
+    """Handler de máxima prioridad (group=-1) — intercepta CUALQUIER mensaje de texto,
+    incluidos comandos slash, cuando el usuario que lo envía tiene una confirmación
+    pendiente (REQ-018, CA-05; "Casos borde" de SPEC-018.md: un comando nuevo mientras hay
+    confirmación pendiente se consume como respuesta, no se ejecuta). Los
+    CommandHandler/MessageHandler de group=0 (incluido handle_text) nunca ven el update si
+    esto lo consume — se corta la propagación con ApplicationHandlerStop.
+
+    Registrado con filters.TEXT SIN excluir comandos (a diferencia de handle_text, que sí
+    los excluye) — necesita capturar también los comandos, porque el caso borde de la SPEC
+    (/tareas, /nueva algo mientras hay confirmación pendiente) exige que ese mensaje se
+    consuma como respuesta a la confirmación, no que dispare su propio CommandHandler."""
+    from telegram.ext import ApplicationHandlerStop
+    from channels.telegram_confirmation_adapter import telegram_confirmation_adapter
+
+    message = update.message
+    if message is None or not message.text:
+        return
+    user = update.effective_user
+    if user is None:
+        return
+
+    if telegram_confirmation_adapter.resolve(str(user.id), message.text):
+        raise ApplicationHandlerStop
+
 
 async def handle_text(update, context):
     from channels.gateway import GlassGateway, GlassMessage, MessageType
@@ -770,6 +868,22 @@ async def handle_error(update, context):
 
 # ── Punto de entrada ───────────────────────────────────────────────
 
+async def _post_init_telegram(application) -> None:
+    """Callback post_init de la Application (REQ-018) — corre una vez, dentro del event
+    loop ya arrancado por python-telegram-bot, antes de que empiece el polling. Es el
+    primer punto del ciclo de vida donde existe un loop corriendo del que capturar una
+    referencia (asyncio.get_running_loop()) — intentarlo antes, en el cuerpo síncrono de
+    run_telegram_bot(), fallaría porque ese loop todavía no existe en ese punto."""
+    from core.confirmation import register_confirmation_adapter
+    from core.security_manager import ChannelType
+    from channels.telegram_confirmation_adapter import telegram_confirmation_adapter
+
+    loop = asyncio.get_running_loop()
+    telegram_confirmation_adapter.bind(application.bot, loop)
+    register_confirmation_adapter(ChannelType.TELEGRAM, telegram_confirmation_adapter.confirm)
+    logger.info("Adaptador de confirmación conversacional registrado para ChannelType.TELEGRAM")
+
+
 def run_telegram_bot():
     try:
         from telegram.ext import (
@@ -801,7 +915,25 @@ def run_telegram_bot():
     print(f"  Ctrl+C para detener")
     print(f"{'='*50}\n")
 
-    app = Application.builder().token(token).build()
+    app = (
+        Application.builder()
+        .token(token)
+        .concurrent_updates(True)   # REQ-018/Hallazgo A (security-audit-018.md) — sin esto,
+                                    # PTB despacha updates uno a la vez (SimpleUpdateProcessor
+                                    # default, max_concurrent_updates=1) y el bot completo queda
+                                    # bloqueado hasta 120s para todos los usuarios mientras uno
+                                    # solo tiene una confirmación de /eliminar pendiente.
+        .post_init(_post_init_telegram)
+        .build()
+    )
+
+    # ── Interceptor de confirmación pendiente (REQ-018/CA-05) ───────
+    # Prioridad máxima (group=-1, corre antes que el group=0 donde viven todos los
+    # CommandHandler/handle_text) — intercepta cualquier mensaje de texto, incluidos
+    # comandos slash, cuando el usuario que lo envía tiene una confirmación pendiente.
+    app.add_handler(
+        MessageHandler(filters.TEXT, _intercept_confirmacion_pendiente), group=-1
+    )
 
     # ── Comandos existentes ────────────────────────────────────────
     app.add_handler(CommandHandler("start",   cmd_start))

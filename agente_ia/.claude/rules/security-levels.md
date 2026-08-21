@@ -78,6 +78,28 @@ handler, y nunca lee `params` de la invocación para decidir el canal — solo e
 explícitamente por el caller. Ver `workspace/adjuntos/REQ-005/` para el detalle completo (spec,
 arquitectura, auditoría de seguridad).
 
+## REQ-019 — override de configuración de usuario (solo subir, nunca bajar)
+Desde REQ-019, el usuario puede subir (nunca bajar) el nivel de confirmación de una
+categoría acotada de acciones (v1: apertura de aplicaciones y navegación) desde la
+pantalla "Configuración" del webview de escritorio. El nivel efectivo de cualquier acción
+es siempre `max(nivel_código, nivel_config)` — nunca `min` —, calculado en
+`core/security_manager.py::SecurityManager._merge_with_override()` cada vez que se
+registra una acción (`register_action()`), sin importar en qué de los 4 puntos de
+registro del sistema ocurra (los 3 de `core/security_manager.py` +
+`agents/tool_registry.py:73`). El override se persiste en `security_overrides.json`
+(`core/security_config.py`), archivo separado de `config.json` para que una corrupción de
+configuración general nunca borre ni afecte la configuración de seguridad, ni viceversa.
+Un archivo de overrides ausente, corrupto, o con una clave/valor inválido se trata SIEMPRE
+como "sin overrides" (nivel de código puro) — nunca como "sin restricciones". El cambio
+requiere reiniciar la app para tomar efecto (no hay aplicación en caliente en v1). Las
+acciones sin clasificar y las 10 acciones 🔴 Rojo de REQ-005 quedan completamente fuera de
+este mecanismo — el catálogo `_SECURITY_ROWS_V1` de `ui/webview/bridge.py` nunca las
+incluye, y además el propio `_merge_with_override()` bloquea cualquier intento de
+downgrade de una acción RED aunque `security_overrides.json` se edite a mano. El catálogo
+v1 tiene además un techo de `yellow` (`_V1_MAX_OFFERABLE_LEVEL`, `ui/webview/bridge.py`):
+ninguna fila de v1 ofrece ni acepta subir a `red`, para evitar que el usuario autobloquee
+una acción benigna sin `ORION_AUTH_PIN` configurado.
+
 ## Verificación en QA
 - [ ] Toda acción destructiva tiene su nivel clasificado
 - [ ] Las acciones Amarillo piden confirmación antes de ejecutar

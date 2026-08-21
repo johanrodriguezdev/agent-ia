@@ -1,0 +1,24 @@
+/* ui/webview/frontend/css/animations.css
+   REQ-015/CA-32..CA-34 — únicas animaciones del sistema, todas CSS puro. Cero
+   `QPropertyAnimation` (arquitectura-015.md §1).
+*/
+
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes typingBounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+
+/* CA-34: hover/focus con transición corta en botones, ítems de sidebar y chips — las
+   reglas de `transition` viven co-localizadas en cada hoja (sidebar.css, composer.css,
+   layout.css); este archivo concentra los `@keyframes` compartidos, no las transiciones
+   puntuales de cada componente. */

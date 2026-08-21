@@ -1,0 +1,68 @@
+/* ui/webview/frontend/css/theme.css
+   REQ-015/CA-35, CA-37 — fuente #2 de verdad de la paleta (la fuente #1 es
+   `ui/webview/theme.py::DARK_TOKENS`/`LIGHT_TOKENS`, ver arquitectura-015.md §1). Un test
+   (`tests/test_webview_theme.py`) parsea este archivo y compara contra el dict Python
+   para detectar drift entre ambas copias — mantener EXACTAMENTE los mismos hex acá y allá.
+
+   `set_theme()` (bridge) solo cambia `document.documentElement.dataset.theme` — sin
+   recarga de página ni reinicio (CA-37, ver theme.js).
+*/
+
+:root[data-theme="dark"] {
+  --bg-primary: #0d1117;
+  --bg-secondary: #161b22;
+  --bg-input: #1c2333;
+  --bg-hover: #252d3f;
+  --border: #30363d;
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-accent: #58a6ff;
+  --bubble-user: #1f77b4;
+  --bubble-agent: #2d2d2d;
+  --success: #3fb950;
+  --warning: #d29922;
+  --danger: #f85149;
+}
+
+:root[data-theme="light"] {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f6f8fa;
+  --bg-input: #f0f2f5;
+  --bg-hover: #e8eaed;
+  --border: #d0d7de;
+  --text-primary: #24292f;
+  --text-secondary: #57606a;
+  --text-accent: #0969da;
+  --bubble-user: #d1e5ff;
+  --bubble-agent: #e8eaed;
+  --success: #2da44e;
+  --warning: #bf8700;
+  --danger: #cf222e;
+}
+
+/* CA-38: DEFAULT_THEME = "light" — si por alguna razón `data-theme` todavía no fue
+   escrito por theme.js (primer paint, antes de que `theme_changed` llegue), el atributo
+   ya viene en `light` desde `index.html`, así que este bloque es solo una red de
+   seguridad adicional, no la única fuente del valor inicial. */
+:root:not([data-theme]) {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f6f8fa;
+  --bg-input: #f0f2f5;
+  --bg-hover: #e8eaed;
+  --border: #d0d7de;
+  --text-primary: #24292f;
+  --text-secondary: #57606a;
+  --text-accent: #0969da;
+  --bubble-user: #d1e5ff;
+  --bubble-agent: #e8eaed;
+  --success: #2da44e;
+  --warning: #bf8700;
+  --danger: #cf222e;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  /* CA-33: transición de tema nunca instantánea. */
+  transition: background-color 200ms, color 200ms;
+}

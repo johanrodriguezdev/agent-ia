@@ -1,0 +1,204 @@
+/* ui/webview/frontend/css/chat.css
+   REQ-015/CA-12..CA-19, CA-46 — área de conversación: estado vacío (saludo grande),
+   burbujas usuario/asistente/sistema, Markdown/código, indicador de escritura.
+*/
+
+#chat-area {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 0 24px;
+}
+
+/* -------------------------------------------------------------- estado vacío (CA-46) */
+
+#empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  text-align: center;
+  padding: 32px;
+}
+
+#empty-state-avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background-color: var(--text-accent);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+#empty-state-greeting {
+  font-size: 40px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+#empty-state-subtitle {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+/* -------------------------------------------------------------- mensajes (CA-12, CA-14, CA-32) */
+
+#messages {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px 0;
+}
+
+.message {
+  display: flex;
+  max-width: 78%;
+  animation: fadeSlideIn 300ms ease;
+}
+
+.msg-user {
+  align-self: flex-end;
+  justify-content: flex-end;
+}
+
+.msg-assistant {
+  align-self: flex-start;
+}
+
+.msg-system {
+  align-self: center;
+  max-width: 90%;
+}
+
+.bubble {
+  border-radius: 16px;
+  padding: 12px 16px;
+  font-size: 14px;
+  line-height: 1.55;
+  overflow-wrap: break-word;
+}
+
+.msg-user .bubble {
+  background-color: var(--bubble-user);
+  color: var(--text-primary);
+  border-bottom-right-radius: 4px;
+}
+
+/* CA-36: `--text-primary` sobre `--bubble-user` da 4.08:1 en dark (por debajo de AA
+   4.5:1 para texto normal) — `--bubble-user` en dark (#1f77b4) es un azul saturado que
+   necesita texto más claro que el resto de la superficie. Blanco puro sobre esa burbuja
+   da 4.82:1. En light, `--bubble-user` (#d1e5ff) ya contrasta bien con `--text-primary`
+   (11.42:1), así que no se toca. */
+:root[data-theme="dark"] .msg-user .bubble {
+  color: #ffffff;
+}
+
+.msg-assistant .bubble {
+  background-color: var(--bubble-agent);
+  color: var(--text-primary);
+  border-bottom-left-radius: 4px;
+}
+
+.msg-system .bubble {
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-align: center;
+  padding: 4px 12px;
+}
+
+.bubble p:not(:last-child) {
+  margin-bottom: 8px;
+}
+
+.bubble pre {
+  border-radius: 8px;
+  padding: 12px;
+  overflow-x: auto;
+  font-size: 12.5px;
+  margin: 8px 0;
+}
+
+.bubble code {
+  font-family: "Cascadia Code", Consolas, "Courier New", monospace;
+}
+
+.bubble :not(pre) > code {
+  background-color: var(--bg-hover);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.bubble table {
+  border-collapse: collapse;
+  font-size: 13px;
+  margin: 8px 0;
+}
+
+.bubble th, .bubble td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+}
+
+.bubble a {
+  color: var(--text-accent);
+}
+
+/* CA-18: bloques largos (>500 chars) se recortan con degradado + "Ver más" */
+.bubble.clamped {
+  max-height: 220px;
+  overflow: hidden;
+  position: relative;
+  mask-image: linear-gradient(to bottom, black 75%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, black 75%, transparent 100%);
+}
+
+.bubble-expand-btn {
+  display: block;
+  margin-top: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-accent);
+  font-size: 12px;
+  padding: 0;
+}
+
+/* -------------------------------------------------------------- typing indicator (CA-15) */
+
+#typing-indicator {
+  display: flex;
+  gap: 4px;
+  padding: 0 0 16px 4px;
+}
+
+/* CA-15 — bug real encontrado en la verificación manual (envío de mensaje real vía la
+   app corriendo, ver desarrollo-log-015.md): `chat.js::setTyping()` alterna el atributo
+   `hidden`, pero la regla de arriba (`#typing-indicator { display: flex }`, un selector
+   de ID) tiene más especificidad que la regla `[hidden] { display: none }` del user-agent
+   stylesheet — el indicador quedaba SIEMPRE visible/animando, incluso después de que la
+   respuesta ya había llegado. Este selector (ID + atributo) tiene más especificidad que
+   el de arriba y restaura el comportamiento de `hidden`. */
+#typing-indicator[hidden] {
+  display: none;
+}
+
+#typing-indicator span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--text-secondary);
+  animation: typingBounce 1.2s infinite ease-in-out;
+}
+
+#typing-indicator span:nth-child(2) { animation-delay: 0.15s; }
+#typing-indicator span:nth-child(3) { animation-delay: 0.3s; }

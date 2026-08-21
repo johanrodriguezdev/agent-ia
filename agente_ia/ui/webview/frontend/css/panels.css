@@ -1,0 +1,133 @@
+/* ui/webview/frontend/css/panels.css
+   REQ-016/§8.3, §8.4 — contenido de los modales de Tareas/Proyectos. Reutiliza
+   `.modal-overlay`/`.modal-box` de modal.css (misma raíz visual que la confirmación
+   YELLOW) pero montado sobre `#panel-modal-root`, nunca `#confirm-modal-root` (§0.3).
+*/
+
+.modal-box-wide {
+  width: 480px;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.panel-close-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 6px;
+  width: 24px;
+  height: 24px;
+}
+
+.panel-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.panel-form input,
+.panel-form select {
+  border: 1px solid var(--border);
+  background-color: var(--bg-input);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.panel-submit-btn {
+  background-color: var(--text-accent);
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 13px;
+}
+
+.panel-list {
+  max-height: 320px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.panel-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  background-color: var(--bg-secondary);
+}
+
+.panel-item-pickable {
+  width: 100%;
+  text-align: left;
+  border: none;
+  cursor: pointer;
+}
+
+.panel-item-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.panel-item-title {
+  font-size: 13px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panel-item-meta {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.task-item.completed .panel-item-title {
+  text-decoration: line-through;
+  color: var(--text-secondary);   /* CA-07: distinción visual pendiente/completada */
+}
+
+.panel-item-actions {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+
+.panel-item-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 6px;
+  width: 26px;
+  height: 26px;
+  transition: background-color 150ms, color 150ms;
+}
+
+.panel-item-btn:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.panel-item-btn-danger:hover {
+  background-color: var(--danger);
+  color: #ffffff;
+}
+
+.panel-empty {
+  padding: 24px 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
