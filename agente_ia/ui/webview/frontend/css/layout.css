@@ -1,0 +1,93 @@
+/* ui/webview/frontend/css/layout.css
+   REQ-015/CA-01, CA-03, CA-04 — estructura general: gutter transparente (deja ver el
+   escritorio, ver MainWindow.WA_TranslucentBackground) + tarjeta con esquinas redondeadas
+   y sombra dibujadas enteramente en CSS (nunca Qt/QSS — ver arquitectura-015.md §5.1).
+*/
+
+html, body {
+  background: transparent;
+}
+
+#app-shell {
+  position: fixed;
+  inset: 10px;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+/* -------------------------------------------------------------- window chrome (CA-01, CA-02) */
+
+#window-chrome {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 36px;
+  flex: none;
+  /* Región arrastrable con `startSystemMove()` (window_chrome.js) — el 6px de borde de
+     #app-shell ya cubre el hit-test de resize (CA-02), esta franja es solo para mover. */
+  -webkit-app-region: drag;
+}
+
+#drag-region {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  padding-left: 14px;
+}
+
+#agent-name-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+}
+
+#window-controls {
+  display: flex;
+  height: 100%;
+  -webkit-app-region: no-drag;
+}
+
+.window-btn {
+  width: 44px;
+  height: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 150ms;
+}
+
+.window-btn:hover {
+  background-color: var(--bg-hover);
+}
+
+.window-btn-close:hover {
+  background-color: var(--danger);
+  color: #ffffff;
+}
+
+/* -------------------------------------------------------------- cuerpo (sidebar + main) */
+
+#app-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+#main-column {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}

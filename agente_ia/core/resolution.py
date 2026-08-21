@@ -18,6 +18,7 @@ de texto libre) — mismo invariante documentado en `security_manager.py:214-221
 """
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -141,13 +142,45 @@ def _is_task_complete_phrase(text_lower: str) -> bool:
     return mentions_task and mentions_done
 
 
+# REQ-017 (CA-01/CA-02): palabras clave de alcance "todas" — amplias pero determinísticas,
+# sin LLM. AJUSTE respecto al ASUMIDO original de SPEC-017.md (que decía "todas/todos/todo"):
+# Johan pidió sacar "todo" (singular) del set — es la palabra de mayor riesgo de falso
+# positivo (aparece en frases sin relación a tareas, ej. "todo bien", "eso es todo"), y los
+# 3 ejemplos literales de la SPEC ("completa todas...", "ya completé todas...", "termina
+# todas mis tareas") ya matchean con "todas" solo. Ver arquitectura-017.md, "Ajustes de
+# Johan", punto 2.
+_TASK_BULK_ALL_RE = re.compile(r"\b(?:todas|todos)\b")
+
+# Verbos de "completar" en cualquier conjugación común (imperativo/presente/pretérito/
+# participio): completa/completé/completo/completando/completado -> "complet";
+# termina/terminé/terminado -> "termin"; marca/marcar/marqué -> "marc". Mismo criterio que
+# sugiere SPEC-017.md en "Casos borde" ("la presencia de un verbo de completar — 'completa',
+# 'termina', 'marca', 'ya completé' — antes de evaluar el trigger de listado puro").
+_TASK_BULK_COMPLETE_VERB_STEMS = ("complet", "termin", "marc")
+
+
+def _is_bulk_complete_phrase(text_lower: str) -> bool:
+    """Detecta intención de completar TODAS las tareas pendientes (CA-01, CA-02).
+
+    Requiere un verbo de completar Y la palabra todas/todos — cualquiera de las dos
+    condiciones sola es demasiado ambigua (un verbo de completar solo no implica lote;
+    "todas"/"todos" solas pueden aparecer en frases sin relación con tareas). Debe
+    evaluarse antes de `_TASK_LIST_TRIGGERS` en `_try_task_tool()` (hallazgo de
+    orion-baseline: la mayoría de las frases reales de "completar todas" contienen
+    substrings de `_TASK_LIST_TRIGGERS` como "tareas pendientes"/"mis tareas" y hoy se
+    resuelven como listado antes de llegar a evaluar completar)."""
+    if not _TASK_BULK_ALL_RE.search(text_lower):
+        return False
+    return any(stem in text_lower for stem in _TASK_BULK_COMPLETE_VERB_STEMS)
+
+
 def _try_task_tool(text: str, channel: "ChannelType", user_id: str) -> Optional[ResolutionResult]:
     """Reemplaza `channels/gateway.py::_try_create_task/_try_list_tasks/_try_complete_task`
     (H3: antes llamaban a `tasks/task_manager.py` directo, sin gate). Ahora resuelve
     siempre vía `agents/tool_registry.py:execute_tool()` — segundo (y único otro) punto
     de gate del sistema. `user_id` viene del `resolve()` que recibió este resolver como
     argumento, nunca del texto libre (Observación B de orion-security)."""
-    from agents.tool_registry import execute_tool
+    from agents.tool_registry import execute_tool, has_explicit_task_id
 
     text_lower = text.lower().strip()
     try:
@@ -158,7 +191,28 @@ def _try_task_tool(text: str, channel: "ChannelType", user_id: str) -> Optional[
             )
             return ResolutionResult(text=result, matched_by="task_tool", channel=channel)
 
-        if any(t in text_lower for t in _TASK_LIST_TRIGGERS):
+        # REQ-017 (CA-01, CA-02, CA-05, CA-06 desambiguación) — evaluado ANTES de
+        # _TASK_LIST_TRIGGERS, hallazgo crítico de orion-baseline.
+        bulk_all = _is_bulk_complete_phrase(text_lower)
+        list_trigger = any(t in text_lower for t in _TASK_LIST_TRIGGERS)
+
+        if bulk_all or list_trigger:
+            # CA-05/CA-06: un ID explícito en el texto gana siempre sobre "todas" y sobre
+            # "listar" — se resuelve como completar UNA tarea (comportamiento existente de
+            # _task_complete_invoke, sin cambios en su rama de ID explícito).
+            if has_explicit_task_id(text):
+                result = execute_tool(
+                    "task_complete", {"text": text, "user_id": user_id}, channel, user_id,
+                )
+                return ResolutionResult(text=result, matched_by="task_tool", channel=channel)
+
+            if bulk_all:
+                result = execute_tool(
+                    "task_complete_all", {"text": text, "user_id": user_id}, channel, user_id,
+                )
+                return ResolutionResult(text=result, matched_by="task_tool", channel=channel)
+
+            # Solo list_trigger, sin "todas" y sin ID explícito -> comportamiento sin cambios.
             result = execute_tool("task_list", {"user_id": user_id}, channel, user_id)
             return ResolutionResult(text=result, matched_by="task_tool", channel=channel)
 

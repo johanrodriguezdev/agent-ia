@@ -42,6 +42,12 @@ dateparser
 # --- Interfaz gráfica HUD ---
 PyQt6
 
+# --- Interfaz gráfica WebView (REQ-015) ---
+PyQt6-WebEngine
+markdown
+Pygments
+bleach
+
 # ================================================================
 # DEPENDENCIAS OPCIONALES (descomenta si las necesitas)
 # ================================================================

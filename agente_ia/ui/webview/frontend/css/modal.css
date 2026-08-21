@@ -1,0 +1,72 @@
+/* ui/webview/frontend/css/modal.css
+   REQ-015/CA-41 — modal genérico de confirmación (YELLOW, incluye delete_conversation
+   desde §10.2). Los campos de texto de este modal (`action_name`, `message`) se insertan
+   vía `textContent` en confirm_modal.js — nunca `innerHTML` (regla de §10.1).
+*/
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 150ms ease;
+}
+
+.modal-box {
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  width: 360px;
+  max-width: calc(100vw - 48px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+}
+
+.modal-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 10px;
+}
+
+.modal-message {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin-bottom: 20px;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.modal-btn {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-primary);
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  transition: background-color 150ms, border-color 150ms;
+}
+
+.modal-btn:hover {
+  background-color: var(--bg-hover);
+}
+
+.modal-btn-confirm {
+  background-color: var(--warning);
+  border-color: var(--warning);
+  color: #1a1300;
+}
+
+.modal-btn-confirm:hover {
+  filter: brightness(1.08);
+}

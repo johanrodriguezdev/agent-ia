@@ -10,12 +10,27 @@ directo sin pasar antes por acá.
 """
 
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Optional
 
 from core.security_manager import ActionDenied, RiskLevel, format_details, security_manager
 
 logger = logging.getLogger(__name__)
+
+# REQ-017 — Reconoce "tarea 3"/"tarea #3"/"numero 3"/"id 3" (comportamiento existente,
+# grupo 1) y también un "#3" suelto sin palabra clave delante (grupo 2) — necesario para
+# que la desambiguación ID-vs-todas (CA-05, CA-06) funcione con frases como "de todas mis
+# tareas, la #3 ya la hice", donde el número no está precedido por tarea/numero/id.
+_TASK_ID_RE = re.compile(r"(?:tarea|numero|número|id)\s*#?(\d+)|#(\d+)")
+
+
+def has_explicit_task_id(text: str) -> bool:
+    """Detecta si el texto menciona un ID de tarea explícito (mismo criterio que usa
+    _task_complete_invoke() para extraerlo). Expuesta para que core/resolution.py decida
+    prioridad "ID explícito gana sobre todas/listar" (SPEC-017 CA-05, CA-06) sin duplicar
+    el regex en dos módulos."""
+    return bool(_TASK_ID_RE.search(text.lower()))
 
 
 @dataclass(frozen=True)
@@ -110,16 +125,14 @@ def _task_complete_invoke(params: dict) -> str:
     """Misma lógica que `channels/gateway.py::_try_complete_task` tenía antes de
     REQ-006 (detección de ID explícito, auto-completar si solo hay una pendiente, o
     pedir aclaración si hay varias), ahora detrás del gate."""
-    import re
-
     from tasks.task_manager import task_manager
 
     text = params.get("text", "")
     user_id = params["user_id"]
     text_lower = text.lower()
 
-    match = re.search(r"(?:tarea|numero|número|id)\s*#?(\d+)", text_lower)
-    task_id = int(match.group(1)) if match else None
+    match = _TASK_ID_RE.search(text_lower)
+    task_id = int(match.group(1) or match.group(2)) if match else None
 
     if task_id is not None:
         success = task_manager.complete_task(task_id, user_id)
@@ -191,4 +204,57 @@ register_tool(ToolSpec(
     },
     risk_level=RiskLevel.GREEN,
     invoke=_task_complete_invoke,
+))
+
+
+# REQ-017 — alineado con el default de list_tasks() (SPEC-017.md, "Casos borde").
+_TASK_COMPLETE_ALL_LIMIT = 20
+
+
+def _task_complete_all_invoke(params: dict) -> str:
+    """Completa todas las tareas pendientes del usuario en una sola invocación (CA-01, CA-02).
+
+    Cada llamada a task_manager.complete_task() ocurre DENTRO de este invoke, que solo se
+    ejecuta después de que execute_tool() ya corrió security_manager.require_confirmation()
+    para la acción 'task_complete_all' — mismo patrón que ya usa _task_complete_invoke() para
+    su rama de auto-completar la única tarea pendiente (CA-07, ver arquitectura-017.md §6).
+    """
+    from tasks.task_manager import task_manager
+
+    user_id = params["user_id"]
+    pending_tasks = task_manager.list_tasks(user_id, status="pending", limit=_TASK_COMPLETE_ALL_LIMIT)
+
+    if not pending_tasks:
+        return "No tiene ninguna tarea pendiente en este momento, Señor."
+
+    completed = [t for t in pending_tasks if task_manager.complete_task(t["id"], user_id)]
+
+    if not completed:
+        return "No pude completar ninguna tarea, Señor. Intente nuevamente."
+
+    n = len(completed)
+    lines = "\n".join(f"• #{t['id']} - {t['title']}" for t in completed)
+    header = f"☑️ *¡Trabajo terminado!* Completé {n} tarea{'s' if n != 1 else ''}, Señor:\n"
+
+    footer = ""
+    if len(pending_tasks) >= _TASK_COMPLETE_ALL_LIMIT:
+        footer = (
+            f"\n\n(Procesé el máximo de {_TASK_COMPLETE_ALL_LIMIT} tareas por vez. Si tiene "
+            f"más pendientes, puede pedírmelo de nuevo.)"
+        )
+    return header + lines + footer
+
+
+register_tool(ToolSpec(
+    name="task_complete_all",
+    description="Completa todas las tareas pendientes del usuario en un solo lote.",
+    parameters_schema={
+        "type": "object",
+        "properties": {"text": {"type": "string"}, "user_id": {"type": "string"}},
+        "required": ["user_id"],
+    },
+    # GREEN: misma clasificación que task_complete — SPEC-017.md es NO NEGOCIABLE en que
+    # completar (individual o en lote) sigue sin pedir confirmación (decisión de UX de Johan).
+    risk_level=RiskLevel.GREEN,
+    invoke=_task_complete_all_invoke,
 ))

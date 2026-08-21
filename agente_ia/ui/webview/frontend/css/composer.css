@@ -1,0 +1,174 @@
+/* ui/webview/frontend/css/composer.css
+   REQ-015/CA-05, CA-20..CA-25, CA-46 — barra de entrada. CA-05 es la pieza crítica de
+   no-regresión del bug #3 de REQ-014 (input invisible): border/background/placeholder se
+   declaran en UNA ÚNICA regla co-localizada acá, sin cascada de selectores por
+   objectName como en QSS (ver arquitectura-015.md §5.1). Un test automatizado
+   (`tests/test_webview_smoke.py`) lee `getComputedStyle()` de `#composer-input` y falla
+   si el borde/fondo quedan transparentes o el placeholder vacío.
+*/
+
+#composer {
+  flex: none;
+  padding: 12px 24px 20px;
+}
+
+#chips-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+  border-radius: 999px;
+  padding: 7px 14px;
+  font-size: 12.5px;
+  transition: background-color 150ms, border-color 150ms;
+}
+
+.chip:hover {
+  background-color: var(--bg-hover);
+  border-color: var(--text-accent);
+}
+
+.chip-risk-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.chip-risk-green { background-color: var(--success); }
+.chip-risk-yellow { background-color: var(--warning); }
+.chip-risk-red { background-color: var(--danger); }
+
+#composer-input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  /* CA-05: borde y fondo declarados acá, en la fila completa (look "píldora" — CA-46). */
+  border: 1px solid var(--border);
+  background-color: var(--bg-input);
+  border-radius: 22px;
+  padding: 8px 10px 8px 14px;
+  transition: border-color 150ms, background-color 200ms;
+}
+
+#composer-input-row:focus-within {
+  border-color: var(--text-accent);
+}
+
+#composer-input {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.4;
+  padding: 6px 4px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+/* CA-05: placeholder siempre visible, nunca vacío ni transparente. */
+#composer-input::placeholder {
+  color: var(--text-secondary);
+  opacity: 1;
+}
+
+#composer-input:disabled {
+  opacity: 0.6;
+}
+
+.composer-icon-btn {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 50%;
+  font-size: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 150ms, color 150ms;
+}
+
+.composer-icon-btn:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.composer-icon-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.composer-send-btn {
+  background-color: var(--text-accent);
+  color: #ffffff;
+}
+
+.composer-send-btn:hover {
+  background-color: var(--text-accent);
+  filter: brightness(1.1);
+}
+
+/* CA-36: blanco sobre `--text-accent` da solo 2.53:1 en dark (`#58a6ff` es un azul
+   claro/brillante) — muy por debajo incluso del umbral de 3:1 para componentes de UI no
+   textuales. `--bg-primary` (oscuro) sobre ese mismo azul da 7.49:1. En light,
+   `--text-accent` es más oscuro (`#0969da`) y blanco ya contrasta bien (5.19:1). */
+:root[data-theme="dark"] .composer-send-btn {
+  color: var(--bg-primary);
+}
+
+#wake-toggle-btn[data-wake-state="LISTENING_WAKE"] {
+  color: var(--warning);
+}
+
+#wake-toggle-btn[data-wake-state="AWAKE"] {
+  color: var(--success);
+  background-color: var(--bg-hover);
+}
+
+#attachment-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  color: var(--text-primary);
+  width: fit-content;
+}
+
+/* Addendum REQ-016 (verificación visual pre-prueba-manual del orquestador) — mismo bug de
+   especificidad ya diagnosticado y corregido para `#typing-indicator` en REQ-015/CA-15 (ver
+   chat.css): la regla de arriba (`#attachment-chip { display: flex }`, un selector de ID) le
+   gana en especificidad a `[hidden] { display: none }` del user-agent stylesheet, así que el
+   chip quedaba SIEMPRE visible (vacío, sin nombre de archivo) aunque `index.html` lo declare
+   con el atributo `hidden` por defecto. Este selector (ID + atributo) tiene más especificidad
+   que el de arriba y restaura el comportamiento de `hidden` — el chip solo aparece cuando
+   `composer.js::showAttachment()` le saca el atributo al adjuntar un archivo real. */
+#attachment-chip[hidden] {
+  display: none;
+}
+
+#attachment-chip-remove {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+}

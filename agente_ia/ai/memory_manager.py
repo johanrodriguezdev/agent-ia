@@ -52,6 +52,17 @@ class ConversationSummary:
     turn_count: int
 
 
+@dataclass
+class ProjectSummary:
+    """Fila del listado de proyectos del sidebar (REQ-016/CA-15), mismo criterio que
+    `ConversationSummary` (REQ-013/CA-10)."""
+
+    id: int
+    name: str
+    created_at: str
+    conversation_count: int
+
+
 def _row_to_item(row) -> MemoryItem:
     """Materializa una fila de `_MEMORY_COLUMNS` como `MemoryItem`."""
     return MemoryItem(
@@ -116,6 +127,35 @@ class UnifiedMemory:
                         msg_count INTEGER DEFAULT 0,
                         timestamp TEXT NOT NULL
                     )
+                """)
+                # REQ-016/§4.1: agrupador de conversaciones ("proyectos"). 2 tablas nuevas,
+                # CERO columnas nuevas en `memories` — ninguna de las 5 funciones
+                # protegidas por CA-21 (new_conversation_id, store_turn, list_conversations,
+                # get_conversation_turns, delete_conversation) sabe que estas tablas existen.
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS projects (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id TEXT NOT NULL,
+                        name TEXT NOT NULL,
+                        created_at TEXT NOT NULL
+                    )
+                """)
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_projects_user
+                    ON projects(user_id)
+                """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS project_conversations (
+                        conversation_id TEXT PRIMARY KEY,
+                        project_id INTEGER NOT NULL,
+                        user_id TEXT NOT NULL,
+                        assigned_at TEXT NOT NULL,
+                        FOREIGN KEY (project_id) REFERENCES projects(id)
+                    )
+                """)
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_project_conversations_project
+                    ON project_conversations(project_id, user_id)
                 """)
                 self._migrate_schema(conn)
             logger.info(f"Base de datos unificada inicializada: {DB_PATH}")
@@ -498,6 +538,187 @@ class UnifiedMemory:
         t = threading.Thread(target=run, daemon=True, name="MemoryConsolidation")
         t.start()
         logger.info("Hilo de consolidación de memoria iniciado (cada 24h)")
+
+    def delete_conversation(self, conversation_id: str, user_id: str = "default") -> bool:
+        """Borra todas las filas de una conversación (REQ-015/CA-31).
+
+        Reimplementada desde cero (no recuperada del stash de REQ-014) con comportamiento
+        idéntico al documentado en `baseline-015.md` — DELETE real (no soft-delete),
+        restringido por `user_id` en el WHERE (nunca borra conversaciones de otro usuario
+        aunque `conversation_id` coincida — imposible de adivinar por ser uuid4, pero el
+        filtro es defensivo). No lanza si la conversación no existe o ya fue borrada:
+        retorna `False` sin efecto, en vez de una excepción no controlada.
+
+        REQ-015/§10.2: esta acción está registrada como `RiskLevel.YELLOW` en
+        `core/security_manager.py::_register_default_actions()` — `Bridge.
+        request_delete_conversation()` la invoca solo después de que
+        `security_manager.require_confirmation()` la confirme, nunca directo.
+        """
+        if not conversation_id:
+            return False
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                cur = conn.execute(
+                    "DELETE FROM memories WHERE conversation_id = ? AND user_id = ?",
+                    (conversation_id, user_id),
+                )
+                deleted = cur.rowcount
+            if deleted:
+                self._load_embeddings()  # mismo patrón que consolidate()/clear_user_memory()
+                logger.info(f"Conversación eliminada: {conversation_id} (user={user_id}, filas={deleted})")
+            return bool(deleted)
+        except Exception as e:
+            logger.error(f"Error eliminando conversación {conversation_id}: {e}")
+            return False
+
+    # ------------------------------------------------------------ proyectos (REQ-016/§4.2)
+    def create_project(self, user_id: str = "default", name: str = "") -> Optional[int]:
+        """Crea un proyecto y devuelve su id (o None si el nombre es vacío/solo espacios,
+        CA-14, caso borde de SPEC-016). Sin unicidad de nombre — dos proyectos pueden llamarse
+        igual (caso borde explícito de SPEC-016: "es solo una etiqueta visual, no un
+        identificador")."""
+        name = (name or "").strip()
+        if not name:
+            return None
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                cur = conn.execute(
+                    "INSERT INTO projects (user_id, name, created_at) VALUES (?, ?, ?)",
+                    (user_id, name, datetime.now().isoformat()),
+                )
+                return cur.lastrowid
+        except Exception as e:
+            logger.error(f"Error creando proyecto: {e}")
+            return None
+
+    def list_projects(self, user_id: str = "default") -> List[ProjectSummary]:
+        """CA-15 — proyectos del usuario, más reciente primero, con conteo de conversaciones
+        asignadas (subquery, sin N+1: una sola consulta)."""
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                rows = conn.execute(
+                    """SELECT p.id, p.name, p.created_at,
+                              (SELECT COUNT(*) FROM project_conversations pc
+                                WHERE pc.project_id = p.id) AS conversation_count
+                       FROM projects p
+                       WHERE p.user_id = ?
+                       ORDER BY p.created_at DESC""",
+                    (user_id,),
+                ).fetchall()
+            return [ProjectSummary(id=r[0], name=r[1], created_at=r[2], conversation_count=r[3])
+                    for r in rows]
+        except Exception as e:
+            logger.error(f"Error listando proyectos: {e}")
+            return []
+
+    def assign_conversation_to_project(self, conversation_id: str, project_id: int,
+                                        user_id: str = "default") -> bool:
+        """CA-16, CA-20 — asigna (o reasigna) una conversación a un proyecto. Verifica que
+        AMBOS existan y pertenezcan a `user_id` antes de escribir (defensa en profundidad:
+        a diferencia de `conversation_id` (uuid4, no adivinable), `project_id` es un entero
+        autoincremental chico — sí es adivinable, mismo criterio conservador que ya usa
+        `delete_conversation()` para su propio filtro de `user_id`, aplicado acá con más
+        razón)."""
+        if not conversation_id:
+            return False
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                owns_project = conn.execute(
+                    "SELECT 1 FROM projects WHERE id = ? AND user_id = ?", (project_id, user_id)
+                ).fetchone()
+                if not owns_project:
+                    return False
+                owns_conversation = conn.execute(
+                    "SELECT 1 FROM memories WHERE conversation_id = ? AND user_id = ? LIMIT 1",
+                    (conversation_id, user_id),
+                ).fetchone()
+                if not owns_conversation:
+                    return False
+                conn.execute(
+                    """INSERT OR REPLACE INTO project_conversations
+                           (conversation_id, project_id, user_id, assigned_at)
+                       VALUES (?, ?, ?, ?)""",
+                    (conversation_id, project_id, user_id, datetime.now().isoformat()),
+                )
+            return True
+        except Exception as e:
+            logger.error(f"Error asignando conversación a proyecto: {e}")
+            return False
+
+    def unassign_conversation_from_project(self, conversation_id: str,
+                                            user_id: str = "default") -> bool:
+        """CA-16 (desasignar explícito desde la UI) y CA-21 (limpieza de huérfanos al borrar
+        una conversación, ver `ui/webview/bridge.py::_delete_conversation_flow()`) — misma
+        función para ambos casos, DELETE idempotente: llamarla sobre una conversación sin
+        proyecto asignado no lanza, retorna False."""
+        if not conversation_id:
+            return False
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                cur = conn.execute(
+                    "DELETE FROM project_conversations WHERE conversation_id = ? AND user_id = ?",
+                    (conversation_id, user_id),
+                )
+            return bool(cur.rowcount)
+        except Exception as e:
+            logger.error(f"Error desasignando conversación de proyecto: {e}")
+            return False
+
+    def list_conversations_by_project(self, project_id: int,
+                                       user_id: str = "default") -> List[ConversationSummary]:
+        """CA-17 — mismo shape de salida que `list_conversations()` (reutiliza
+        `ConversationSummary`), pero es una query separada (no una modificación de
+        `list_conversations()`, que CA-21 protege) con un INNER JOIN adicional contra
+        `project_conversations`. Esto también actúa como red de seguridad contra huérfanos:
+        si por algún motivo quedara una fila en `project_conversations` sin fila
+        correspondiente en `memories` (no debería pasar, ver bridge.py), el INNER JOIN la
+        excluye automáticamente — nunca se renderiza una conversación "fantasma"."""
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                rows = conn.execute(
+                    """SELECT  m.conversation_id,
+                               MAX(m.timestamp) AS last_activity,
+                               COUNT(*)         AS turn_count,
+                               (SELECT u.text FROM memories u
+                                 WHERE u.conversation_id = m.conversation_id
+                                   AND u.role = 'user'
+                                 ORDER BY u.id ASC LIMIT 1) AS title_src
+                       FROM memories m
+                       INNER JOIN project_conversations pc
+                               ON pc.conversation_id = m.conversation_id
+                              AND pc.user_id = m.user_id
+                       WHERE m.user_id = ? AND m.archived = 0
+                             AND m.conversation_id IS NOT NULL
+                             AND pc.project_id = ?
+                       GROUP BY m.conversation_id
+                       ORDER BY last_activity DESC""",
+                    (user_id, project_id),
+                ).fetchall()
+            return [ConversationSummary(conversation_id=r[0], last_activity=r[1] or "",
+                                         turn_count=r[2], title=_derive_title(r[3]))
+                    for r in rows]
+        except Exception as e:
+            logger.error(f"Error listando conversaciones del proyecto: {e}")
+            return []
+
+    def delete_project(self, project_id: int, user_id: str = "default") -> bool:
+        """CA-18, CA-19 — borra el proyecto y sus filas de asignación. NUNCA toca `memories`:
+        las conversaciones que agrupaba quedan intactas por construcción (tablas separadas),
+        no por una condición si/no en el código."""
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                cur = conn.execute(
+                    "DELETE FROM projects WHERE id = ? AND user_id = ?", (project_id, user_id)
+                )
+                deleted = cur.rowcount
+                if deleted:
+                    conn.execute(
+                        "DELETE FROM project_conversations WHERE project_id = ?", (project_id,)
+                    )
+            return bool(deleted)
+        except Exception as e:
+            logger.error(f"Error eliminando proyecto: {e}")
+            return False
 
     def clear_user_memory(self, user_id: str):
         try:

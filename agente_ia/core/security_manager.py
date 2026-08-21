@@ -17,6 +17,20 @@ class RiskLevel(Enum):
     RED = "red"
 
 
+# REQ-019/CA-01 — ranking explícito de RiskLevel. `RiskLevel` sigue siendo un Enum plano
+# (no IntEnum): convertirlo a IntEnum cambiaría `RiskLevel.GREEN.value` de "green" (string)
+# a un entero, rompiendo el contrato ya consumido por
+# `ui/webview/frontend/js/composer.js:110` (`chip-risk-${chip.risk_level}`, construido a
+# partir de `level.value`). Este dict aparte es la única fuente de verdad del orden
+# verde < amarillo < rojo — `ui/webview/bridge.py` lo importa directo, nunca mantiene una
+# copia local (arquitectura-019.md §11.2, Hallazgo B).
+_RISK_LEVEL_ORDER: Dict[RiskLevel, int] = {
+    RiskLevel.GREEN: 0,
+    RiskLevel.YELLOW: 1,
+    RiskLevel.RED: 2,
+}
+
+
 class ActionDenied(Exception):
     """Excepción estructurada de denegación (REQ-006, CA-09).
 
@@ -58,6 +72,17 @@ CHANNEL_ALLOWED_LEVELS: Dict[ChannelType, List[RiskLevel]] = {
     ChannelType.VOICE: [RiskLevel.GREEN],
     ChannelType.API: [RiskLevel.GREEN],
     ChannelType.UNKNOWN: [RiskLevel.GREEN],
+}
+
+# REQ-018/CA-02 — excepción quirúrgica por (canal, acción), evaluada ADEMÁS de
+# CHANNEL_ALLOWED_LEVELS, nunca en su reemplazo. CHANNEL_ALLOWED_LEVELS sigue siendo la
+# política general por canal (decisión de REQ-006, "capacidad, no autoridad"); esta tabla
+# es una lista de excepciones puntuales y aditivas — habilita una acción YELLOW específica
+# en un canal que de otro modo no la tendría, sin abrir el resto de las acciones YELLOW de
+# ese canal. Cada entrada debe justificarse caso por caso (ver REQ-018,
+# arquitectura-018.md §3/§4.1).
+CHANNEL_ACTION_EXCEPTIONS: set[tuple[ChannelType, str]] = {
+    (ChannelType.TELEGRAM, "delete_task"),
 }
 
 _CHANNEL_STR_MAP: Dict[str, ChannelType] = {
@@ -106,13 +131,48 @@ def format_details(prefix: str, params: Optional[Dict] = None) -> str:
     return f"{prefix} | " + ", ".join(partes)
 
 
+def _load_and_parse_overrides() -> Dict[str, "RiskLevel"]:
+    """REQ-019/§1.2 — lee `security_overrides.json` (vía `core.security_config`, import
+    perezoso, mismo estilo que `from core.confirmation import get_confirmation_adapter`
+    dentro de `require_confirmation()`) y convierte cada valor string a `RiskLevel`.
+
+    Segunda capa de defensa (arquitectura-019.md §11.1, Hallazgo A de
+    security-audit-019.md): aunque `core.security_config.load_security_overrides()` ya
+    garantiza no propagar excepciones, esta función envuelve la llamada en su propio
+    `try/except Exception` — se invoca dentro de `SecurityManager.__new__()`, el punto
+    más caro para fallar de todo el sistema (tiempo de import de este módulo), así que se
+    protege con una capa independiente por si un REQ futuro reintroduce un hueco en
+    `security_config.py`.
+    """
+    from core.security_config import load_security_overrides
+
+    try:
+        raw = load_security_overrides()
+    except Exception as e:
+        logger.warning(
+            f"Fallback de emergencia en _load_and_parse_overrides() "
+            f"({type(e).__name__}) — se continúa sin overrides: {e}"
+        )
+        raw = {}
+
+    result: Dict[str, RiskLevel] = {}
+    for name, value in raw.items():
+        try:
+            result[name] = RiskLevel(value)
+        except ValueError:
+            logger.warning(f"Nivel inválido en override de '{name}': {value!r} — ignorado")
+    return result
+
+
 class SecurityManager:
     _instance = None
 
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
-            cls._instance._actions: Dict[str, RiskLevel] = {}
+            cls._instance._actions: Dict[str, RiskLevel] = {}        # nivel EFECTIVO (código + override, REQ-019)
+            cls._instance._base_levels: Dict[str, RiskLevel] = {}    # REQ-019 — nivel puro de código
+            cls._instance._config_overrides: Dict[str, RiskLevel] = _load_and_parse_overrides()  # REQ-019
             cls._instance._init_audit()
         return cls._instance
 
@@ -192,24 +252,64 @@ class SecurityManager:
         return _CHANNEL_STR_MAP.get(str(channel).lower(), ChannelType.UNKNOWN)
 
     def register_action(self, name: str, level: RiskLevel) -> bool:
-        """Registra o actualiza la clasificación de riesgo de una acción.
+        """Registra la clasificación de código de una acción y recalcula su nivel
+        efectivo (código + override de config, REQ-019/CA-02/CA-03).
 
-        Rechaza (retorna False) cualquier intento de degradar una acción ya clasificada
-        como RiskLevel.RED a un nivel menor. En cualquier otro caso aplica el cambio y
-        retorna True.
+        Rechaza (retorna False) cualquier intento de degradar el nivel BASE de una acción
+        ya registrada como RiskLevel.RED a un nivel menor — comportamiento idéntico al de
+        REQ-005, ahora aplicado sobre el nivel de código (`_base_levels`), no sobre el
+        efectivo. En cualquier otro caso aplica el cambio y retorna True.
         """
-        current = self._actions.get(name)
-        if current == RiskLevel.RED and level != RiskLevel.RED:
+        current_base = self._base_levels.get(name)
+        if current_base == RiskLevel.RED and level != RiskLevel.RED:
             logger.critical(
                 f"Intento de reclasificar acción ROJO '{name}' a '{level.value}' bloqueado"
             )
             self._log_audit(name, ChannelType.UNKNOWN, "reclasificacion_bloqueada", details=f"nivel_solicitado={level.value}")
             return False
-        self._actions[name] = level
+        self._base_levels[name] = level
+        self._actions[name] = self._merge_with_override(name, level)
         return True
+
+    def _merge_with_override(self, name: str, base_level: RiskLevel) -> RiskLevel:
+        """REQ-019/CA-02, CA-03 — nivel efectivo = max(base, override), nunca min.
+
+        Un override de config que intente bajar el nivel de código se ignora EN EFECTO
+        (se conserva `base_level`) pero queda auditado (CA-04). No se implementa
+        llamando recursivamente a `register_action()` con el nivel de override — eso
+        reabriría el bug original (`register_action()` solo protegía RED): acá se compara
+        el rank de los 3 niveles de forma simétrica, siempre.
+        """
+        override = self._config_overrides.get(name)
+        if override is None:
+            return base_level
+        if _RISK_LEVEL_ORDER[override] < _RISK_LEVEL_ORDER[base_level]:
+            logger.warning(
+                f"Override de config para '{name}' ({override.value}) intenta bajar el nivel "
+                f"de código ({base_level.value}) — ignorado, se mantiene {base_level.value}"
+            )
+            self._log_audit(name, ChannelType.UNKNOWN, "override_bajada_ignorada",
+                             details=f"nivel_codigo={base_level.value}, nivel_config_ignorado={override.value}")
+            return base_level
+        return override
 
     def classify_action(self, name: str) -> Optional[RiskLevel]:
         return self._actions.get(name)
+
+    def classify_action_base(self, name: str) -> Optional[RiskLevel]:
+        """REQ-019 — nivel puro de código, sin overrides aplicados. Permite que la UI de
+        Configuración muestre 'nivel base' vs. 'nivel efectivo' cuando hace falta."""
+        return self._base_levels.get(name)
+
+    def log_override_attempt(self, name: str, requested_level: RiskLevel,
+                              current_level: RiskLevel, accepted: bool) -> None:
+        """REQ-019/CA-04, CA-21 — auditoría de un intento de GUARDADO desde el bridge
+        (distinto de `_merge_with_override()`, que audita al aplicar overrides ya
+        persistidos durante el arranque). Público porque `ui/webview/bridge.py` es quien
+        conoce el intento crudo en el momento en que ocurre."""
+        result = "override_guardado" if accepted else "override_guardado_rechazado_bajada"
+        self._log_audit(name, ChannelType.DESKTOP, result,
+                         details=f"nivel_actual={current_level.value}, nivel_solicitado={requested_level.value}")
 
     def get_allowed_levels(self, channel: ChannelType) -> List[RiskLevel]:
         return CHANNEL_ALLOWED_LEVELS.get(channel, [RiskLevel.GREEN])
@@ -226,6 +326,9 @@ class SecurityManager:
         level = self.classify_action(action_name)
         if level is None:
             return False
+        # REQ-018/CA-02 — excepción quirúrgica evaluada antes que la política general de canal.
+        if (channel, action_name) in CHANNEL_ACTION_EXCEPTIONS:
+            return True
         allowed = self.get_allowed_levels(channel)
         return level in allowed
 
@@ -304,6 +407,17 @@ def _register_default_actions():
     sm.register_action("close_app", RiskLevel.YELLOW)
     sm.register_action("delete_file", RiskLevel.YELLOW)
     sm.register_action("delete_folder", RiskLevel.YELLOW)
+    # REQ-015/§10.2 (Hallazgo C de security-audit-015.md): `Bridge.request_delete_conversation()`
+    # es un @pyqtSlot invocable desde cualquier script que corra en la página del WebView
+    # — a diferencia de REQ-014 (borrado solo alcanzable vía un QPushButton nativo), acá
+    # el modal JS ya no es una barrera real. Mismo patrón que delete_file/delete_folder.
+    sm.register_action("delete_conversation", RiskLevel.YELLOW)
+    # REQ-016/CA-08, CA-18, CA-33 — mismo patrón que delete_conversation: son @pyqtSlot
+    # invocables desde cualquier script que corra en la página del WebView, no solo desde
+    # el botón visible; se clasifican YELLOW y pasan por el mismo
+    # `security_manager.require_confirmation()` antes de ejecutarse.
+    sm.register_action("delete_task", RiskLevel.YELLOW)
+    sm.register_action("delete_project", RiskLevel.YELLOW)
     sm.register_action("execute_code", RiskLevel.YELLOW)
     sm.register_action("create_skill", RiskLevel.YELLOW)
     sm.register_action("modify_skill", RiskLevel.YELLOW)

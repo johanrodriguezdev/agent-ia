@@ -30,6 +30,21 @@ import os
 # cualquier import de PyQt6, para que aplique a toda la suite sin tocar cada test individual.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+# REQ-015/§6 — este entorno tiene PyQt6 Y PySide6 instalados a la vez; sin fijar esta
+# variable, `pytest-qt` puede resolver el backend equivocado y `qtbot.addWidget()` falla
+# con un conflicto `isinstance()` entre ambos bindings (66 fallos falsos, documentados por
+# `orion-baseline` en `baseline-015.md`). Fix ya probado en el stash de REQ-014. Fijado
+# ANTES de cualquier import de PyQt6, igual que `QT_QPA_PLATFORM` arriba.
+os.environ.setdefault("PYTEST_QT_API", "pyqt6")
+
+# REQ-015 — `QtWebEngineWidgets`/`QtWebEngineCore` exigen ser importados ANTES de que
+# exista cualquier instancia de `QApplication` en todo el proceso (si no, PyQt6 lanza
+# `ImportError: QtWebEngineWidgets must be imported... before a QCoreApplication instance
+# is created`). Sin esto, el orden real dependería de qué archivo de test corra primero y
+# de si ya se creó un `QApplication` vía `qtbot`/`qapp` en un test anterior — se fija acá,
+# a nivel de sesión, antes de que cualquier test tenga oportunidad de crear una app Qt.
+import PyQt6.QtWebEngineWidgets  # noqa: F401
+
 from core.confirmation import register_confirmation_adapter
 from core.security_manager import ChannelType
 
@@ -40,3 +55,15 @@ def _desktop_confirm(action_name: str, message: str) -> bool:
 
 
 register_confirmation_adapter(ChannelType.DESKTOP, _desktop_confirm)
+
+
+def pytest_configure(config):
+    # REQ-015/§7, §8 — `tests/test_webview_smoke.py` instancia `QWebEngineView` real en
+    # modo offscreen; puede ser lento o inestable según el entorno de CI/GPU. Se marca
+    # aparte para que se pueda correr/excluir por separado sin bloquear el resto de la
+    # suite si el entorno no lo soporta bien (`pytest -m "not webview_smoke"`).
+    config.addinivalue_line(
+        "markers",
+        "webview_smoke: instancia QWebEngineView real offscreen (REQ-015) — puede ser "
+        "lento/inestable según el entorno; correr aparte si hace falta.",
+    )

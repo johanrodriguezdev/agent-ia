@@ -1,0 +1,28 @@
+/* ui/webview/frontend/css/fonts.css
+   REQ-016/CA-26..CA-28 — Inter vendorizada localmente (SIL OFL 1.1, ver fonts/LICENSE-OFL.txt).
+   Rutas relativas, sin ningún <link>/@import a un CDN externo — cumple la CSP actual
+   (default-src 'self') sin modificarla. */
+
+@font-face {
+  font-family: "Inter";
+  src: url("../fonts/Inter-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Inter";
+  src: url("../fonts/Inter-Medium.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Inter";
+  src: url("../fonts/Inter-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
