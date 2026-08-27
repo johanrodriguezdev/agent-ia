@@ -10,7 +10,7 @@
 ## Perfil profesional
 
 - Desarrollador en formación, aprendiendo con ayuda de IA
-- Proyecto principal: Noddoo — su propio asistente de IA local
+- Proyecto principal: O.R.I.O.N — su propio asistente de IA local
 - Herramientas diarias: Python, VS Code, Windows 11
 - Intereses: inteligencia artificial, automatización, asistentes de voz, sistemas operativos personales
 
@@ -29,11 +29,11 @@
 - Sistema operativo: Windows 11
 - Editor: VS Code
 - Python: entorno virtual `.venv`
-- Noddoo corre en local, con DeepSeek como LLM principal
+- O.R.I.O.N corre en local, con DeepSeek como LLM principal
 - Usa PyQt6 para interfaz gráfica
 - Tiene Telegram bot activo para control remoto
 
-## Lo que Johan espera de Noddoo
+## Lo que Johan espera de O.R.I.O.N
 
 - Respuestas precisas y útiles, no genéricas
 - Que recuerde contexto entre sesiones
