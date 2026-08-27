@@ -188,11 +188,17 @@ class MemoryDigestSkill(BaseSkill):
 
     # ── Destilación ─────────────────────────────────────────────────
 
-    def _extraer_hechos(self, registros: List[str]) -> Tuple[List[str], int]:
-        """Return los hechos extraídos y cuántos lotes fallaron."""
+    def _extraer_hechos(self, registros: List[str]) -> Tuple[List[List[str]], int]:
+        """Return los hechos AGRUPADOS POR LOTE y cuántos lotes fallaron.
+
+        Se devuelven por lote y no en una lista plana porque la puntuación necesita saber en
+        cuántos tramos distintos de la conversación apareció cada hecho: repetirse a lo
+        largo del tiempo es la señal más fiable de que algo se sostiene, y aplanar la lista
+        la destruye.
+        """
         from ai.llm_provider import generate_response
 
-        hechos: List[str] = []
+        por_lote: List[List[str]] = []
         fallidos = 0
         descartados = 0
 
@@ -211,6 +217,8 @@ class MemoryDigestSkill(BaseSkill):
 
             if not isinstance(respuesta, str) or "SIN HECHOS" in respuesta.upper():
                 continue
+
+            del_lote: List[str] = []
             for linea in respuesta.splitlines():
                 limpia = linea.strip()
                 if not limpia.startswith("-"):
@@ -220,13 +228,18 @@ class MemoryDigestSkill(BaseSkill):
                 if not _es_hecho_durable(limpia):
                     descartados += 1
                     continue
-                hechos.append(limpia)
+                del_lote.append(limpia)
+
+            if del_lote:
+                por_lote.append(del_lote)
 
         if descartados:
             logger.info(f"{descartados} línea(s) descartadas por no ser hechos durables")
-        return hechos, fallidos
+        return por_lote, fallidos
 
-    def _consolidar(self, hechos: List[str]) -> str:
+    def _consolidar(self, hechos: str) -> str:
+        """`hechos` llega ya formateado por `memory_scoring`, con la marca de cuáles se
+        repitieron: esa señal es justo lo que el consolidador necesita para ordenar."""
         from ai.llm_provider import generate_response
 
         respuesta = generate_response(
@@ -276,8 +289,8 @@ class MemoryDigestSkill(BaseSkill):
         if not registros:
             return f"No encontré historial que destilar{vocative()}."
 
-        hechos, fallidos = self._extraer_hechos(registros)
-        if not hechos:
+        por_lote, fallidos = self._extraer_hechos(registros)
+        if not por_lote:
             if fallidos:
                 return (
                     f"No pude destilar la memoria{vocative()}: fallaron {fallidos} de los "
@@ -288,8 +301,22 @@ class MemoryDigestSkill(BaseSkill):
                 f"merecieran guardarse{vocative()}. MEMORY.md queda como estaba."
             )
 
+        # Un candidato no se promueve por existir, sino por ganárselo: se agrupan los que
+        # dicen lo mismo, se cuenta en cuántos tramos distintos apareció cada uno, y se
+        # ordena por eso. Antes entraban todos por igual, así que un comentario suelto
+        # pesaba lo mismo que algo repetido en veinte conversaciones — y lo que entra de
+        # más no es neutro: desplaza a lo que importa, en cada respuesta.
+        from core.memory_scoring import formatear_para_consolidar, promover
+
+        promovidos, resumen = promover(por_lote)
+        if not promovidos:
+            return (
+                f"Revisé {len(registros)} registros y no encontré hechos nuevos que "
+                f"merecieran guardarse{vocative()}. MEMORY.md queda como estaba."
+            )
+
         try:
-            cuerpo = self._consolidar(hechos)
+            cuerpo = self._consolidar(formatear_para_consolidar(promovidos))
         except Exception as e:
             logger.error(f"Falló la consolidación de la memoria: {e}")
             return f"Extraje los hechos pero no pude consolidarlos{vocative()}. No se escribió nada."
@@ -304,8 +331,14 @@ class MemoryDigestSkill(BaseSkill):
             return f"No pude escribir el archivo de memoria{vocative()}: {e}"
 
         aviso = f" ({fallidos} lote(s) fallaron y se omitieron)" if fallidos else ""
+        reforzados = (
+            f", {resumen['reforzados']} de ellos confirmados en varios tramos"
+            if resumen["reforzados"] else ""
+        )
         return (
-            f"Memoria actualizada{vocative()}. Destilé {len(registros)} registros en "
-            f"{len(hechos)} hechos y los consolidé en MEMORY.md{aviso}. "
+            f"Memoria actualizada{vocative()}. Revisé {len(registros)} registros, de los "
+            f"que salieron {resumen['propuestos']} hechos; agrupé los repetidos en "
+            f"{resumen['agrupados']} distintos y promoví {resumen['promovidos']}"
+            f"{reforzados}{aviso}. "
             f"Guardé una copia previa en MEMORY.md.bak por si quiere comparar."
         )
