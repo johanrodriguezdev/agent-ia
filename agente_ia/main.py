@@ -232,6 +232,12 @@ if __name__ == "__main__":
 
     start_warmup()
 
+    # Consolidación automática de la memoria. Desactivada por defecto: gasta llamadas al
+    # modelo por su cuenta, y eso se activa a propósito, no por descuido.
+    from core.dreaming import start_dreaming
+
+    start_dreaming()
+
     if not headless:
         try:
             from PyQt6.QtWidgets import QApplication
