@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 
 _voice = "es-ES-ElviraNeural"
 _speaking = False
+#: Texto en curso, para que el barge-in pueda descartar el eco propio.
+_current_text = ""
 _speak_lock = threading.Lock()
 _barge_in = False
 
@@ -107,13 +109,24 @@ def is_speaking() -> bool:
     return _speaking
 
 
+def current_speech_text() -> str:
+    """Return el texto que se está pronunciando ahora mismo, o cadena vacía.
+
+    Lo consume `voice/wake_word.py` para distinguir una interrupción real del usuario del
+    eco de los propios altavoces: si lo que capta el micrófono es un trozo de esto, no es
+    una interrupción, es el agente oyéndose a sí mismo.
+    """
+    with _speak_lock:
+        return _current_text
+
+
 def signal_barge_in():
     global _barge_in
     _barge_in = True
 
 
 async def _speak_edge(text: str) -> bool:
-    global _speaking, _barge_in
+    global _speaking, _barge_in, _current_text
     import edge_tts
     communicate = edge_tts.Communicate(text, _voice)
     mp3_path = None
@@ -123,6 +136,7 @@ async def _speak_edge(text: str) -> bool:
         await asyncio.wait_for(communicate.save(mp3_path), timeout=15)
         with _speak_lock:
             _speaking = True
+            _current_text = text
         _play_mp3_windows(mp3_path)
         return True
     except asyncio.TimeoutError:
@@ -135,6 +149,7 @@ async def _speak_edge(text: str) -> bool:
         with _speak_lock:
             _speaking = False
             _barge_in = False
+            _current_text = ""
         if mp3_path and os.path.exists(mp3_path):
             try:
                 os.unlink(mp3_path)

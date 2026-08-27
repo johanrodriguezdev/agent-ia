@@ -107,6 +107,53 @@ def _report_state(
         logger.error(f"fallo en wake_state_callback: {e}")
 
 
+#: Palabras que deben coincidir con lo que el agente está diciendo para considerar que lo
+#: captado es su propio eco. Con dos basta: la transcripción del eco es imperfecta, pero
+#: rara vez acierta dos palabras seguidas por casualidad.
+_ECO_MIN_PALABRAS_COMUNES = 2
+
+
+def _es_interrupcion_real(texto: str) -> bool:
+    """Return True si `texto` es el usuario interrumpiendo, y no el eco del propio agente.
+
+    El micrófono capta los altavoces. Sin esta comprobación, cualquier respuesta hablada se
+    interrumpía a sí misma: el bucle oía al agente, asumía que era el usuario, y cortaba la
+    locución a los pocos segundos de empezar.
+
+    La comparación es por palabras y no por subcadena porque la transcripción del eco nunca
+    es exacta —le faltan sílabas, cambia acentos— pero conserva las palabras largas.
+    """
+    from ui.tts_engine import current_speech_text, is_speaking
+
+    if not is_speaking():
+        return False        # nadie está hablando: no hay nada que interrumpir
+
+    dicho = current_speech_text()
+    if not dicho:
+        return True         # está hablando pero no sabemos qué: se respeta la interrupción
+
+    captadas = {p for p in normalize_for_match(texto).split() if len(p) > 3}
+    pronunciadas = {p for p in normalize_for_match(dicho).split() if len(p) > 3}
+    if not captadas:
+        return False        # ruido sin palabras con contenido: no es nadie hablando
+
+    comunes = captadas & pronunciadas
+
+    # Dos condiciones, cualquiera basta para considerarlo eco. La segunda cubre el caso de
+    # que el micrófono solo alcance a captar una palabra suelta de la locución: si TODO lo
+    # que se oyó está dentro de lo que el agente está diciendo, no hay nada que sugiera una
+    # voz distinta.
+    es_eco = len(comunes) >= _ECO_MIN_PALABRAS_COMUNES or captadas <= pronunciadas
+    if es_eco:
+        logger.info(
+            f"[Barge-in] Descartado: es el eco del propio agente "
+            f"(coinciden {sorted(comunes)[:4]})"
+        )
+        return False
+
+    return True
+
+
 def _report_awake(wake_state_callback: Optional[Callable[[str], None]]) -> None:
     """Reportar el estado 'AWAKE' por el canal nuevo (REQ-009/CA-04), nunca silenciado."""
     _report_state(wake_state_callback, "AWAKE")
@@ -164,14 +211,6 @@ def listen_for_wake_word(
                 listen_started_at = time.monotonic()
                 audio = recognizer.listen(source, timeout=1, phrase_time_limit=6)
 
-                try:
-                    from ui.tts_engine import is_speaking, signal_barge_in
-                    if is_speaking():
-                        signal_barge_in()
-                        print("[Barge-in] Usuario interrumpio")
-                except Exception:
-                    pass
-
                 if wake_state_callback is None:
                     try:
                         from ui.gui import update_gui_state
@@ -202,6 +241,21 @@ def listen_for_wake_word(
                     )
                     text = _transcribe_whisper(audio)
 
+                # Barge-in: se decide sobre el TEXTO, no sobre el sonido. Antes bastaba
+                # con que el micrófono captara algo mientras el agente hablaba, y por los
+                # altavoces eso es SIEMPRE cierto: el agente se cortaba a sí mismo a mitad
+                # de frase, en cada respuesta. Ahora hace falta una transcripción con
+                # contenido que además no sea lo que él mismo está diciendo.
+                if text and _es_interrupcion_real(text):
+                    try:
+                        from ui.tts_engine import signal_barge_in
+
+                        signal_barge_in()
+                        logger.info(f"[Barge-in] Interrupción del usuario: '{text[:50]}'")
+                        print("[Barge-in] Usuario interrumpio")
+                    except Exception as e:
+                        logger.error(f"No se pudo señalar el barge-in: {e}")
+
                 if not text:
                     # REQ-009 (hallazgo post-QA): ningun motor devolvio texto. Con el
                     # fallback local (Whisper) no instalado por defecto (ver
@@ -213,6 +267,24 @@ def listen_for_wake_word(
                         "ciclo (silencio, audio ambiguo, o fallback local no disponible)"
                     )
                     continue
+
+                # Una confirmación hablada pendiente se lleva la siguiente frase, por
+                # delante de todo lo demás: ni wake word, ni ventana de conversación, ni
+                # comando nuevo. Mientras el agente espera un "confirmo", nada más puede
+                # ocupar el micrófono — si no, la misma frase podría interpretarse a la vez
+                # como respuesta y como orden.
+                try:
+                    from voice.voice_confirmation import voice_confirmation
+
+                    if voice_confirmation.hay_pendiente():
+                        accion = voice_confirmation.accion_pendiente()
+                        logger.info(
+                            f"[Confirmación] respuesta hablada a '{accion}': {text[:40]!r}"
+                        )
+                        voice_confirmation.responder(text)
+                        continue
+                except Exception as e:
+                    logger.error(f"Fallo atendiendo la confirmación hablada: {e}")
 
                 # REQ-021/CA-12: dentro de la ventana de conversación, la frase se acepta
                 # sin exigir la wake word. `consume()` la cierra en el acto: UNA frase por

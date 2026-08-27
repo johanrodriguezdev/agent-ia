@@ -431,3 +431,79 @@ def test_tts_reemplaza_el_nombre_por_su_pronunciacion(monkeypatch):
     assert re.sub(patron, "orion", "Hola, soy O.R.I.O.N hoy") == "Hola, soy orion hoy"
     # El comodín sin escapar habría matcheado también esta cadena, que no es el nombre.
     assert re.sub(patron, "orion", "OXRXIXOXN") == "OXRXIXOXN"
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  Barge-in: distinguir al usuario del eco del propio agente
+#
+#  Reportado por Johan en prueba real: preguntó "qué es un bot", el agente empezó a
+#  responder por voz y se cortó solo a los pocos segundos. En el log:
+#  "[Barge-in] Usuario interrumpio" seguido de "ningún motor devolvió texto".
+#
+#  Causa: el barge-in se disparaba con CUALQUIER sonido captado mientras `is_speaking()`
+#  fuera cierto. Con altavoces eso es siempre: el micrófono oye al propio agente. Ahora se
+#  decide sobre el texto transcrito, comparándolo con lo que se está pronunciando.
+# ══════════════════════════════════════════════════════════════════════
+
+_LOCUCION = (
+    "Senor Johan, permitame aclararle el concepto de forma precisa. Un bot es un "
+    "programa de software disenado para ejecutar tareas de forma automatica."
+)
+
+
+@pytest.fixture
+def hablando(monkeypatch):
+    import ui.tts_engine as tts
+
+    monkeypatch.setattr(tts, "_speaking", True)
+    monkeypatch.setattr(tts, "_current_text", _LOCUCION)
+    return tts
+
+
+@pytest.mark.parametrize("captado", [
+    "permitame aclararle el concepto",
+    "un bot es un programa de software",
+    "para ejecutar tareas de forma automatica",
+    "precisa",                                    # una sola palabra suelta de la locución
+])
+def test_el_eco_del_propio_agente_no_interrumpe(hablando, captado):
+    from voice.wake_word import _es_interrupcion_real
+
+    assert _es_interrupcion_real(captado) is False
+
+
+@pytest.mark.parametrize("captado", [
+    "orion detente por favor",
+    "espera quiero preguntarte otra cosa",
+    "no era eso lo que queria saber",
+])
+def test_una_interrupcion_real_si_corta(hablando, captado):
+    from voice.wake_word import _es_interrupcion_real
+
+    assert _es_interrupcion_real(captado) is True
+
+
+def test_sin_locucion_en_curso_no_hay_nada_que_interrumpir(monkeypatch):
+    import ui.tts_engine as tts
+    from voice.wake_word import _es_interrupcion_real
+
+    monkeypatch.setattr(tts, "_speaking", False)
+
+    assert _es_interrupcion_real("orion detente") is False
+
+
+def test_ruido_sin_palabras_con_contenido_no_interrumpe(hablando):
+    from voice.wake_word import _es_interrupcion_real
+
+    assert _es_interrupcion_real("eh ah um") is False
+
+
+def test_si_no_se_sabe_que_se_esta_diciendo_se_respeta_la_interrupcion(monkeypatch):
+    """Ante la duda, gana el usuario: es peor ignorar una interrupción real."""
+    import ui.tts_engine as tts
+    from voice.wake_word import _es_interrupcion_real
+
+    monkeypatch.setattr(tts, "_speaking", True)
+    monkeypatch.setattr(tts, "_current_text", "")
+
+    assert _es_interrupcion_real("cualquier cosa") is True

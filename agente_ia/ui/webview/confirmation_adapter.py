@@ -41,11 +41,52 @@ class WebViewConfirmationAdapter:
         self._results: Dict[str, bool] = {}
         self._lock = threading.Lock()
 
+    def _manos_libres_activo(self) -> bool:
+        """Return True si hay un worker de wake word escuchando ahora mismo.
+
+        La comparación es `is True` y no `bool(...)` a propósito. Cualquier objeto no vacío
+        es "verdadero" en Python —un `MagicMock` de un test, un valor inesperado de una
+        refactorización futura— y aquí equivocarse significa esperar veinte segundos una
+        respuesta hablada que nadie va a dar, en vez de mostrar el modal. Solo un `True`
+        literal desvía al camino de voz.
+        """
+        try:
+            return self._bridge._hands_free_active() is True
+        except Exception as e:
+            # Ante la duda, el modal: es el camino que siempre funciona.
+            logger.warning(f"No se pudo determinar el estado del manos libres: {e}")
+            return False
+
+    def _confirmar_hablando(self, action_name: str, message: str) -> bool:
+        """Pregunta en voz alta y espera un "confirmo". Fail-closed en todo lo demás."""
+        from ui.tts_engine import prepare_for_speech, speak
+        from voice.voice_confirmation import mensaje_hablado, voice_confirmation
+
+        pregunta = mensaje_hablado(action_name, message)
+        try:
+            # Se pronuncia ANTES de abrir la escucha: si se abriera antes, el micrófono
+            # capturaría la propia pregunta como si fuera la respuesta.
+            speak(prepare_for_speech(pregunta))
+        except Exception as e:
+            # Sin voz no hay confirmación hablada posible, y adivinar no es una opción.
+            logger.error(f"No se pudo pronunciar la confirmación de '{action_name}': {e}")
+            return False
+
+        return voice_confirmation.solicitar(action_name)
+
     def confirm(self, action_name: str, message: str) -> bool:
         """Adaptador síncrono/bloqueante — se registra vía
         `core.confirmation.register_confirmation_adapter(ChannelType.DESKTOP, adapter.confirm)`.
         Corre siempre en el hilo worker que ejecuta la acción, nunca en el hilo de la GUI.
+
+        Con el manos libres activo la confirmación se pide HABLANDO, no con un modal. Un
+        modal en mitad de una conversación por voz obliga a dejar de hablar e ir al ratón,
+        y con la ventana de micrófono abierta cualquiera podría provocar ese modal contando
+        con un clic distraído. Sin manos libres, el modal sigue siendo lo correcto.
         """
+        if self._manos_libres_activo():
+            return self._confirmar_hablando(action_name, message)
+
         request_id = uuid.uuid4().hex
         event = threading.Event()
         with self._lock:
