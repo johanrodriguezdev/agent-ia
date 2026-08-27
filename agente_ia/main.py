@@ -224,6 +224,14 @@ if __name__ == "__main__":
     headless = "--headless" in sys.argv
     tray_mode = "--tray" in sys.argv          # REQ-011 — arranque minimizado a bandeja
 
+    # Lo caro se carga ahora, en segundo plano, mientras el usuario abre la ventana y
+    # escribe su primer mensaje. Antes se cargaba en esa primera pregunta: más de un minuto
+    # entre el clasificador, torch y el modelo de embeddings, con el usuario mirando tres
+    # puntos suspensivos sin saber si el agente pensaba o se había colgado.
+    from core.warmup import start_warmup
+
+    start_warmup()
+
     if not headless:
         try:
             from PyQt6.QtWidgets import QApplication
