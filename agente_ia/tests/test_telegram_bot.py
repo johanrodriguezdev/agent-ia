@@ -440,3 +440,114 @@ def test_run_telegram_bot_source_incluye_concurrent_updates_true():
     source = inspect.getsource(telegram_bot.run_telegram_bot)
     assert ".concurrent_updates(True)" in source
     assert ".post_init(_post_init_telegram)" in source
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  Control de acceso por identidad — `_intercept_no_autorizado`
+#
+#  Es el primer handler de la cadena (group=-2). Si deja pasar a alguien que no debía,
+#  ese alguien queda con la autoridad de herramientas del agente: las acciones verdes se
+#  ejecutan sin confirmar, y "tomar captura de pantalla" es una de ellas.
+# ══════════════════════════════════════════════════════════════════════
+
+def _update_de(user_id, username="alguien"):
+    update = MagicMock()
+    update.effective_user.id = user_id
+    update.effective_user.username = username
+    update.effective_chat.id = 555
+    return update
+
+
+def _context_con_bot():
+    context = MagicMock()
+    context.bot.send_message = AsyncMock()
+    return context
+
+
+def test_acceso_un_autorizado_pasa_sin_ser_interrumpido(monkeypatch):
+    monkeypatch.setattr(
+        "core.authorized_users.is_authorized", lambda channel, uid: True
+    )
+    context = _context_con_bot()
+
+    # No lanzar ApplicationHandlerStop es lo que deja continuar la cadena de handlers.
+    asyncio.run(telegram_bot._intercept_no_autorizado(_update_de("1578909994"), context))
+
+    context.bot.send_message.assert_not_called()
+
+
+def test_acceso_un_desconocido_corta_la_cadena(monkeypatch):
+    from telegram.ext import ApplicationHandlerStop
+
+    monkeypatch.setattr(
+        "core.authorized_users.is_authorized", lambda channel, uid: False
+    )
+    context = _context_con_bot()
+
+    with pytest.raises(ApplicationHandlerStop):
+        asyncio.run(telegram_bot._intercept_no_autorizado(_update_de("999999"), context))
+
+
+def test_acceso_al_desconocido_se_le_responde_algo_neutro(monkeypatch):
+    from telegram.ext import ApplicationHandlerStop
+
+    from core.authorized_users import UNAUTHORIZED_MESSAGE
+
+    monkeypatch.setattr(
+        "core.authorized_users.is_authorized", lambda channel, uid: False
+    )
+    context = _context_con_bot()
+
+    with pytest.raises(ApplicationHandlerStop):
+        asyncio.run(telegram_bot._intercept_no_autorizado(_update_de("999999"), context))
+
+    context.bot.send_message.assert_awaited_once()
+    enviado = context.bot.send_message.await_args.kwargs["text"]
+    assert enviado == UNAUTHORIZED_MESSAGE
+    # El mensaje no debe delatar de quién es el bot ni qué sabe hacer.
+    assert "O.R.I.O.N" not in enviado and "Johan" not in enviado
+
+
+def test_acceso_un_update_sin_remitente_se_deniega(monkeypatch):
+    """Fail-closed: sin identidad no hay forma de comprobar quién escribe."""
+    from telegram.ext import ApplicationHandlerStop
+
+    monkeypatch.setattr(
+        "core.authorized_users.is_authorized",
+        lambda channel, uid: uid not in ("", "None"),
+    )
+    update = MagicMock()
+    update.effective_user = None
+    update.effective_chat.id = 555
+
+    with pytest.raises(ApplicationHandlerStop):
+        asyncio.run(telegram_bot._intercept_no_autorizado(update, _context_con_bot()))
+
+
+def test_acceso_si_falla_el_aviso_igual_se_corta(monkeypatch):
+    """Que no se pueda avisar al remitente no puede convertirse en dejarlo pasar."""
+    from telegram.ext import ApplicationHandlerStop
+
+    monkeypatch.setattr(
+        "core.authorized_users.is_authorized", lambda channel, uid: False
+    )
+    context = MagicMock()
+    context.bot.send_message = AsyncMock(side_effect=RuntimeError("sin red"))
+
+    with pytest.raises(ApplicationHandlerStop):
+        asyncio.run(telegram_bot._intercept_no_autorizado(_update_de("999999"), context))
+
+
+def test_acceso_el_canal_consultado_es_siempre_telegram(monkeypatch):
+    """Nunca se deduce del texto ni del update: es el canal real del handler."""
+    vistos = []
+
+    def _spy(channel, uid):
+        vistos.append(channel)
+        return True
+
+    monkeypatch.setattr("core.authorized_users.is_authorized", _spy)
+
+    asyncio.run(telegram_bot._intercept_no_autorizado(_update_de("111"), _context_con_bot()))
+
+    assert vistos == ["telegram"]
