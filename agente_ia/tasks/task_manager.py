@@ -11,6 +11,7 @@ import datetime
 import re
 from pathlib import Path
 from typing import Optional
+from core.address import vocative, vocative_start
 
 
 # ── Base de datos global de tareas ─────────────────────────────────
@@ -214,21 +215,47 @@ def _parse_recurrence(text: str) -> Optional[str]:
 
 # ── Parseo completo de tarea natural ───────────────────────────────
 
+# REQ-021 (move puro desde el cuerpo de `parse_natural_task`, sin cambiar contenido ni
+# orden): `tasks/task_slots.py` necesita EXACTAMENTE estas dos listas para recortar el
+# prefijo y las expresiones de fecha antes de decidir si falta el "qué". Copiarlas habría
+# creado una tercera versión destinada a divergir.
+#
+# DIVERGENCIA DELIBERADA con `core/resolution.py::_TASK_CREATE_TRIGGERS` (12 entradas):
+# esta lista tiene además "tengo que", "debo" y "pendiente" suelto. NO se unifican, por
+# decisión (d) de `workspace/adjuntos/REQ-021/propuestas/arquitectura-021.md` §3.5: las
+# dos listas responden preguntas distintas con costos de error opuestos. Esta corre sobre
+# texto YA clasificado como tarea ("¿dónde empieza el título?") y puede ser liberal; la de
+# `resolution.py` decide si le roba la frase al LLM y tiene que ser conservadora —
+# sumarle "tengo que"/"debo" mandaría a `task_create` frases como "tengo que pensarlo".
+# `tests/test_task_slots.py` fija que esta lista siga conteniendo a la otra.
+TASK_TRIGGERS = [
+    "recuérdame", "recuerdame", "recordarme", "recordatorio",
+    "agrega tarea", "agregar tarea", "nueva tarea", "crear tarea",
+    "tengo que", "debo", "no olvidar", "no olvides",
+    "pendiente", "tarea:"
+]
+
+# REQ-021 (move puro): expresiones de fecha que se recortan del título.
+TASK_DATE_PATTERNS = [
+    r'\b(?:mañana|pasado mañana|hoy)\b',
+    r'\ba\s+las?\s+\d{1,2}(?::\d{2})?\s*(?:pm|am|de la (?:tarde|mañana|noche))?\b',
+    r'\ben\s+\d+\s+(?:hora|minuto|día)s?\b',
+    r'\bel\s+(?:lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo)\b',
+    r'\btodos\s+los\s+(?:días|dias|lunes|martes|miércoles|miercoles|jueves|viernes|sábados|sabados|domingos)\b',
+    r'\bcada\s+(?:día|dia|semana|lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo)\b',
+]
+
+
 def parse_natural_task(text: str, user_id: str, channel: str = "telegram") -> Optional[dict]:
     """
     Parsea un texto natural y extrae la información de la tarea.
-    
+
     Retorna dict con los campos de la tarea, o None si no parece una tarea.
     """
     text_lower = text.lower().strip()
 
     # Detectar intención de tarea/recordatorio
-    task_triggers = [
-        "recuérdame", "recuerdame", "recordarme", "recordatorio",
-        "agrega tarea", "agregar tarea", "nueva tarea", "crear tarea",
-        "tengo que", "debo", "no olvidar", "no olvides",
-        "pendiente", "tarea:"
-    ]
+    task_triggers = TASK_TRIGGERS
 
     is_task = any(trigger in text_lower for trigger in task_triggers)
     if not is_task:
@@ -243,14 +270,7 @@ def parse_natural_task(text: str, user_id: str, channel: str = "telegram") -> Op
             break
 
     # Quitar expresiones de fecha del título
-    date_patterns = [
-        r'\b(?:mañana|pasado mañana|hoy)\b',
-        r'\ba\s+las?\s+\d{1,2}(?::\d{2})?\s*(?:pm|am|de la (?:tarde|mañana|noche))?\b',
-        r'\ben\s+\d+\s+(?:hora|minuto|día)s?\b',
-        r'\bel\s+(?:lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo)\b',
-        r'\btodos\s+los\s+(?:días|dias|lunes|martes|miércoles|miercoles|jueves|viernes|sábados|sabados|domingos)\b',
-        r'\bcada\s+(?:día|dia|semana|lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo)\b',
-    ]
+    date_patterns = TASK_DATE_PATTERNS
     for pattern in date_patterns:
         title = re.sub(pattern, '', title, flags=re.IGNORECASE)
 
@@ -495,7 +515,7 @@ class TaskManager:
         """Genera un resumen legible de todas las tareas del usuario (pendientes y completadas)."""
         tasks = self.list_all_tasks(user_id, limit=20)
         if not tasks:
-            return "No tiene ninguna tarea registrada, Señor. Todo está en orden."
+            return f"No tiene ninguna tarea registrada{vocative()}. Todo está en orden."
 
         priority_icons = {
             "urgent": "🔴",
@@ -565,7 +585,7 @@ class TaskManager:
             priority_str = f"\n⚠️ Prioridad: {task_info['priority'].capitalize()}"
 
         return (
-            f"✅ *Tarea registrada, Señor.*\n\n"
+            f"✅ *Tarea registrada{vocative()}.*\n\n"
             f"📋 *{title}*\n"
             f"🆔 #{task_id}\n"
             f"⏰ Recordatorio: {remind_str}"

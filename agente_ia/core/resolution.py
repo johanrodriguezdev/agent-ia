@@ -19,9 +19,11 @@ de texto libre) — mismo invariante documentado en `security_manager.py:214-221
 
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable, Optional
 
+from core.address import vocative
+from core.dialog_state import PendingDialog, dialog_store
 from core.security_manager import ActionDenied, ChannelType, security_manager
 
 logger = logging.getLogger(__name__)
@@ -30,10 +32,18 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class ResolutionResult:
     text: str                    # respuesta final para el usuario
-    matched_by: str              # "routine" | "autopilot" | "learned" | "capability"
-                                  # | "task_tool" | "intent:<NOMBRE>" | "claude"
+    matched_by: str              # "pending_dialog" | "routine" | "autopilot" | "learned"
+                                  # | "capability" | "task_tool" | "intent:<NOMBRE>"
+                                  # | "claude"
     channel: "ChannelType"
     denied: bool = False         # True si un resolver intentó y el gate denegó
+    expects_reply: bool = False  # REQ-021: quedó una pregunta en el aire
+
+    # REQ-021/CA-10: `expects_reply` se agrega ÚLTIMO y con default, así los 4 consumidores
+    # de `resolve()` (main.py, channels/gateway.py, core/orchestrator.py,
+    # ui/webview/bridge.py) siguen funcionando sin leerlo. Y al ser `frozen`, ningún
+    # resolver muta un resultado: se construye uno nuevo. El único `dataclasses.replace()`
+    # de todo el REQ está en `_append_pending_question()`.
 
 
 def _denied_message(exc: ActionDenied) -> str:
@@ -46,6 +56,207 @@ def _denied_message(exc: ActionDenied) -> str:
 #  Resolvers — cada uno recibe (text, channel, user_id) y retorna
 #  Optional[ResolutionResult]. None significa "no aplica, seguir probando".
 # ─────────────────────────────────────────────
+
+# ─────────────────────────────────────────────
+#  REQ-021 — diálogo pendiente (resolver en posición 0 de RESOLVERS)
+#
+#  Con un diálogo abierto, la frase entrante se lee como la RESPUESTA al dato que faltaba,
+#  no como un comando nuevo. Con el estado vacío este resolver retorna `None` en su primera
+#  línea, así que el orden de resolución de los otros 7 no cambia para nadie (CA-09).
+# ─────────────────────────────────────────────
+
+_MATCHED_BY_DIALOG = "pending_dialog"
+_MATCHED_BY_DIALOG_CANCEL = "pending_dialog:cancel"
+_MATCHED_BY_DIALOG_OPEN = "task_tool:dialog_open"
+
+#: Cancelación explícita (CA-06). Se exige coincidencia EXACTA de la frase normalizada:
+#: "cancela la reunión del lunes" es contenido de un slot, no una cancelación.
+_CANCEL_PHRASES = frozenset({
+    "olvídalo", "olvidalo", "olvídate", "olvidate", "olvida", "olvidalo ya",
+    "cancela", "cancelar", "cancélalo", "cancelalo",
+    "déjalo", "dejalo", "déjalo así", "dejalo asi",
+    "nada", "no importa", "ya no", "nada más", "nada mas",
+})
+
+#: Señal fuerte de que la frase no responde al slot "qué", sino que cambia de tema
+#: (CA-30). El caso borde literal de la SPEC es "qué hora es" con el "qué" pendiente.
+_QUESTION_STARTERS = (
+    "qué ", "que ", "cuál", "cual ", "cómo ", "como ", "cuándo", "cuando ",
+    "dónde", "donde ", "quién", "quien ", "por qué", "por que", "para qué",
+    "para que", "cuánto", "cuanto ",
+)
+
+_PHRASE_EDGE_PUNCT = " \t\r\n.,;:!¡?¿\"'"
+
+_DIALOG_CLOSING = "¿Algo más?"
+
+
+def _normalize_phrase(text: str) -> str:
+    return text.strip().strip(_PHRASE_EDGE_PUNCT).lower().strip()
+
+
+def _is_cancel_phrase(text: str) -> bool:
+    return _normalize_phrase(text) in _CANCEL_PHRASES
+
+
+def _is_question_phrase(text: str) -> bool:
+    stripped = text.strip()
+    if stripped.startswith("¿") or stripped.endswith("?"):
+        return True
+    return any(f"{_normalize_phrase(stripped)} ".startswith(q) for q in _QUESTION_STARTERS)
+
+
+def _answers_slot(slot: str, text: str) -> bool:
+    """Return True si `text` puede leerse como la respuesta a `slot`.
+
+    Asimétrico A PROPÓSITO, y esa asimetría es la que decide qué gana entre CA-18 y CA-30
+    (ver hallazgo H1 de `propuestas/security-audit-021.md`):
+
+    - `cuando`: hay un parser duro (`_parse_natural_date`), así que se puede exigir match
+      positivo. Una frase que no parsea como fecha se desvía al camino normal — donde el
+      gate `require_confirmation()` se evalúa con el canal real, exactamente igual que si
+      no hubiera ningún diálogo abierto.
+    - `que`: es texto libre, así que solo se puede rechazar ante una señal fuerte (forma
+      interrogativa). Una frase no interrogativa se guarda como título y NO se ejecuta:
+      *fail-safe* deliberado, no defecto.
+    """
+    from tasks.task_manager import _parse_natural_date
+    from tasks.task_slots import SLOT_WHAT, SLOT_WHEN, has_content_tokens
+
+    if slot == SLOT_WHEN:
+        return _parse_natural_date(text) is not None
+    if slot == SLOT_WHAT:
+        if _is_question_phrase(text):
+            return False
+        return has_content_tokens(text)
+    logger.warning(f"[Diálogo] slot desconocido '{slot}': la frase se resuelve como comando nuevo")
+    return False
+
+
+def _try_pending_dialog(
+    text: str, channel: "ChannelType", user_id: str,
+) -> Optional[ResolutionResult]:
+    """Lee la frase entrante como respuesta al dato que faltaba (CA-04, CA-05, CA-06).
+
+    INVARIANTE DE SEGURIDAD: la acción que se ejecuta al completar el diálogo es siempre
+    `dialog.action`, fijada al abrirlo — nunca una derivada del contenido de un slot
+    (CA-19). Y se ejecuta por el mismo `execute_tool()` de siempre, con el `channel` que
+    recibió este resolver, así que el gate no se mueve ni se salta (CA-17).
+    """
+    dialog = dialog_store.get(user_id, channel)      # purga los expirados (CA-07)
+    if dialog is None:
+        return None                                   # camino de coste ~0 (CA-09)
+
+    stripped = text.strip()
+    if not stripped:
+        return None          # STT vacío: no cuenta como turno, ni avanza ni cierra nada
+
+    if _is_cancel_phrase(stripped):                   # CA-06
+        dialog_store.cancel(user_id, channel)
+        logger.info(f"[Diálogo] cancelado por el usuario user={user_id}")
+        return ResolutionResult(
+            text=f"De acuerdo{vocative()}, lo descarto.",
+            matched_by=_MATCHED_BY_DIALOG_CANCEL, channel=channel,
+        )
+
+    slot = dialog.next_slot
+    if slot is None:
+        # Defensivo: un diálogo sin slots pendientes no debería existir (se cierra al
+        # completarse). Se descarta en vez de dejarlo trabado.
+        dialog_store.cancel(user_id, channel)
+        return None
+
+    if not _answers_slot(slot, stripped):             # CA-30: desvío de tema
+        return None                                   # el diálogo sigue VIVO
+
+    updated = dialog_store.fill(user_id, channel, slot, stripped)   # mueve el reloj (CA-32)
+    if updated is None:                               # expiró entre el get y el fill
+        return None
+
+    if updated.missing:
+        from core.dialog_questions import ask_question
+
+        question = ask_question(updated.action, updated.missing[0], updated.slots)
+        dialog_store.touch_question(user_id, channel, question)
+        return ResolutionResult(
+            text=question, matched_by=_MATCHED_BY_DIALOG, channel=channel,
+            expects_reply=True,
+        )
+
+    return _execute_completed_dialog(updated, channel, user_id)
+
+
+def _execute_completed_dialog(
+    dialog: PendingDialog, channel: "ChannelType", user_id: str,
+) -> Optional[ResolutionResult]:
+    """Ejecuta la acción del diálogo ya completo, por el camino de ejecución de siempre."""
+    from agents.tool_registry import execute_tool
+    from tasks.task_slots import TASK_CREATE_ACTION, compose_task_sentence
+
+    if dialog.action != TASK_CREATE_ACTION:
+        # v1 solo cablea `task_create` (SPEC-021, alcance). Cualquier otra acción sería
+        # un diálogo que nadie sabe ejecutar: se descarta en vez de improvisar.
+        logger.warning(f"[Diálogo] acción '{dialog.action}' no cableada en v1; se descarta")
+        dialog_store.cancel(user_id, channel)
+        return None
+
+    composed = compose_task_sentence(dialog.slots)
+    try:
+        result = execute_tool(
+            dialog.action,
+            {"text": composed, "user_id": user_id, "channel": channel.value},
+            channel, user_id,
+        )
+    except ActionDenied as e:
+        dialog_store.cancel(user_id, channel)
+        return ResolutionResult(
+            text=_denied_message(e), matched_by=_MATCHED_BY_DIALOG, channel=channel,
+            denied=True,
+        )
+
+    dialog_store.cancel(user_id, channel)             # completado -> cerrado
+    return ResolutionResult(
+        text=f"{result}\n\n{_DIALOG_CLOSING}", matched_by=_MATCHED_BY_DIALOG, channel=channel,
+    )
+
+
+def _append_pending_question(
+    result: ResolutionResult, user_id: str, channel: "ChannelType",
+) -> ResolutionResult:
+    """CA-31 — cuelga la pregunta pendiente a la respuesta de un desvío de tema.
+
+    Así la pregunta pendiente es siempre lo último que se preguntó, y la frase siguiente se
+    lee sin ambigüedad como su respuesta. Determinista, sin LLM: reusa la pregunta que ya
+    se redactó. NO mueve `last_progress_at` — un desvío no compra tiempo (CA-32).
+
+    NO se pega a un resultado denegado (hallazgo H2 de la auditoría de seguridad): mezclar
+    "⛔ Acción no autorizada" con "Por cierto, ¿para cuándo?" degrada el aviso de seguridad
+    y lo convierte en parte de una charla. El diálogo NO se cancela por eso — la repregunta
+    simplemente reaparece en el turno siguiente.
+    """
+    if result.denied:
+        return result
+    if result.matched_by.startswith(_MATCHED_BY_DIALOG) \
+            or result.matched_by == _MATCHED_BY_DIALOG_OPEN:
+        return result
+
+    dialog = dialog_store.get(user_id, channel)
+    if dialog is None or not dialog.question:
+        return result
+
+    return replace(
+        result,
+        text=f"{result.text}\n\nPor cierto, {_as_inline_question(dialog.question)}",
+        expects_reply=True,
+    )
+
+
+def _as_inline_question(question: str) -> str:
+    """Return la pregunta lista para ir después de "Por cierto, " (minúscula inicial)."""
+    if question.startswith("¿") and len(question) > 1:
+        return "¿" + question[1].lower() + question[2:]
+    return question[:1].lower() + question[1:] if question else question
+
 
 def _try_routine(text: str, channel: "ChannelType", user_id: str) -> Optional[ResolutionResult]:
     """`learning/routines_engine.py:try_routine()` — ya gateado por construcción vía
@@ -185,6 +396,29 @@ def _try_task_tool(text: str, channel: "ChannelType", user_id: str) -> Optional[
     text_lower = text.lower().strip()
     try:
         if any(t in text_lower for t in _TASK_CREATE_TRIGGERS):
+            # REQ-021/CA-01: antes se disparaba `task_create` a ciegas y `parse_natural_task`
+            # inventaba el dato que faltara (título "Algo", recordatorio a 1 hora). Ahora se
+            # revisa primero qué falta y, si falta algo, se PREGUNTA.
+            #
+            # `scan_task_slots()` corre fuera del gate a propósito: es una función pura (ni
+            # ejecuta, ni persiste, ni consulta red), así que el gate sigue exactamente donde
+            # estaba, dentro de `execute_tool()`.
+            from tasks.task_slots import scan_task_slots
+
+            scan = scan_task_slots(text)
+            if scan.missing:
+                from core.dialog_questions import ask_question
+
+                question = ask_question("task_create", scan.missing[0], scan.filled)
+                dialog_store.open(
+                    user_id, channel, action="task_create", slots=scan.filled,
+                    missing=scan.missing, question=question,
+                )
+                return ResolutionResult(
+                    text=question, matched_by=_MATCHED_BY_DIALOG_OPEN, channel=channel,
+                    expects_reply=True,
+                )
+
             result = execute_tool(
                 "task_create", {"text": text, "user_id": user_id, "channel": channel.value},
                 channel, user_id,
@@ -295,6 +529,9 @@ def _try_claude(
 
 
 RESOLVERS = [
+    # REQ-021: PRIMERO. Con el estado de diálogo vacío retorna `None` en su primera línea,
+    # así que el orden relativo de los 7 resolvers de siempre no cambia (CA-09).
+    ("pending_dialog", _try_pending_dialog),
     ("routine", _try_routine),
     ("autopilot", _try_autopilot),
     ("learned", _try_learned),
@@ -339,6 +576,10 @@ def resolve(
             )
 
         if result is not None:
+            # REQ-021/CA-31: si el turno fue un desvío de tema y quedó un diálogo abierto,
+            # la respuesta lleva colgada la pregunta pendiente. Vive acá y no dentro de un
+            # resolver porque el desvío lo puede resolver cualquiera de los 7.
+            result = _append_pending_question(result, user_id, resolved_channel)
             logger.info(f"resolve() resuelto por '{result.matched_by}'")
             return result
 

@@ -14,11 +14,23 @@ mecanismo actual (arquitectura-015.md §0.4) — solo cambia de dónde importa
 import logging
 import threading
 
-from PyQt6.QtCore import QRunnable
+from PyQt6.QtCore import QObject, QRunnable, pyqtSignal
 
 from ui.webview.gui_state import update_wake_state
+from voice.mic_window import ConversationWindow
 
 logger = logging.getLogger(__name__)
+
+
+class WakeWordSignals(QObject):
+    """Portador de señales del worker.
+
+    `QRunnable` no es `QObject`, así que no puede declarar señales propias. La conexión
+    resultante es de tipo cola (el worker vive en un hilo del pool y el Bridge en el hilo
+    principal), que es justo lo que se necesita para tocar la UI sin cruzar hilos.
+    """
+
+    command_detected = pyqtSignal(str)
 
 
 class WakeWordWorker(QRunnable):
@@ -34,6 +46,11 @@ class WakeWordWorker(QRunnable):
     def __init__(self):
         super().__init__()
         self.stop_event = threading.Event()
+        self.signals = WakeWordSignals()
+        # REQ-021 (pieza 6) — canal bridge -> worker, público a propósito: el `Bridge` lo
+        # arma (`open()`) en el `on_done` de la locución y lo cierra al apagar el manos
+        # libres. Mismo patrón que `stop_event`, en el sentido contrario del `command_detected`.
+        self.conversation_window = ConversationWindow()
 
     def run(self) -> None:
         from voice.wake_word import listen_for_wake_word
@@ -42,7 +59,8 @@ class WakeWordWorker(QRunnable):
             while not self.stop_event.is_set():
                 update_wake_state("LISTENING_WAKE")
                 result = listen_for_wake_word(
-                    stop_event=self.stop_event, wake_state_callback=update_wake_state
+                    stop_event=self.stop_event, wake_state_callback=update_wake_state,
+                    conversation_window=self.conversation_window,
                 )
                 if result is None:
                     # Parada cooperativa (stop_event) o KeyboardInterrupt (False también
@@ -50,7 +68,17 @@ class WakeWordWorker(QRunnable):
                     break
                 if result is False:
                     break
+                if isinstance(result, str) and result.strip():
+                    # El comando dictado después de la wake word. Antes se descartaba acá
+                    # mismo: el agente despertaba, contestaba "lo escucho" y nunca
+                    # ejecutaba nada. Ahora se emite para que el Bridge lo resuelva por el
+                    # mismo camino que un mensaje escrito.
+                    logger.info(f"[Wake word] comando por voz: {result!r}")
+                    self.signals.command_detected.emit(result.strip())
         except Exception as e:
             logger.error(f"Error en WakeWordWorker (listen_for_wake_word): {e}")
         finally:
+            # Sin manos libres no puede quedar una ventana armada: un `on_done` tardío del
+            # TTS encontraría el worker parado, pero la ventana no debe sobrevivirle.
+            self.conversation_window.cancel()
             update_wake_state("INACTIVE")
