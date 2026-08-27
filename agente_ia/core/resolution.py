@@ -475,6 +475,31 @@ def _try_capability(text: str, channel: "ChannelType", user_id: str) -> Optional
     return ResolutionResult(text=result, matched_by="capability", channel=channel)
 
 
+
+# Intents que YA NO se ejecutan directamente: ceden el turno al LLM, que decide con qué
+# herramienta responder (`wikipedia_search`, `web_search`, `web_read`) o si le basta con lo
+# que ya sabe.
+#
+# El motivo, con el caso que lo destapó: "que es un bot" se clasificaba como
+# WIKIPEDIA_SUMMARY con un margen de 1.35 —alta confianza, no es un fallo del clasificador—
+# y se respondía con el resumen de Wikipedia sin que el modelo llegara a verlo nunca. Para
+# el usuario eso se siente como un agente que "solo sabe buscar en Wikipedia", porque
+# literalmente es lo único que ese camino puede hacer.
+#
+# Ceder no es perder la capacidad: Wikipedia sigue disponible como herramienta, y ahora
+# convive con la búsqueda web. Lo que cambia es quién decide.
+#
+# Coste consciente: estas frases pasan a costar una llamada al LLM. Solo se ceden intents
+# de CONSULTA DE CONOCIMIENTO, nunca los de acción — abrir una aplicación o apagar el PC
+# siguen resolviéndose en local, sin coste y sin latencia.
+#
+# SEARCH_WEB entra por el mismo motivo, y con un agravante: su handler es
+# `os_integration/browser.py::search_google()`, que se limita a ABRIR el navegador y
+# responder "Búsqueda lanzada". Nunca lee los resultados. Pedirle "busca en internet la
+# última versión de Python" abría una pestaña en vez de contestar. Ahora que existe la
+# herramienta `web_search`, que busca y lee de verdad, el atajo es peor que el camino largo.
+_INTENTS_QUE_CEDEN_AL_LLM = frozenset({"WIKIPEDIA_SUMMARY", "SEARCH_WEB"})
+
 def _try_intent(text: str, channel: "ChannelType", user_id: str) -> Optional[ResolutionResult]:
     """`intent/classifier.py:classify_command()` + `router/dispatcher.py:dispatch()` —
     único punto de ejecución de intents legacy y skills modernas. `channel` se reasigna de
@@ -485,6 +510,14 @@ def _try_intent(text: str, channel: "ChannelType", user_id: str) -> Optional[Res
 
     intent, params = classify_command(text)
     if intent == Intent.UNKNOWN:
+        return None
+
+    intent_name_raw = intent.value if hasattr(intent, "value") else str(intent)
+    if intent_name_raw in _INTENTS_QUE_CEDEN_AL_LLM:
+        logger.info(
+            f"Intent '{intent_name_raw}' cede al LLM: es una consulta de conocimiento, "
+            f"no una acción"
+        )
         return None
 
     # `classify_command()` puede devolver un `str` plano en vez de un miembro de `Intent`

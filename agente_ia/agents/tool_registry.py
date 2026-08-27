@@ -259,3 +259,110 @@ register_tool(ToolSpec(
     risk_level=RiskLevel.GREEN,
     invoke=_task_complete_all_invoke,
 ))
+
+
+# ─────────────────────────────────────────────
+#  Acceso a internet — el agente pasa de "solo Wikipedia" a poder consultar y leer la web
+# ─────────────────────────────────────────────
+
+def _web_search_invoke(params: dict) -> str:
+    from os_integration.web_search import MAX_RESULTADOS, buscar, formatear_resultados
+
+    consulta = (params.get("query") or params.get("text") or "").strip()
+    if not consulta:
+        return "Necesito saber qué buscar."
+
+    try:
+        maximo = int(params.get("max_results") or MAX_RESULTADOS)
+    except (TypeError, ValueError):
+        maximo = MAX_RESULTADOS
+
+    return formatear_resultados(buscar(consulta, maximo), consulta)
+
+
+def _web_read_invoke(params: dict) -> str:
+    from os_integration.web_search import leer_pagina
+
+    url = (params.get("url") or "").strip()
+    if not url:
+        return "Necesito la dirección de la página que quieres que lea."
+    return leer_pagina(url)
+
+
+register_tool(ToolSpec(
+    name="web_search",
+    description=(
+        "Busca información actualizada en internet y devuelve los resultados con su fuente. "
+        "Úsala cuando la pregunta requiera datos que no conoces, información posterior a tu "
+        "entrenamiento, o cuando necesites verificar algo. Devuelve títulos, extractos y "
+        "enlaces; si necesitas el contenido completo de uno, usa 'web_read' con su enlace."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "Qué buscar, en lenguaje natural."},
+            "max_results": {"type": "integer", "description": "Cuántos resultados (1-10)."},
+        },
+        "required": ["query"],
+    },
+    # GREEN: leer información pública es lo mismo que buscar en Wikipedia, que ya lo es
+    # (`.claude/rules/security-levels.md`, "Buscar en Wikipedia o web"). No escribe nada,
+    # no toca el sistema y no envía datos del usuario más allá de la propia consulta.
+    risk_level=RiskLevel.GREEN,
+    invoke=_web_search_invoke,
+))
+
+register_tool(ToolSpec(
+    name="web_read",
+    description=(
+        "Abre una página web y devuelve su texto para poder leerla. Úsala después de "
+        "'web_search' cuando un resultado prometa la respuesta y necesites el detalle."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "url": {"type": "string", "description": "Dirección http(s) de la página."},
+        },
+        "required": ["url"],
+    },
+    risk_level=RiskLevel.GREEN,
+    invoke=_web_read_invoke,
+))
+
+
+def _wikipedia_invoke(params: dict) -> str:
+    """Wikipedia como herramienta, no como destino.
+
+    Antes, `WIKIPEDIA_SUMMARY` era un intent: cualquier pregunta que se le pareciera se
+    resolvía ahí y nunca llegaba al modelo. Ahora es una opción más que el modelo elige
+    cuando le conviene, junto a `web_search` y a su propio conocimiento.
+    """
+    from os_integration import wiki_api
+
+    consulta = (params.get("query") or params.get("text") or "").strip()
+    if not consulta:
+        return "Necesito saber sobre qué buscar en Wikipedia."
+    try:
+        return wiki_api.get_wikipedia_summary(consulta)
+    except Exception as e:
+        logger.warning(f"Wikipedia falló para '{consulta[:50]}': {e}")
+        return f"No pude consultar Wikipedia sobre «{consulta}»."
+
+
+register_tool(ToolSpec(
+    name="wikipedia_search",
+    description=(
+        "Consulta el resumen de Wikipedia sobre un tema. Útil para conceptos establecidos, "
+        "historia, ciencia y biografías. Para información reciente o que cambia, usa "
+        "'web_search' en su lugar."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "Tema a consultar."},
+        },
+        "required": ["query"],
+    },
+    risk_level=RiskLevel.GREEN,
+    invoke=_wikipedia_invoke,
+))

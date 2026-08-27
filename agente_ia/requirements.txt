@@ -78,3 +78,9 @@ python-dotenv==1.0.1
 # --- Testing (REQ-008): ejercita widgets PyQt6 en pytest sin ventana real ---
 pytest-qt
 # ================================================================
+
+# --- Busqueda web: acceso real a internet, no solo Wikipedia ---
+# DuckDuckGo no necesita API key ni registro. `os_integration/web_search.py` esta escrito
+# con proveedores intercambiables: anadir Brave o Tavily seria sumar una funcion y su clave.
+# beautifulsoup4 (ya listado arriba) extrae el texto legible de las paginas.
+ddgs
