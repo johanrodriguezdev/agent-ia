@@ -24,6 +24,7 @@ from typing import Callable, Optional
 
 from core.address import vocative
 from core.dialog_state import PendingDialog, dialog_store
+from core.progress import report as progress_report
 from core.security_manager import ActionDenied, ChannelType, security_manager
 
 logger = logging.getLogger(__name__)
@@ -592,6 +593,7 @@ def resolve(
     """
     resolved_channel = security_manager.resolve_channel(channel)
     logger.info(f"resolve() canal={resolved_channel.value} user={user_id}: {text[:80]}")
+    progress_report("Entendiendo lo que me pides")
 
     for name, fn in RESOLVERS:
         try:

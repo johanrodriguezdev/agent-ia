@@ -16,6 +16,7 @@ from config_manager import get_agent_name, get_display_name, get_user_title
 from core.agent_context import agent_context_manager
 from core.security_manager import ActionDenied, security_manager
 from core.address import vocative, vocative_start
+from core.progress import report as progress_report
 from core.identity import build_identity_block
 
 logger = logging.getLogger(__name__)
@@ -177,6 +178,11 @@ def run(task: str, channel, user_id: str = "default", agent_name: str = "reasoni
     prior_turns = _load_prior_turns(agent_name, user_id)   # REQ-021/CA-22
 
     for call_number in range(1, MAX_LLM_CALLS + 1):
+        # El silencio entre que el usuario pregunta y llega la respuesta era indistinguible
+        # de un cuelgue. A partir de la segunda vuelta se numera: si el modelo encadena
+        # herramientas, se ve que avanza en vez de parecer que se repite.
+        progress_report("Pensando" if call_number == 1 else f"Pensando ({call_number})")
+
         prompt = _build_prompt(task, history, prior_turns)
         response = generate_response(
             [{"role": "user", "content": prompt}], _build_system_prompt(), tools=tools

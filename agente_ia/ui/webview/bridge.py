@@ -148,6 +148,7 @@ class Bridge(QObject):
     conversation_removed = pyqtSignal(str)           # conversation_id
     turns_loaded = pyqtSignal(str)                   # json: [{id, role, html, timestamp}]
     message_appended = pyqtSignal(str)               # json: {role, html, timestamp}
+    progress_updated = pyqtSignal(str)               # que esta haciendo ahora mismo
     typing_started = pyqtSignal()
     typing_stopped = pyqtSignal()
     gui_state_changed = pyqtSignal(str)
@@ -242,6 +243,12 @@ class Bridge(QObject):
 
         self._pending_user_text = text
         self._resolution_in_flight = True
+        # El reportero se registra por turno y se retira al acabar: fuera de una resolución
+        # no hay nada que contar, y así ningún proceso de fondo puede escribir en la línea
+        # de estado de un turno que ya terminó.
+        from core.progress import register_reporter
+
+        register_reporter(self._on_progress)
         self.message_appended.emit(json.dumps({
             "role": "user", "html": render_markdown(text), "timestamp": _now_iso(),
         }))
@@ -251,8 +258,38 @@ class Bridge(QObject):
         run_async(resolve, self._on_resolve_done, self._on_resolve_error, text,
                    ChannelType.DESKTOP, user_id=OWNER_USER_ID)
 
+    def _on_progress(self, mensaje: str) -> None:
+        """Recibe el aviso desde el hilo que trabaja y lo entrega a la interfaz.
+
+        `progress_updated` es un `pyqtSignal`, así que Qt encola la entrega en el hilo de la
+        GUI por su cuenta: este método puede llamarse desde cualquier hilo sin cuidados.
+        """
+        self.progress_updated.emit(mensaje)
+
+    def _stop_progress(self) -> None:
+        """Retira el reportero y limpia la línea de estado.
+
+        Todo va envuelto por el mismo principio que rige `core/progress.py`: contar lo que
+        se hace no puede romper lo que se hace. Este método corre justo antes de entregar
+        la respuesta al usuario, así que un fallo aquí —una señal sobre un objeto Qt a
+        medio construir, por ejemplo— no puede impedir que la respuesta llegue.
+        """
+        try:
+            from core.progress import clear_reporter
+
+            clear_reporter()
+        except Exception as e:
+            logger.warning(f"No se pudo retirar el reportero de progreso: {e}")
+
+        try:
+            self.progress_updated.emit("")
+        except Exception as e:
+            logger.warning(f"No se pudo limpiar la línea de progreso: {e}")
+
     def _on_resolve_done(self, resolution) -> None:
         from ai.memory_manager import memory
+
+        self._stop_progress()
 
         result_text = resolution.text
         self.message_appended.emit(json.dumps({
@@ -330,6 +367,7 @@ class Bridge(QObject):
     def _on_resolve_error(self, message: str) -> None:
         """Un error no es una respuesta de la IA — no se persiste (mismo criterio que
         `JarvisMainWindow._on_command_error()`, REQ-013/eliminado)."""
+        self._stop_progress()
         self.message_appended.emit(json.dumps({
             "role": "assistant", "html": render_markdown(f"Error: {message}"),
             "timestamp": _now_iso(),

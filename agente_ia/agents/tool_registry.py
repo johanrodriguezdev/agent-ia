@@ -97,7 +97,36 @@ def execute_tool(name: str, params: dict, channel, user_id: str = "default") -> 
         spec.name, channel, details=format_details(f"tool:{spec.name}", params), user_id=user_id
     ):
         raise ActionDenied(spec.name, channel, "denegado por security_manager")
+
+    # Se anuncia DESPUÉS del gate: si la acción se va a denegar, no tiene sentido decir que
+    # se está haciendo. Este es el punto por el que pasan todas las herramientas, así que
+    # instrumentarlo aquí evita repartir avisos por cada `invoke`.
+    _report_tool_progress(spec.name, params)
+
     return spec.invoke(params)
+
+
+#: De qué parámetro sacar el detalle que acompaña al aviso, por herramienta. Solo se leen
+#: campos que el usuario ya escribió o dictó: nunca rutas internas, identificadores ni nada
+#: que no tenga sentido para quien mira la pantalla.
+_PARAM_DE_DETALLE = {
+    "web_search": "query",
+    "web_read": "url",
+    "wikipedia_search": "query",
+    "task_create": "text",
+}
+
+
+def _report_tool_progress(nombre: str, params: dict) -> None:
+    """Cuenta a la interfaz qué herramienta se va a usar. Nunca interrumpe la ejecución."""
+    try:
+        from core.progress import report_tool
+
+        clave = _PARAM_DE_DETALLE.get(nombre)
+        detalle = str(params.get(clave) or "") if clave else ""
+        report_tool(nombre, detalle)
+    except Exception as e:
+        logger.debug(f"No se pudo reportar el progreso de '{nombre}': {e}")
 
 
 # ─────────────────────────────────────────────

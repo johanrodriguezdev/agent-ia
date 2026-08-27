@@ -11,7 +11,7 @@ import {
   connectBridge, requestInitialState,
   onGuiStateChanged, onWakeStateChanged, onThemeChanged, onChipsLoaded,
   onConversationListUpdated, onConversationCleared, onConversationRemoved,
-  onTurnsLoaded, onMessageAppended, onTypingStarted, onTypingStopped,
+  onTurnsLoaded, onMessageAppended, onTypingStarted, onTypingStopped, onProgressUpdated,
   onConfirmationRequested, onFileAttached, onErrorOccurred, onWindowMaximizedChanged,
   onTasksLoaded, onProjectsLoaded, onProjectConversationsLoaded, onProjectRemoved,
   onSecurityOverridesLoaded, onSecurityOverrideSaved, onSecurityOverrideSaveRejected,
@@ -21,7 +21,7 @@ import {
   initSidebar, renderConversationList, clearActiveConversation, removeConversationFromList,
 } from "./sidebar.js";
 import {
-  initChat, renderTurns, appendMessage, clearMessages, setTyping, updateGuiState,
+  initChat, renderTurns, appendMessage, clearMessages, setTyping, setProgress, updateGuiState,
 } from "./chat.js";
 import {
   initComposer, setComposerEnabled, setWakeState, showAttachment, renderChips,
@@ -88,6 +88,8 @@ async function bootstrap() {
 
   onTurnsLoaded((json) => renderTurns(JSON.parse(json)));
   onMessageAppended((json) => appendMessage(JSON.parse(json)));
+
+  onProgressUpdated((text) => setProgress(text));
 
   onTypingStarted(() => {
     setTyping(true);
