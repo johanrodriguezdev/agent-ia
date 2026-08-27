@@ -66,3 +66,4 @@ ai/memory.db
 ai/semantic_memory.db
 ai/unified_memory.db
 tasks/tasks.db
+standing_intents.db

@@ -395,3 +395,125 @@ register_tool(ToolSpec(
     risk_level=RiskLevel.GREEN,
     invoke=_wikipedia_invoke,
 ))
+
+
+# ─────────────────────────────────────────────
+#  Intenciones permanentes — recordatorios que se disparan por lo que dices, no por reloj
+# ─────────────────────────────────────────────
+
+def _intent_create_invoke(params: dict) -> str:
+    from core.standing_intents import extraer_triggers, standing_intents
+
+    descripcion = (params.get("descripcion") or params.get("text") or "").strip()
+    if not descripcion:
+        return "Necesito saber qué quiere que le recuerde."
+
+    # Los disparadores pueden venir del modelo o deducirse del tema. Que el modelo los
+    # proponga suele dar mejor resultado: sabe cuál es el sustantivo importante de la frase.
+    crudos = params.get("disparadores") or params.get("triggers") or ""
+    if isinstance(crudos, str):
+        crudos = [t.strip() for t in crudos.replace(",", " ").split() if t.strip()]
+    triggers = extraer_triggers(" ".join(crudos)) if crudos else ()
+    if not triggers:
+        triggers = extraer_triggers(params.get("tema") or descripcion)
+
+    if not triggers:
+        return (
+            "No encontré ninguna palabra lo bastante específica para reconocer el momento. "
+            "¿Sobre qué tema quiere que se lo recuerde?"
+        )
+
+    intent = standing_intents.crear(params["user_id"], descripcion, triggers)
+    if intent is None:
+        return f"No pude registrar ese recordatorio{vocative()}."
+
+    lista = ", ".join(f"«{t}»" for t in intent.triggers)
+    return (
+        f"Anotado{vocative()}. Se lo recordaré la próxima vez que hablemos de {lista}: "
+        f"{intent.descripcion}"
+    )
+
+
+def _intent_list_invoke(params: dict) -> str:
+    from core.standing_intents import standing_intents
+
+    intents = standing_intents.listar(params["user_id"])
+    if not intents:
+        return f"No tiene recordatorios por tema pendientes{vocative()}."
+
+    lineas = [f"Recordatorios que esperan una ocasión{vocative()}:", ""]
+    for i in intents:
+        temas = ", ".join(i.triggers)
+        lineas.append(f"• #{i.id} — {i.descripcion}  (cuando hable de: {temas})")
+    return "\n".join(lineas)
+
+
+def _intent_cancel_invoke(params: dict) -> str:
+    from core.standing_intents import standing_intents
+
+    try:
+        intent_id = int(params.get("id") or params.get("intent_id") or 0)
+    except (TypeError, ValueError):
+        return "Necesito el número del recordatorio que quiere quitar."
+
+    if intent_id <= 0:
+        return "Necesito el número del recordatorio que quiere quitar."
+
+    if standing_intents.cancelar(intent_id, params["user_id"]):
+        return f"Listo{vocative()}, he quitado el recordatorio #{intent_id}."
+    return f"No encontré un recordatorio suyo con el número #{intent_id}{vocative()}."
+
+
+register_tool(ToolSpec(
+    name="intent_create",
+    description=(
+        "Crea un recordatorio que se dispara cuando el usuario vuelva a mencionar un tema, "
+        "en vez de a una hora concreta. Úsala cuando diga cosas como 'cuando hable de X, "
+        "recuérdame Y' o 'la próxima vez que mencione X...'. Para recordatorios con fecha u "
+        "hora usa 'task_create' en su lugar."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "descripcion": {"type": "string", "description": "Qué recordarle."},
+            "tema": {"type": "string", "description": "De qué tiene que hablar para que salte."},
+            "disparadores": {
+                "type": "string",
+                "description": "Palabras clave concretas, separadas por espacios (opcional).",
+            },
+            "user_id": {"type": "string"},
+        },
+        "required": ["descripcion", "user_id"],
+    },
+    # GREEN: no ejecuta nada, solo guarda una nota que se mostrará más adelante. Es el mismo
+    # nivel que crear un recordatorio por reloj.
+    risk_level=RiskLevel.GREEN,
+    invoke=_intent_create_invoke,
+))
+
+register_tool(ToolSpec(
+    name="intent_list",
+    description="Lista los recordatorios por tema que el usuario tiene esperando una ocasión.",
+    parameters_schema={
+        "type": "object",
+        "properties": {"user_id": {"type": "string"}},
+        "required": ["user_id"],
+    },
+    risk_level=RiskLevel.GREEN,
+    invoke=_intent_list_invoke,
+))
+
+register_tool(ToolSpec(
+    name="intent_cancel",
+    description="Quita un recordatorio por tema, por su número.",
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "id": {"type": "integer", "description": "Número del recordatorio."},
+            "user_id": {"type": "string"},
+        },
+        "required": ["id", "user_id"],
+    },
+    risk_level=RiskLevel.GREEN,
+    invoke=_intent_cancel_invoke,
+))
