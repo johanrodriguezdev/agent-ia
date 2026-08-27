@@ -56,3 +56,13 @@ authorized_users.json
 *.bak
 *.bak-*
 MEMORY.md.bak
+
+# Datos personales del usuario: memorias, perfiles y tareas. Estaban versionados desde el
+# inicio del proyecto, cuando aun no habia nada dentro; hoy contienen conversaciones
+# reales. Se sacan del seguimiento para que dejen de subirse. Siguen en el disco local y
+# los genera el propio agente en cualquier instalacion nueva.
+users_data/
+ai/memory.db
+ai/semantic_memory.db
+ai/unified_memory.db
+tasks/tasks.db
