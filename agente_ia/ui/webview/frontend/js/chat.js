@@ -106,7 +106,20 @@ export function clearMessages() {
 
 export function setTyping(active) {
   $("typing-indicator").hidden = !active;
+  if (!active) setProgress("");   // al terminar, no dejar colgado el ultimo paso
   if (active) scrollToBottom();
+}
+
+// Linea de estado: que esta haciendo el agente ahora mismo. Antes, entre la pregunta y la
+// respuesta solo habia tres puntos, y diez segundos buscando en internet se veian igual
+// que un cuelgue. Se usa textContent y no innerHTML a proposito: el texto lo componen
+// modulos de Python con datos que vienen del usuario (su consulta, una URL), y aqui no
+// tiene por que interpretarse como marcado.
+export function setProgress(text) {
+  const el = $("progress-text");
+  if (!el) return;
+  el.textContent = text || "";
+  if (text) scrollToBottom();
 }
 
 export function updateGuiState(state) {

@@ -67,6 +67,7 @@ export function onConversationCleared(cb) { _bridge.conversation_cleared.connect
 export function onConversationRemoved(cb) { _bridge.conversation_removed.connect(cb); }
 export function onTurnsLoaded(cb) { _bridge.turns_loaded.connect(cb); }
 export function onMessageAppended(cb) { _bridge.message_appended.connect(cb); }
+export function onProgressUpdated(cb) { _bridge.progress_updated.connect(cb); }
 export function onTypingStarted(cb) { _bridge.typing_started.connect(cb); }
 export function onTypingStopped(cb) { _bridge.typing_stopped.connect(cb); }
 export function onGuiStateChanged(cb) { _bridge.gui_state_changed.connect(cb); }

@@ -5,6 +5,7 @@ import re
 from datetime import datetime
 from core.address import vocative, vocative_start
 from core.identity import build_identity_block
+from core.progress import report as progress_report
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +144,8 @@ def _resolver_con_tools(history, system_prompt, image_path, channel, user_id):
             })
 
     mensajes = list(history)
-    for _ in range(MAX_TOOL_ROUNDS):
+    for ronda in range(1, MAX_TOOL_ROUNDS + 1):
+        progress_report("Pensando" if ronda == 1 else f"Pensando ({ronda})")
         respuesta = generate_response(
             messages=mensajes,
             system_prompt=system_prompt,
