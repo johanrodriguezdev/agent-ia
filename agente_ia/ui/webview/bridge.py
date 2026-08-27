@@ -55,6 +55,7 @@ from core.security_manager import ChannelType, RiskLevel, _RISK_LEVEL_ORDER
 from ui.gui_workers import run_async
 from ui.webview.gui_state import GLOBAL_STATE, WAKE_STATE  # noqa: F401 (ver poll_state)
 from ui.webview.markdown_render import render_markdown
+from core.user_identity import OWNER_USER_ID
 from ui.webview.theme import resolve_theme_name
 from ui.webview.wake_word_worker import WakeWordWorker
 
@@ -248,7 +249,7 @@ class Bridge(QObject):
 
         from core.resolution import resolve
         run_async(resolve, self._on_resolve_done, self._on_resolve_error, text,
-                   ChannelType.DESKTOP, user_id="default")
+                   ChannelType.DESKTOP, user_id=OWNER_USER_ID)
 
     def _on_resolve_done(self, resolution) -> None:
         from ai.memory_manager import memory
@@ -263,7 +264,7 @@ class Bridge(QObject):
         run_async(
             memory.store_turn, None, None,
             self._pending_user_text, result_text, conversation_id,
-            user_id="default", matched_by=getattr(resolution, "matched_by", ""),
+            user_id=OWNER_USER_ID, matched_by=getattr(resolution, "matched_by", ""),
         )
         self._pending_user_text = ""
         self._resolution_in_flight = False
@@ -360,7 +361,7 @@ class Bridge(QObject):
 
         self._conversation_id = conversation_id
         run_async(memory.get_conversation_turns, self._on_turns_loaded, self._on_turns_error,
-                  conversation_id, user_id="default")
+                  conversation_id, user_id=OWNER_USER_ID)
 
     def _on_turns_loaded(self, turns) -> None:
         payload = [
@@ -394,13 +395,13 @@ class Bridge(QObject):
             # §10.2: clave "name" deliberada — "conversation_id" no está en
             # _DETAILS_ALLOWED_KEYS de format_details(), perdería trazabilidad silenciosa.
             details=format_details("webview:delete_conversation", {"name": conversation_id}),
-            user_id="default",
+            user_id=OWNER_USER_ID,
         )
         if not confirmed:
             return
-        deleted = memory.delete_conversation(conversation_id, user_id="default")
+        deleted = memory.delete_conversation(conversation_id, user_id=OWNER_USER_ID)
         if deleted:
-            memory.unassign_conversation_from_project(conversation_id, user_id="default")  # REQ-016/CA-21
+            memory.unassign_conversation_from_project(conversation_id, user_id=OWNER_USER_ID)  # REQ-016/CA-21
             self.conversation_removed.emit(conversation_id)
 
     def _on_delete_error(self, message: str) -> None:
@@ -412,7 +413,7 @@ class Bridge(QObject):
 
         self._pending_conversation_offset = offset
         run_async(memory.list_conversations, self._on_conversations_loaded,
-                  self._on_conversations_error, user_id="default",
+                  self._on_conversations_error, user_id=OWNER_USER_ID,
                   limit=_CONVERSATION_PAGE_SIZE, offset=offset)
 
     def _on_conversations_loaded(self, conversations) -> None:
@@ -442,7 +443,7 @@ class Bridge(QObject):
 
     def _fetch_tasks(self):
         from tasks.task_manager import task_manager
-        return task_manager.list_all_tasks(user_id="default")
+        return task_manager.list_all_tasks(user_id=OWNER_USER_ID)
 
     def _on_tasks_loaded(self, tasks) -> None:
         self.tasks_loaded.emit(json.dumps(tasks))
@@ -453,7 +454,7 @@ class Bridge(QObject):
         mismo hilo y emite (mismo patrón cross-thread ya usado por
         `conversation_removed.emit()` en `_delete_conversation_flow`)."""
         from tasks.task_manager import task_manager
-        tasks = task_manager.list_all_tasks(user_id="default")
+        tasks = task_manager.list_all_tasks(user_id=OWNER_USER_ID)
         self.tasks_loaded.emit(json.dumps(tasks))
 
     @pyqtSlot(str, str, str, str)
@@ -469,7 +470,7 @@ class Bridge(QObject):
     def _create_task_flow(self, title, description, due_date, priority) -> None:
         from tasks.task_manager import task_manager
         task_manager.create_task(
-            user_id="default", title=title, channel="desktop",
+            user_id=OWNER_USER_ID, title=title, channel="desktop",
             description=description or "", due_date=due_date or None,
             remind_at=due_date or None, priority=priority or "normal",
         )
@@ -483,7 +484,7 @@ class Bridge(QObject):
 
     def _complete_task_flow(self, task_id: int) -> None:
         from tasks.task_manager import task_manager
-        task_manager.complete_task(task_id, user_id="default")
+        task_manager.complete_task(task_id, user_id=OWNER_USER_ID)
         self._emit_tasks_loaded()
 
     @pyqtSlot(int)
@@ -500,11 +501,11 @@ class Bridge(QObject):
         confirmed = security_manager.require_confirmation(
             "delete_task", ChannelType.DESKTOP,
             details=format_details("webview:delete_task", {"name": str(task_id)}),
-            user_id="default",
+            user_id=OWNER_USER_ID,
         )
         if not confirmed:
             return
-        task_manager.delete_task(task_id, user_id="default")
+        task_manager.delete_task(task_id, user_id=OWNER_USER_ID)
         self._emit_tasks_loaded()
 
     def _on_task_error(self, message: str) -> None:
@@ -526,14 +527,14 @@ class Bridge(QObject):
 
     def _fetch_projects(self):
         from ai.memory_manager import memory
-        return memory.list_projects(user_id="default")
+        return memory.list_projects(user_id=OWNER_USER_ID)
 
     def _on_projects_loaded(self, projects) -> None:
         self.projects_loaded.emit(self._projects_payload(projects))
 
     def _emit_projects_loaded(self) -> None:
         from ai.memory_manager import memory
-        self.projects_loaded.emit(self._projects_payload(memory.list_projects(user_id="default")))
+        self.projects_loaded.emit(self._projects_payload(memory.list_projects(user_id=OWNER_USER_ID)))
 
     @pyqtSlot(str)
     def create_project(self, name: str) -> None:
@@ -545,7 +546,7 @@ class Bridge(QObject):
 
     def _create_project_flow(self, name: str) -> None:
         from ai.memory_manager import memory
-        memory.create_project(user_id="default", name=name)
+        memory.create_project(user_id=OWNER_USER_ID, name=name)
         self._emit_projects_loaded()
 
     @pyqtSlot(str, int)
@@ -556,7 +557,7 @@ class Bridge(QObject):
 
     def _assign_flow(self, conversation_id: str, project_id: int) -> None:
         from ai.memory_manager import memory
-        memory.assign_conversation_to_project(conversation_id, project_id, user_id="default")
+        memory.assign_conversation_to_project(conversation_id, project_id, user_id=OWNER_USER_ID)
         self._emit_projects_loaded()
 
     @pyqtSlot(str)
@@ -566,7 +567,7 @@ class Bridge(QObject):
 
     def _unassign_flow(self, conversation_id: str) -> None:
         from ai.memory_manager import memory
-        memory.unassign_conversation_from_project(conversation_id, user_id="default")
+        memory.unassign_conversation_from_project(conversation_id, user_id=OWNER_USER_ID)
         self._emit_projects_loaded()
 
     @pyqtSlot(int)
@@ -579,7 +580,7 @@ class Bridge(QObject):
 
     def _fetch_project_conversations(self, project_id: int) -> None:
         from ai.memory_manager import memory
-        conversations = memory.list_conversations_by_project(project_id, user_id="default")
+        conversations = memory.list_conversations_by_project(project_id, user_id=OWNER_USER_ID)
         payload = json.dumps([
             {"conversation_id": c.conversation_id, "title": c.title,
              "last_activity": c.last_activity, "turn_count": c.turn_count}
@@ -599,11 +600,11 @@ class Bridge(QObject):
         confirmed = security_manager.require_confirmation(
             "delete_project", ChannelType.DESKTOP,
             details=format_details("webview:delete_project", {"name": str(project_id)}),
-            user_id="default",
+            user_id=OWNER_USER_ID,
         )
         if not confirmed:
             return
-        deleted = memory.delete_project(project_id, user_id="default")
+        deleted = memory.delete_project(project_id, user_id=OWNER_USER_ID)
         if deleted:
             self.project_removed.emit(project_id)   # CA-19: las conversaciones NO se tocan
             self._emit_projects_loaded()
@@ -732,7 +733,7 @@ class Bridge(QObject):
         from agents.action_registry import execute_action
 
         run_async(execute_action, self._on_chip_action_done, self._on_chip_action_error,
-                  action_name, channel=ChannelType.DESKTOP, user_id="default")
+                  action_name, channel=ChannelType.DESKTOP, user_id=OWNER_USER_ID)
 
     def _on_chip_action_done(self, result: Any) -> None:
         """No persiste ni se convierte en turno de conversación (no pasó por `resolve()`)

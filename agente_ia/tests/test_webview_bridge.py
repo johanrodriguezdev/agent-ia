@@ -472,7 +472,12 @@ def test_request_tasks_llama_list_all_tasks_y_emite_tasks_loaded(bridge, monkeyp
 
     bridge.request_tasks()
 
-    assert calls == ["default"]
+    # Se asevera contra la constante, no contra el literal: el escritorio dejó de usar
+    # "default" al unificarse la identidad del dueño entre canales, y fijar el texto aquí
+    # solo obligaría a volver a tocar el test la próxima vez que cambie.
+    from core.user_identity import OWNER_USER_ID
+
+    assert calls == [OWNER_USER_ID]
     assert received == [fake_tasks]  # CA-09: orden intacto, se serializa tal cual
 
 
