@@ -1,8 +1,12 @@
+import logging
 import os
 import json
 import re
 from datetime import datetime
 from core.address import vocative, vocative_start
+from core.identity import build_identity_block
+
+logger = logging.getLogger(__name__)
 
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL = "claude-sonnet-4-5"
@@ -16,9 +20,9 @@ def _get_agent_name() -> str:
         config_path = os.path.join(os.path.dirname(__file__), "..", "config.json")
         with open(config_path, "r", encoding="utf-8") as f:
             config = json.load(f)
-            return config.get("agent_name", "noddoo")
+            return config.get("agent_name", "O.R.I.O.N")
     except Exception:
-        return "noddoo"
+        return "O.R.I.O.N"
 
 
 def _build_system_prompt(
@@ -31,22 +35,24 @@ def _build_system_prompt(
 ) -> str:
     agent_name = _get_agent_name()
 
+    # La personalidad sale de SOUL.md / IDENTITY.md / USER.md, no de este archivo. Antes
+    # estaba hardcodeada aca y, por separado, en core/reasoning_loop.py: dos textos que ya
+    # habian divergido, de modo que el agente sonaba distinto por Telegram que por voz.
+    identity_block = build_identity_block(agent_name)
+    if not identity_block:
+        # Ningun documento disponible: se conserva una descripcion minima para no dejar al
+        # modelo sin ninguna indicacion de tono (degradar, nunca quedarse mudo de caracter).
+        identity_block = (
+            "\n\nEres formal, eficiente y leal. Respuestas cortas y directas, sin relleno "
+            "ni falsa humildad. Adviertes de los riesgos antes de que ocurran y anticipas "
+            "lo que el usuario va a necesitar."
+        )
+
     base_prompt = f"""Eres {agent_name.upper()}, un asistente de inteligencia artificial de nivel operativo, instalado localmente en el PC del usuario.
-
-Tu personalidad esta inspirada en JARVIS de Iron Man: formal, eficiente, leal y con un caracter tranquilo pero firme. Nunca pierdes la compostura, incluso en situaciones criticas. Eres proactivo, preciso y siempre un paso adelante.
-
-Tu forma de hablar refleja a JARVIS:
-- Respuestas cortas, directas y con seguridad. No usas relleno ni falsa humildad.
-- Siempre tratas al usuario como "Senor".
-- Usas frases como "Enseguida, Senor", "Como usted ordene", "Ejecutado", "Operacion completada", "Segun mis sistemas", "He finalizado la tarea".
-- Cuando reportas resultados, lo haces con naturalidad: "La captura se ha guardado en el escritorio, Senor" o "Todo esta en orden, Senor".
-- Tienes un humor sutil y seco. Nunca exagerado. Una respuesta como "Era cuestion de tiempo que alguien lo notara, Senor" es aceptable de vez en cuando.
-- Si algo no se puede hacer, lo dices directamente: "Lo lamento, Senor, pero eso excede mis capacidades actuales."
-- Eres protector: adviertes sobre riesgos antes de que ocurran.
-- Anticipas necesidades: "Si lo desea, puedo preparar un informe detallado, Senor."
+{identity_block}
 
 REGLAS DE COMPORTAMIENTO:
-- Responde siempre en espanol, de forma concisa y directa, como JARVIS.
+- Responde siempre en espanol, de forma concisa y directa.
 - Manten el tono de asistente personal de alto nivel en TODO momento.
 - Si el usuario pregunta algo que puedes responder con tu conocimiento, hazlo directamente sin rodeos.
 - Si el usuario pide ejecutar acciones en el PC que no sabes hacer, AHORA PUEDES APRENDERLAS POR TI MISMO. 
@@ -65,7 +71,6 @@ REGLAS DE COMPORTAMIENTO:
   }}
   ```
 - Nunca rompas el personaje ni menciones que eres Claude de Anthropic ni otro modelo. Eres {agent_name.upper()}.
-- Fecha y hora actual: {datetime.now().strftime('%d/%m/%Y %H:%M')}
 """
     if user_name:
         base_prompt += f"\nNombre del usuario: {user_name}"
@@ -90,7 +95,93 @@ RECUERDOS RELEVANTES DE CONVERSACIONES PASADAS (Memoria Semántica):
 {sem_context}
 """
     base_prompt += "\nUsa este contexto y recuerdos para personalizar tus respuestas cuando sea relevante."
+
+    # La fecha y hora va AL FINAL del prompt, nunca en su cuerpo. DeepSeek y el resto de
+    # proveedores con cache de prefijo solo reutilizan lo que no cambia desde el principio:
+    # con la hora al minuto en mitad del prompt, todo lo que venia detras —contexto del
+    # usuario, recuerdos y el historial completo de la conversacion— se recalculaba cada 60
+    # segundos. Mismo criterio que OpenClaw: "keep that metadata at the request tail to
+    # preserve their cached prefix".
+    base_prompt += f"\nFecha y hora actual: {datetime.now().strftime('%d/%m/%Y %H:%M')}"
     return base_prompt
+
+
+
+#: Tope de rondas de herramientas por mensaje. Mismo criterio que `core/reasoning_loop.py`:
+#: acota el coste y evita que un modelo confundido encadene llamadas sin fin.
+MAX_TOOL_ROUNDS = 3
+
+
+def _resolver_con_tools(history, system_prompt, image_path, channel, user_id):
+    """Pide respuesta al modelo dejandole usar herramientas, y devuelve el texto final.
+
+    Este camino —el de Telegram y Discord— llamaba al modelo SIN herramientas, asi que el
+    agente podia conversar pero no buscar en internet ni consultar nada. Por el escritorio
+    si podia, via `core/reasoning_loop.py`: el mismo agente se comportaba distinto segun
+    donde se le hablara.
+
+    No se reusa `reasoning_loop.run()` porque el contrato es otro: aqui hay historial de
+    conversacion por usuario, soporte de imagenes y los bloques JSON de aprendizaje, que
+    ese modulo no maneja. Lo que si se comparte es lo que importa: la ejecucion pasa
+    SIEMPRE por `execute_tool()`, el mismo punto de gate de seguridad, con el canal real
+    del caller y nunca uno deducido del texto.
+    """
+    from agents.tool_registry import execute_tool, get_tool, list_tool_names
+    from ai.llm_provider import LLMToolResponse, generate_response
+    from core.security_manager import ActionDenied, security_manager
+
+    canal = security_manager.resolve_channel(channel)
+
+    herramientas = []
+    for nombre in list_tool_names():
+        spec = get_tool(nombre)
+        if spec is not None:
+            herramientas.append({
+                "name": spec.name,
+                "description": spec.description,
+                "parameters_schema": spec.parameters_schema,
+            })
+
+    mensajes = list(history)
+    for _ in range(MAX_TOOL_ROUNDS):
+        respuesta = generate_response(
+            messages=mensajes,
+            system_prompt=system_prompt,
+            image_path=image_path or None,
+            tools=herramientas or None,
+        )
+
+        if not isinstance(respuesta, LLMToolResponse):
+            return respuesta                      # proveedor sin tool-calling: texto plano
+        if not respuesta.tool_calls:
+            return respuesta.text or ""
+
+        llamada = respuesta.tool_calls[0]
+        params = dict(llamada.arguments or {})
+        # El canal y el usuario los pone el caller, nunca el modelo (mismo invariante que
+        # `reasoning_loop.run()` y `core/resolution.py`).
+        params["channel"] = canal.value
+        params["user_id"] = user_id
+
+        try:
+            resultado = execute_tool(llamada.name, params, canal, user_id)
+        except ActionDenied as e:
+            return f"No puedo ejecutar esa accion: {e.reason or 'denegada'}."
+        except Exception as e:
+            logger.warning(f"La herramienta '{llamada.name}' fallo: {e}")
+            resultado = f"Error ejecutando '{llamada.name}': {e}"
+
+        mensajes = mensajes + [{
+            "role": "user",
+            "content": (
+                f"[Resultado de {llamada.name}]\n{resultado}\n\n"
+                f"Responde al usuario con esta informacion."
+            ),
+        }]
+
+    # Agotadas las rondas: se pide un cierre en texto, sin herramientas.
+    ultimo = generate_response(messages=mensajes, system_prompt=system_prompt)
+    return ultimo if isinstance(ultimo, str) else getattr(ultimo, "text", "") or ""
 
 
 def ask_claude(
@@ -132,10 +223,9 @@ def ask_claude(
         pass
 
     try:
-        from ai.llm_provider import generate_response
-        assistant_message = generate_response(
-            messages=history,
-            system_prompt=_build_system_prompt(
+        assistant_message = _resolver_con_tools(
+            history,
+            _build_system_prompt(
                 sem_context=sem_context,
                 user_id=user_id,
                 user_name=user_name,
@@ -143,7 +233,9 @@ def ask_claude(
                 profile_text=profile_text,
                 memory_text=memory_text,
             ),
-            image_path=image_path or None,
+            image_path,
+            channel,
+            user_id,
         )
 
         json_match = re.search(r'```json\s*(\{.*?\})\s*```', assistant_message, re.DOTALL)

@@ -1,10 +1,36 @@
+import logging
 import os
+from typing import Optional
+
 import joblib
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.svm import LinearSVC
 from sklearn.pipeline import Pipeline
 from intent.intentions import Intent
 from nlp.parser import clean_text
+
+logger = logging.getLogger(__name__)
+
+#: Distancia mínima entre la clase ganadora y la siguiente para aceptar una clasificación.
+#:
+#: Medido sobre el modelo real, y conviene ser honesto con el resultado: los dos grupos
+#: NO se separan limpiamente. Los comandos legítimos van de 0.03 a 2.00 y el ruido llega a
+#: 0.63, así que se solapan y ningún umbral los divide sin coste.
+#:
+#:   legítimos: cierra chrome 2.00 · toma una captura 1.80 · que hora es 1.77 ·
+#:              abre la calculadora 1.01 · suma 3 mas 4 0.38 · reinicia el computador 0.03
+#:   ruido:     en 2 horas 0.63 · cuentame un chiste 0.29 · manana a las 9 0.15 ·
+#:              el viernes 0.03 · hola que tal 0.03 · olvidalo 0.01
+#:
+#: 0.25 es el compromiso: corta los peores falsos positivos —incluido "manana a las 9",
+#: que disparaba una búsqueda por todo el disco— sin descartar ningún comando que la suite
+#: cubra. Deja pasar "en 2 horas" y "cuentame un chiste", que siguen mal clasificados.
+#:
+#: Nota sobre "reinicia el computador" (0.03): hoy se clasifica MAL, como CLOSE_APP. Con
+#: este umbral pasa a UNKNOWN y termina en el LLM, que tiene más posibilidades de acertar
+#: que una etiqueta equivocada. El umbral no arregla el clasificador, solo evita que sus
+#: errores se ejecuten a ciegas.
+MIN_DECISION_MARGIN = 0.25
 
 class IntentClassifierSystem:
     def __init__(self):
@@ -355,7 +381,54 @@ class IntentClassifierSystem:
         self._train()
 
     def predict(self, text: str) -> str:
-        """Infiere la intención del texto crudo (Maneja Enum y Strings dinámicos)."""
+        """Infiere la intención del texto crudo (Maneja Enum y Strings dinámicos).
+
+        `LinearSVC` **siempre** devuelve la clase más cercana, por lejos que esté: no
+        existe un "no sé". Sin un umbral, cualquier frase acaba ejecutando algo. Medido
+        sobre el modelo entrenado, con el margen entre la primera y la segunda clase:
+
+            abre la calculadora   -> OPEN_APP           margen 1.01
+            cuanto es 40 por 60   -> CALCULATE          margen 1.94
+            el viernes            -> CLOSE_APP          margen 0.03   (!)
+            manana a las 9        -> FIND_LARGEST       margen 0.15   (!)
+            cuentame un chiste    -> CREATE_FILE        margen 0.29   (!)
+
+        Los tres últimos son frases normales de conversación que acababan cerrando
+        aplicaciones o recorriendo el disco entero. Por debajo de `MIN_DECISION_MARGIN` se
+        devuelve UNKNOWN, que hace que `_try_intent()` retorne `None` y la frase siga hasta
+        el LLM — el único que puede decidir si aquello era una orden o una charla.
+        """
         clean = clean_text(text)
         prediction = self.pipeline.predict([clean])[0]
+
+        margen = self._decision_margin(clean)
+        if margen is not None and margen < MIN_DECISION_MARGIN:
+            logger.info(
+                f"Intent '{prediction}' descartado por baja confianza "
+                f"(margen {margen:.2f} < {MIN_DECISION_MARGIN}): '{text[:60]}'"
+            )
+            return Intent.UNKNOWN.value
+
         return str(prediction)
+
+    def _decision_margin(self, clean_text_value: str) -> Optional[float]:
+        """Return la distancia entre la clase ganadora y la siguiente, o `None`.
+
+        `None` significa "no se puede medir" (el pipeline no expone `decision_function`, o
+        solo hay una clase): en ese caso no se filtra nada y el comportamiento es el de
+        antes de este umbral.
+        """
+        try:
+            scores = self.pipeline.decision_function([clean_text_value])[0]
+        except (AttributeError, ValueError, IndexError) as e:
+            logger.debug(f"No se pudo medir la confianza del clasificador: {e}")
+            return None
+
+        try:
+            ordenados = sorted(scores, reverse=True)
+        except TypeError:
+            return None    # clasificación binaria: `decision_function` da un escalar
+
+        if len(ordenados) < 2:
+            return None
+        return float(ordenados[0] - ordenados[1])
