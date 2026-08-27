@@ -17,6 +17,59 @@ from core import reasoning_loop
 from core.security_manager import ActionDenied, RiskLevel
 
 
+def test_ca22_sin_historial_el_prompt_es_el_de_siempre():
+    """REQ-021/CA-22: sin tools ejecutadas y sin turnos previos, `_build_prompt` devuelve
+    la tarea tal cual — el prompt de antes de REQ-021, byte a byte."""
+    assert reasoning_loop._build_prompt("qué hora es", []) == "qué hora es"
+    assert reasoning_loop._build_prompt("qué hora es", [], None) == "qué hora es"
+    assert reasoning_loop._build_prompt("qué hora es", [], []) == "qué hora es"
+
+
+def test_ca22_el_prompt_incluye_los_ultimos_n_turnos():
+    """REQ-021/CA-22: con 7 turnos en `agent_context`, el prompt lleva los últimos 5 y no
+    los 2 primeros."""
+    turnos = [{"role": "user", "content": f"turno {i}"} for i in range(7)]
+
+    prompt = reasoning_loop._build_prompt(
+        "y entonces?", [], turnos[-reasoning_loop.CONTEXT_TURNS:]
+    )
+
+    assert "turno 0" not in prompt
+    assert "turno 1" not in prompt
+    for i in range(2, 7):
+        assert f"turno {i}" in prompt
+    assert "Mensaje actual del usuario: y entonces?" in prompt
+
+
+def test_ca22_los_turnos_previos_conviven_con_el_historial_de_tools():
+    prompt = reasoning_loop._build_prompt(
+        "sigue", [{"tool": "task_list", "params": {}, "result": "2 tareas"}],
+        [{"role": "assistant", "content": "le queda una tarea"}],
+    )
+
+    assert "le queda una tarea" in prompt
+    assert "task_list" in prompt
+    assert "Tarea original del usuario: sigue" in prompt
+
+
+def test_ca22_un_fallo_de_la_db_de_contexto_no_tumba_el_loop():
+    """Leer el contexto es best-effort: si la DB falla, el loop sigue sin historial."""
+    with patch("core.reasoning_loop.agent_context_manager") as mock_ctx:
+        mock_ctx.get_context.side_effect = RuntimeError("db caída")
+        assert reasoning_loop._load_prior_turns("reasoning_loop", "u1") == []
+
+
+def test_ca22_los_turnos_leidos_son_estrictamente_anteriores():
+    """El contexto se lee UNA vez, antes del bucle; las escrituras del turno actual pasan
+    al final de `run()`, así que el turno en curso nunca se ve a sí mismo."""
+    import inspect
+
+    src = inspect.getsource(reasoning_loop.run)
+    lectura = src.index("_load_prior_turns")
+    escritura = src.index("update_context")
+    assert lectura < escritura
+
+
 def test_build_tool_list_expone_parameters_schema_sin_modificar():
     """CA-02: un ToolSpec registrado aparece en `_build_tool_list()` con su
     `parameters_schema` intacto."""

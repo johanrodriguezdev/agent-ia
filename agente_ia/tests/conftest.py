@@ -24,6 +24,8 @@ un solo lugar (acá), documentada como desviación de infraestructura de test en
 
 import os
 
+import pytest
+
 # REQ-008 — los widgets PyQt6 nuevos (`tests/test_gui_workers.py`, `tests/test_gui_widgets.py`)
 # usan pytest-qt, que necesita el backend "offscreen" de Qt para construir QWidgets sin una
 # ventana real ni un servidor gráfico disponible (CI, este entorno). Se fija acá, antes de
@@ -55,6 +57,19 @@ def _desktop_confirm(action_name: str, message: str) -> bool:
 
 
 register_confirmation_adapter(ChannelType.DESKTOP, _desktop_confirm)
+
+
+@pytest.fixture(autouse=True)
+def _clear_dialog_store():
+    """REQ-021 — el estado de diálogo pendiente (`core/dialog_state.py`) es un singleton de
+    proceso. Sin esto, un diálogo abierto por un test cambiaría la resolución de los demás:
+    con diálogo abierto, `_try_pending_dialog` corre primero y puede tragarse la frase.
+    """
+    from core.dialog_state import dialog_store
+
+    dialog_store.clear_all()
+    yield
+    dialog_store.clear_all()
 
 
 def pytest_configure(config):

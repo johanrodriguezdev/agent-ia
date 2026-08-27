@@ -156,6 +156,7 @@ class Bridge(QObject):
     file_attached = pyqtSignal(str, str, bool, str)      # path, name, accepted, reason
     chips_loaded = pyqtSignal(str)                   # json: [{label, kind, payload, risk_level}]
     error_occurred = pyqtSignal(str)
+    window_maximized_changed = pyqtSignal(bool)
 
     # ------------------------------------------------------------ Python → JS (REQ-016)
     tasks_loaded = pyqtSignal(str)                   # json: lista cruda de task_manager.list_all_tasks()
@@ -164,6 +165,8 @@ class Bridge(QObject):
     project_removed = pyqtSignal(int)                # project_id
 
     # ------------------------------------------------------------ Python → JS (REQ-019)
+    profile_loaded = pyqtSignal(str)                  # json: {agent_name, agent_pronunciation, display_name, user_title}
+    profile_saved = pyqtSignal(str)                   # json: mismo shape, ya normalizado y persistido
     security_overrides_loaded = pyqtSignal(str)       # json: [{row_id, label, description, effective_level, base_level, options}]
     security_override_saved = pyqtSignal(str, str)    # row_id, nuevo_nivel — CA-10
     security_override_save_rejected = pyqtSignal(str)  # row_id — CA-21
@@ -181,6 +184,13 @@ class Bridge(QObject):
         self._wake_worker: Optional[WakeWordWorker] = None
         self._current_gui_state: str = GLOBAL_STATE
         self._current_wake_state: str = WAKE_STATE
+
+        # REQ-021 (pieza 8) — locuciones despachadas y terminadas. Solo cuando no queda
+        # ninguna en vuelo se arma la ventana de micrófono: si el usuario escribió mientras
+        # el agente hablaba, el `on_done` de la locución vieja no puede abrirla antes de
+        # tiempo (riesgo R10). Ambos contadores se tocan solo desde el hilo de la GUI.
+        self._speech_seq: int = 0
+        self._speech_done_seq: int = 0
 
     def set_confirmation_adapter(self, adapter) -> None:
         """Llamado por `MainWindow.__init__` tras construir el `WebViewConfirmationAdapter`
@@ -258,6 +268,63 @@ class Bridge(QObject):
         self._pending_user_text = ""
         self._resolution_in_flight = False
         self._load_conversations(offset=0)
+        # REQ-021 (pieza 8): el TTS va DESPUÉS de liberar el guard, y la ventana de
+        # micrófono se arma más tarde todavía, al terminar la locución. Son dos instantes
+        # separados por toda la locución — es lo que hace que el segundo turno de una
+        # conversación nunca llegue con una resolución en curso (CA-15), sin tocar el guard.
+        self._speak_response(result_text)
+
+    # ------------------------------------------------------------ voz de la respuesta (pieza 8)
+    def _hands_free_active(self) -> bool:
+        """Return True si el modo manos libres está realmente activo.
+
+        Se evalúa sobre el estado REAL del worker, nunca sobre el texto ni sobre el canal
+        declarado (CA-23 ajustado por Johan): el webview pronuncia solo cuando hay manos
+        libres, no las respuestas a lo que se escribe con la wake word apagada.
+        """
+        worker = self._wake_worker
+        return worker is not None and not worker.stop_event.is_set()
+
+    def _speak_response(self, raw_text: str) -> None:
+        """Pronuncia la respuesta del agente — exactamente una vez por turno resuelto."""
+        if not self._hands_free_active():
+            return
+
+        from ui.tts_engine import prepare_for_speech, speak
+
+        # CA-24: sobre el texto CRUDO, nunca sobre el HTML de `render_markdown()`.
+        speech_text = prepare_for_speech(raw_text)
+        if not speech_text:
+            self._open_conversation_window()
+            return
+
+        self._speech_seq += 1
+        # CA-25: `speak()` es bloqueante (edge-tts + reproducción); nunca desde el hilo de
+        # la GUI. `run_async` además entrega el `on_done` en el hilo de la GUI, que es el
+        # gancho que necesita la ventana de micrófono (CA-26).
+        run_async(speak, self._on_speech_done, self._on_speech_error, speech_text)
+
+    def _on_speech_done(self, _result) -> None:
+        """CA-26 — la ventana de micrófono abre acá, encadenada al fin de la locución."""
+        self._finish_speech()
+
+    def _on_speech_error(self, message: str) -> None:
+        """CA-28 — un fallo del TTS no puede dejar la conversación muerta."""
+        logger.warning(f"TTS falló, la ventana de micrófono se abre igual: {message}")
+        self._finish_speech()
+
+    def _finish_speech(self) -> None:
+        self._speech_done_seq += 1
+        if self._speech_done_seq < self._speech_seq:
+            return                      # hay otra locución más nueva todavía sonando
+        self._open_conversation_window()
+
+    def _open_conversation_window(self) -> None:
+        """Arma la ventana de ~15 s en la que se acepta una frase sin wake word."""
+        worker = self._wake_worker
+        if worker is None or worker.stop_event.is_set():
+            return                      # manos libres OFF: no se abre nada
+        worker.conversation_window.open()
 
     def _on_resolve_error(self, message: str) -> None:
         """Un error no es una respuesta de la IA — no se persiste (mismo criterio que
@@ -269,6 +336,9 @@ class Bridge(QObject):
         self.typing_stopped.emit()
         self._pending_user_text = ""
         self._resolution_in_flight = False
+        # No se pronuncia (un error no es una respuesta del agente), pero tampoco se deja
+        # la conversación muerta: en manos libres la ventana se abre igual (CA-28).
+        self._open_conversation_window()
 
     def _ensure_conversation_id(self) -> str:
         from ai.memory_manager import memory
@@ -542,6 +612,35 @@ class Bridge(QObject):
         logger.error(f"Error en operación de proyectos: {message}")
         self.error_occurred.emit(message)
 
+    # ------------------------------------------------------------ perfil (nombre y trato)
+    @pyqtSlot()
+    def request_profile(self) -> None:
+        """Carga perezosa: se llama al abrir la sección 'Perfil' de Configuración."""
+        self.profile_loaded.emit(json.dumps(_build_profile_payload()))
+
+    @pyqtSlot(str, str, str, str)
+    def save_profile(
+        self, agent_name: str, agent_pronunciation: str, display_name: str, user_title: str
+    ) -> None:
+        """Persiste el perfil y lo re-emite ya normalizado.
+
+        El nombre del agente es el único campo obligatorio: si llega vacío se conserva el
+        actual en vez de dejar la app sin nombre. Los otros tres admiten vacío como
+        elección deliberada del usuario. Se emite `profile_loaded` además de
+        `profile_saved` para que la ventana (título, bandeja, logo del sidebar) se
+        actualice en vivo, sin reiniciar.
+        """
+        name = agent_name.strip() or config_manager.get_agent_name()
+        config_manager.set_agent_name(name)
+        config_manager.set_agent_pronunciation(agent_pronunciation.strip() or name)
+        config_manager.set_display_name(display_name)
+        config_manager.set_user_title(user_title)
+
+        payload = _build_profile_payload()
+        logger.info(f"Perfil actualizado: agente={payload['agent_name']!r}")
+        self.profile_saved.emit(json.dumps(payload))
+        self.profile_loaded.emit(json.dumps(payload))
+
     # ------------------------------------------------------------ seguridad (REQ-019/§3.3)
     @pyqtSlot()
     def request_security_overrides(self) -> None:
@@ -664,12 +763,30 @@ class Bridge(QObject):
                 # evitar dos WakeWordWorker compitiendo por sr.Microphone() (REQ-009).
                 return
             self._wake_worker = WakeWordWorker()
+            self._wake_worker.signals.command_detected.connect(self._on_voice_command)
             QThreadPool.globalInstance().start(self._wake_worker)
         else:
             self._stop_wake_word_worker()
 
+    def _on_voice_command(self, text: str) -> None:
+        """Resuelve un comando dictado por voz igual que uno escrito.
+
+        Llega por conexión en cola desde el hilo del worker, así que este cuerpo corre en
+        el hilo principal y puede reusar `send_message()` tal cual — mismo pipeline
+        (`resolve()`), mismo gate de seguridad, misma persistencia en el historial. Si ya
+        hay una resolución en curso, `send_message()` lo ignora con su propio guard.
+        """
+        if self._resolution_in_flight:
+            logger.warning(f"Comando por voz ignorado (resolución en curso): {text!r}")
+            return
+        self.send_message(text)
+
     def _stop_wake_word_worker(self) -> None:
         if self._wake_worker is not None:
+            # REQ-021: primero se cierra la ventana de conversación y después se pide la
+            # parada. Así, entre ambas cosas, no queda un instante en el que se acepte una
+            # frase sin wake word con el manos libres ya apagado.
+            self._wake_worker.conversation_window.cancel()
             self._wake_worker.stop_event.set()
 
     def stop_wake_word_worker(self) -> None:
@@ -739,6 +856,16 @@ def _build_chips_payload() -> List[Dict[str, Any]]:
             entry["risk_level"] = None
         result.append(entry)
     return result
+
+
+def _build_profile_payload() -> Dict[str, Any]:
+    """Estado actual del perfil, leído siempre de `config.json` (nunca de una caché)."""
+    return {
+        "agent_name": config_manager.get_agent_name(),
+        "agent_pronunciation": config_manager.get_agent_pronunciation(),
+        "display_name": config_manager.get_display_name(),
+        "user_title": config_manager.get_user_title(),
+    }
 
 
 def _build_security_overrides_payload() -> List[Dict[str, Any]]:

@@ -1,5 +1,5 @@
 from ui.stt.transcriber import listen_command
-from ui.tts_engine import speak
+from ui.tts_engine import prepare_for_speech, speak
 from ui.personality import format_response
 from config_manager import get_agent_name
 
@@ -41,12 +41,9 @@ class CLI:
         
         # 3. Voz
         if read_aloud:
-            # Para la voz, quitamos saltos de línea y formateamos un poco
-            text_to_speak = formal_text.replace("\n", ". ")
-            
-            # Truncar si es muy largo
-            if len(text_to_speak) > 400:
-                short_text = text_to_speak[:380].rsplit('.', 1)[0] + "... La información completa está en su pantalla, Señor."
-                speak(short_text)
-            else:
-                speak(text_to_speak)
+            # REQ-021/CA-27: la preparación del texto para voz (aplanado, limpieza de
+            # markdown/HTML/emojis, umbral de 400, corte en 380 y coletilla con
+            # `vocative()`) vive en un único lugar, `ui/tts_engine.py`, compartido con el
+            # webview. Antes estaba inline acá y la consola pronunciaba literalmente los
+            # asteriscos y los emojis de `format_task_created()`.
+            speak(prepare_for_speech(formal_text))
