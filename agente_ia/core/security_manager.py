@@ -418,6 +418,12 @@ def _register_default_actions():
     # `security_manager.require_confirmation()` antes de ejecutarse.
     sm.register_action("delete_task", RiskLevel.YELLOW)
     sm.register_action("delete_project", RiskLevel.YELLOW)
+    # `MemoryDigestSkill` reescribe MEMORY.md, un archivo del proyecto, con contenido que
+    # produce el LLM: entra en "modificar archivos existentes" de security-levels.md. Solo
+    # toca el bloque entre marcadores y deja copia en MEMORY.md.bak, pero eso acota el daño
+    # posible, no elimina la necesidad de confirmar. Como YELLOW no se puede lanzar por voz
+    # (CHANNEL_ALLOWED_LEVELS), que es lo deseable: es mantenimiento, no conversación.
+    sm.register_action("UPDATE_MEMORY_FILE", RiskLevel.YELLOW)
     sm.register_action("execute_code", RiskLevel.YELLOW)
     sm.register_action("create_skill", RiskLevel.YELLOW)
     sm.register_action("modify_skill", RiskLevel.YELLOW)
