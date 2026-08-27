@@ -199,8 +199,21 @@ def ask_claude(
 
     history.append({"role": "user", "content": user_message})
 
-    if len(history) > MAX_HISTORY_TURNS * 2:
-        history = history[-(MAX_HISTORY_TURNS * 2):]
+    # Antes aquí había un truncado que no truncaba: `history = history[-N:]` reasigna la
+    # variable local pero NO modifica la lista guardada en `_conversation_histories`, así
+    # que el historial crecía sin límite y, peor, a partir de ese punto los `append`
+    # posteriores iban a una lista local que se perdía al salir de la función: las
+    # respuestas del agente dejaban de guardarse.
+    #
+    # Ahora se compacta en lugar de cortar. Cortar es la peor forma de olvidar: lo que se va
+    # no es lo menos importante, es lo más viejo, y en una conversación de trabajo lo más
+    # viejo suele ser la decisión que explica todo lo demás. Y se escribe con `[:]` para
+    # modificar la lista guardada, no una copia.
+    from core.compaction import compactar
+
+    compactado = compactar(history)
+    if compactado is not history:
+        history[:] = compactado
 
     sem_context = ""
     try:
