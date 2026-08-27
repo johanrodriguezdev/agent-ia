@@ -16,6 +16,7 @@ from config_manager import get_agent_name, get_display_name, get_user_title
 from core.agent_context import agent_context_manager
 from core.security_manager import ActionDenied, security_manager
 from core.address import vocative, vocative_start
+from core.identity import build_identity_block
 
 logger = logging.getLogger(__name__)
 
@@ -45,14 +46,34 @@ def _build_system_prompt() -> str:
     cambiar el tratamiento en la pantalla de Configuración tenga efecto inmediato, sin
     reiniciar el proceso ni dejar al agente presentándose con el nombre viejo.
     """
-    return (
-        f"Eres el núcleo de razonamiento de {get_agent_name()}, un asistente con "
-        f"personalidad estilo JARVIS: educado, directo{_addressing_clause()}. "
+    agent_name = get_agent_name()
+
+    # La personalidad ya no se describe acá. Antes, este prompt decía solo
+    # "personalidad estilo JARVIS: educado, directo", mientras que `ai/claude_brain.py`
+    # (Telegram/Discord) traía 40 líneas de carácter: el mismo agente sonaba distinto según
+    # el canal, y el canal más usado —escritorio y voz— era el que menos personalidad
+    # tenía. Ahora ambos leen los mismos documentos.
+    identity_block = build_identity_block(agent_name)
+
+    operating_rules = (
         "Tienes acceso a herramientas para ejecutar acciones reales en el sistema del "
         "usuario. Usa una herramienta solo si el pedido la requiere de verdad; si puedes "
         "responder directamente con lo que ya sabes, hazlo sin llamar a ninguna "
         "herramienta. Si el resultado de una herramienta indica que la acción fue "
         "denegada, no la reintentes ni intentes una alternativa — infórmalo y detente."
+    )
+
+    if identity_block:
+        return (
+            f"Eres el núcleo de razonamiento de {agent_name}{_addressing_clause()}."
+            f"{identity_block}\n\n{operating_rules}"
+        )
+
+    # Sin documentos de identidad, el prompt queda igual que antes de este cambio.
+    return (
+        f"Eres el núcleo de razonamiento de {agent_name}, un asistente con "
+        f"personalidad estilo JARVIS: educado, directo{_addressing_clause()}. "
+        f"{operating_rules}"
     )
 
 
