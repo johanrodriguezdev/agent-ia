@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 
 echo ======================================================
-echo     GLASS — CONFIGURAR ANTHROPIC API KEY
+echo     O.R.I.O.N — CONFIGURAR ANTHROPIC API KEY
 echo ======================================================
 echo.
 echo Este script configura tu clave de API de Anthropic
@@ -45,7 +45,7 @@ echo ======================================================
 echo   [OK] API key configurada correctamente.
 echo.
 echo   IMPORTANTE: Debes CERRAR y REABRIR la terminal
-echo   (o reiniciar VS Code) para que Glass la detecte.
+echo   (o reiniciar VS Code) para que O.R.I.O.N la detecte.
 echo ======================================================
 echo.
 
@@ -62,9 +62,9 @@ if %errorlevel% neq 0 (
 
 echo.
 echo ======================================================
-echo   Glass ya puede usar Claude como cerebro.
+echo   O.R.I.O.N ya puede usar Claude como cerebro.
 echo   Prueba preguntarle algo que no sea un comando,
-echo   como: "Glass, que es la inteligencia artificial?"
+echo   como: "O.R.I.O.N, que es la inteligencia artificial?"
 echo ======================================================
 echo.
 pause

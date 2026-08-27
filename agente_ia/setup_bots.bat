@@ -4,7 +4,7 @@ chcp 65001 >nul
 
 echo.
 echo ======================================================
-echo   GLASS — Configurar Bots de Comunicación
+echo   O.R.I.O.N — Configurar Bots de Comunicación
 echo ======================================================
 echo.
 
@@ -17,7 +17,7 @@ echo.
 :: Leer config actual
 set CONFIG_FILE=%~dp0config.json
 if not exist "%CONFIG_FILE%" (
-    echo {"agent_name": "glass"} > "%CONFIG_FILE%"
+    echo {"agent_name": "O.R.I.O.N"} > "%CONFIG_FILE%"
 )
 
 :: Token de Telegram
@@ -26,7 +26,7 @@ echo.
 echo     Para crear tu bot:
 echo     1. Abre Telegram y busca @BotFather
 echo     2. Escribe /newbot
-echo     3. Dale un nombre y un username (ej: GlassAssistantBot)
+echo     3. Dale un nombre y un username (ej: OrionAssistantBot)
 echo     4. Copia el token que te da
 echo.
 set /p TELEGRAM_TOKEN="Pega tu token de Telegram (o ENTER para omitir): "
