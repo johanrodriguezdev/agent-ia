@@ -105,20 +105,95 @@ def generate_response(messages, system_prompt, image_path=None, tools=None):
             )
         else:
             response = _cached_call(active_provider, messages, system_prompt, image_path, model_name)
-        if isinstance(response, str) and "Error:" in response and fallback_provider and fallback_provider != active_provider:
+        if isinstance(response, str) and "Error:" in response and _cadena_de_respaldo(
+            active_provider, fallback_provider
+        ):
             raise Exception(response)
         return response
     except Exception as e:
-        if fallback_provider and fallback_provider != active_provider:
-            try:
-                if fallback_provider == "ollama":
-                    fallback_resp = _ask_ollama(messages, system_prompt, image_path, "qwen3:8b")
-                else:
-                    fallback_resp = _uncached_call(fallback_provider, messages, system_prompt, image_path, model_name)
-                return f"[Fallback activado. Proveedor original falló por: {str(e)}]\n{fallback_resp}"
-            except Exception as e2:
-                return f"Error en proveedor principal ({str(e)}) y también en el de emergencia ({str(e2)})."
-        return f"Error ({active_provider}): {str(e)}"
+        return _intentar_respaldos(
+            active_provider, e, messages, system_prompt, image_path, model_name,
+            effective_tools, fallback_provider,
+        )
+
+
+#: Modelo por defecto de cada proveedor de respaldo. Sin esto se le pedía al respaldo el
+#: modelo configurado para el principal — "deepseek-chat" no existe en Ollama, así que el
+#: respaldo fallaba por una razón distinta a la del principal y quedaba igual de inútil.
+_MODELO_POR_PROVEEDOR = {
+    "ollama": "qwen3:8b",
+    "openai": "gpt-4o-mini",
+    "anthropic": "claude-3-5-sonnet-20241022",
+    "gemini": "gemini-1.5-flash",
+}
+
+
+def _cadena_de_respaldo(activo, fallback_config) -> list:
+    """Return los proveedores a los que caer, en orden, sin repetir el que ya falló.
+
+    Acepta un proveedor suelto (lo que había) o una lista: se puede encadenar más de uno
+    sin romper la configuración de nadie.
+    """
+    if not fallback_config:
+        return []
+    if isinstance(fallback_config, str):
+        candidatos = [p.strip() for p in fallback_config.replace(",", " ").split()]
+    else:
+        candidatos = [str(p).strip() for p in fallback_config]
+
+    vistos, cadena = {activo}, []
+    for p in candidatos:
+        if p and p not in vistos:
+            vistos.add(p)
+            cadena.append(p)
+    return cadena
+
+
+def _intentar_respaldos(
+    activo, error_original, messages, system_prompt, image_path, model_name,
+    tools, fallback_config,
+):
+    """Recorre la cadena de respaldo hasta que alguno responda.
+
+    Tres diferencias con lo que hacía antes:
+
+    - Recorre una CADENA, no un único respaldo. Si el segundo también está caído, prueba el
+      siguiente en vez de rendirse.
+    - Conserva las herramientas si el respaldo las soporta. Antes se perdían, así que el
+      agente caía a un modo en el que no podía buscar ni consultar nada, justo cuando ya
+      estaba teniendo un mal día.
+    - El aviso va al registro, no a la respuesta. Que el proveedor principal fallara es un
+      problema de operación, no algo que el usuario deba leer mezclado con lo que preguntó.
+    """
+    cadena = _cadena_de_respaldo(activo, fallback_config)
+    if not cadena:
+        logger.error(f"Proveedor '{activo}' falló y no hay respaldo configurado: {error_original}")
+        return f"Error ({activo}): {error_original}"
+
+    logger.warning(f"Proveedor '{activo}' falló ({error_original}); probando respaldos: {cadena}")
+
+    errores = [f"{activo}: {error_original}"]
+    for respaldo in cadena:
+        try:
+            modelo = _MODELO_POR_PROVEEDOR.get(respaldo, model_name)
+            soporta_tools = respaldo in ("anthropic", "deepseek", "openai")
+            respuesta = _uncached_call(
+                respaldo, messages, system_prompt, image_path, modelo,
+                tools=tools if (tools and soporta_tools) else None,
+            )
+            if isinstance(respuesta, str) and respuesta.startswith("Error:"):
+                raise Exception(respuesta)
+            logger.info(f"Respaldo '{respaldo}' respondió correctamente")
+            return respuesta
+        except Exception as e:
+            logger.warning(f"El respaldo '{respaldo}' también falló: {e}")
+            errores.append(f"{respaldo}: {e}")
+
+    logger.error(f"Todos los proveedores fallaron: {errores}")
+    return (
+        "No consigo comunicarme con ningún proveedor de modelo en este momento. "
+        "Revise su conexión y la configuración de claves."
+    )
 
 def _ask_anthropic(messages, system_prompt, image_path, model_name, tools=None):
     import anthropic
