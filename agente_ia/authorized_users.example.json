@@ -1,0 +1,6 @@
+{
+  "_comentario": "Copie este archivo como authorized_users.json y ponga sus identidades reales. Sin el archivo, ningun remitente remoto es atendido (fail-closed). Los canales locales (escritorio, voz) nunca se filtran.",
+  "_como_obtener_su_id": "Telegram: escriba a @userinfobot. Discord: active el Modo Desarrollador en Ajustes > Avanzado y use 'Copiar ID de usuario'.",
+  "telegram": ["SU_ID_DE_TELEGRAM"],
+  "discord": []
+}

@@ -357,7 +357,7 @@ async def cmd_memoria(update, context):
     from ai.user_manager import registry
     user = update.effective_user
     session = registry.get_or_create(
-        user_id=str(user.id),
+        user_id=_owner_uid(user),
         user_name=user.first_name or "Usuario",
         channel="telegram"
     )
@@ -371,7 +371,7 @@ async def cmd_memoria(update, context):
 async def cmd_limpiar(update, context):
     from ai.user_manager import registry
     user = update.effective_user
-    session = registry.get(str(user.id), "telegram")
+    session = registry.get(_owner_uid(user), "telegram")
     if session:
         session.clear_history()
     await update.message.reply_text(
@@ -608,6 +608,20 @@ async def cmd_eliminar(update, context):
 
 # ── Handlers de mensajes ───────────────────────────────────────────
 
+
+def _owner_uid(user) -> str:
+    """Return el `user_id` canonico con el que guardar y buscar la memoria.
+
+    Todas las identidades autorizadas son el mismo dueno, asi que lo que se cuenta por
+    Telegram y lo que se dice por voz en el escritorio acaban en el mismo espacio. NO se usa
+    para las confirmaciones pendientes (esas identifican una sesion de chat concreta: dos
+    autorizados no deben poder responderse la confirmacion el uno al otro) ni para la
+    auditoria de `require_confirmation()`, que necesita saber quien lo pidio de verdad.
+    """
+    from core.user_identity import canonical_user_id
+
+    return canonical_user_id("telegram", getattr(user, "id", None))
+
 async def _intercept_confirmacion_pendiente(update, context):
     """Handler de máxima prioridad (group=-1) — intercepta CUALQUIER mensaje de texto,
     incluidos comandos slash, cuando el usuario que lo envía tiene una confirmación
@@ -634,6 +648,45 @@ async def _intercept_confirmacion_pendiente(update, context):
         raise ApplicationHandlerStop
 
 
+async def _intercept_no_autorizado(update, context):
+    """Corta cualquier update de quien no esté en `authorized_users.json` (group=-2).
+
+    Es el primer handler de la cadena: si esto no deja pasar el update, ningún otro lo ve.
+    Un agente con herramientas no distingue permisos por usuario — quien puede hablarle
+    comparte su autoridad para ejecutar —, así que el control tiene que estar en la puerta
+    y no repartido por cada comando.
+
+    Un update sin remitente identificable se deniega igual (fail-closed): no hay forma de
+    comprobar quién lo manda.
+    """
+    from telegram.ext import ApplicationHandlerStop
+    from core.authorized_users import UNAUTHORIZED_MESSAGE, is_authorized
+
+    user = update.effective_user
+    user_id = str(user.id) if user is not None else ""
+
+    if is_authorized("telegram", user_id):
+        return
+
+    logger.warning(
+        f"Telegram: update rechazado de un remitente no autorizado "
+        f"(id={user_id or 'desconocido'}, username={getattr(user, 'username', None)!r})"
+    )
+
+    # Se responde algo neutro en vez de ignorar en silencio: quien escriba por error merece
+    # saber que no va a obtener respuesta. El texto no confirma de quién es el bot ni qué
+    # sabe hacer.
+    try:
+        if update.effective_chat is not None:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id, text=UNAUTHORIZED_MESSAGE
+            )
+    except Exception as e:
+        logger.error(f"No se pudo avisar al remitente no autorizado: {e}")
+
+    raise ApplicationHandlerStop
+
+
 async def handle_text(update, context):
     from channels.gateway import GlassGateway, GlassMessage, MessageType
 
@@ -657,7 +710,7 @@ async def handle_text(update, context):
     # `resolve()`. `_handle_shutdown`/`_handle_restart` quedan disponibles para invocación
     # directa (p.ej. desde comandos explícitos ya existentes o tests).
     msg = GlassMessage(
-        user_id=str(user.id),
+        user_id=_owner_uid(user),
         user_name=user.first_name or "Usuario",
         text=text, channel="telegram",
         msg_type=MessageType.TEXT
@@ -703,7 +756,7 @@ async def handle_voice(update, context):
     # REQ-006/B6: mismo motivo que en handle_text() — el pre-chequeo de apagado/reinicio
     # se elimina, `GlassGateway().process()` resuelve el texto transcrito completo.
     msg = GlassMessage(
-        user_id=str(user.id),
+        user_id=_owner_uid(user),
         user_name=user.first_name or "Usuario",
         text=transcribed, channel="telegram",
         msg_type=MessageType.VOICE
@@ -796,7 +849,7 @@ async def handle_photo(update, context):
 
     try:
         msg = GlassMessage(
-            user_id=str(user.id),
+            user_id=_owner_uid(user),
             user_name=user.first_name or "Usuario",
             text=caption,
             channel="telegram",
@@ -845,7 +898,7 @@ async def handle_document(update, context):
 
     try:
         msg = GlassMessage(
-            user_id=str(user.id),
+            user_id=_owner_uid(user),
             user_name=user.first_name or "Usuario",
             text=text_to_process,
             channel="telegram",
@@ -933,10 +986,22 @@ def run_telegram_bot():
         .build()
     )
 
+    # ── Control de acceso por identidad ────────────────────────────
+    # group=-2: por delante de TODO lo demás, incluido el interceptor de confirmaciones.
+    # `TypeHandler(Update, ...)` cubre cualquier update —texto, comandos, voz, fotos y
+    # documentos—, en vez de tener que recordar añadir el filtro a cada handler nuevo.
+    # Sin esto, cualquiera que encontrara el bot era atendido como el dueño: las acciones
+    # verdes se ejecutan sin confirmar, y "tomar captura de pantalla" es una de ellas.
+    from telegram import Update as _Update
+    from telegram.ext import TypeHandler
+
+    app.add_handler(TypeHandler(_Update, _intercept_no_autorizado), group=-2)
+
     # ── Interceptor de confirmación pendiente (REQ-018/CA-05) ───────
-    # Prioridad máxima (group=-1, corre antes que el group=0 donde viven todos los
-    # CommandHandler/handle_text) — intercepta cualquier mensaje de texto, incluidos
-    # comandos slash, cuando el usuario que lo envía tiene una confirmación pendiente.
+    # Prioridad máxima entre los handlers de mensajes (group=-1, corre antes que el group=0
+    # donde viven todos los CommandHandler/handle_text) — intercepta cualquier mensaje de
+    # texto, incluidos comandos slash, cuando el usuario que lo envía tiene una confirmación
+    # pendiente.
     app.add_handler(
         MessageHandler(filters.TEXT, _intercept_confirmacion_pendiente), group=-1
     )

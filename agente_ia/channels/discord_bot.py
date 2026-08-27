@@ -59,7 +59,10 @@ def _process_message(user_id: str, user_name: str, text: str, image_path: str = 
         from channels.gateway import GlassGateway, GlassMessage, MessageType
         msg_type = MessageType.IMAGE if image_path else MessageType.TEXT
         msg = GlassMessage(
-            user_id=f"discord_{user_id}",
+            # Sin prefijo de canal: `user_id` ya llega resuelto por
+            # `core.user_identity.canonical_user_id()`. Envolverlo aqui ("discord_owner")
+            # devolvia al dueno a un espacio de memoria propio de Discord.
+            user_id=user_id,
             user_name=user_name,
             text=text,
             channel="discord",
@@ -71,6 +74,27 @@ def _process_message(user_id: str, user_name: str, text: str, image_path: str = 
         return response.text
     except Exception as e:
         return f"Error procesando su solicitud: {str(e)[:100]}"
+
+
+
+async def _slash_autorizado(interaction, comando: str) -> bool:
+    """Return True si quien lanza el comando slash puede ser atendido.
+
+    Los comandos slash no pasan por `on_message`, asi que cada uno necesita su propia
+    comprobacion. Si devuelve False ya respondio al usuario y el comando debe cortar.
+    """
+    from core.authorized_users import UNAUTHORIZED_MESSAGE, is_authorized
+
+    autor_id = str(interaction.user.id)
+    if is_authorized("discord", autor_id):
+        return True
+
+    logger.warning(f"Discord: /{comando} rechazado de un remitente no autorizado (id={autor_id})")
+    try:
+        await interaction.response.send_message(UNAUTHORIZED_MESSAGE, ephemeral=True)
+    except Exception as e:
+        logger.error(f"No se pudo avisar al remitente no autorizado: {e}")
+    return False
 
 
 def run_discord_bot():
@@ -122,6 +146,24 @@ def run_discord_bot():
             await bot.process_commands(message)
             return
 
+        # Control de acceso por identidad: quien no esté en `authorized_users.json` no es
+        # atendido. Va antes de procesar el texto y antes de descargar adjuntos — un agente
+        # con herramientas no distingue permisos por usuario, así que el corte tiene que
+        # estar en la puerta. Fail-closed: sin archivo o sin la clave `discord`, nadie pasa.
+        from core.authorized_users import UNAUTHORIZED_MESSAGE, is_authorized
+
+        author_id = str(message.author.id)
+        if not is_authorized("discord", author_id):
+            logger.warning(
+                f"Discord: mensaje rechazado de un remitente no autorizado "
+                f"(id={author_id}, nombre={message.author.display_name!r})"
+            )
+            try:
+                await message.reply(UNAUTHORIZED_MESSAGE)
+            except Exception as e:
+                logger.error(f"No se pudo avisar al remitente no autorizado: {e}")
+            return
+
         # Limpiar la mención del texto
         text = message.content.replace(f"<@{bot.user.id}>", "").strip()
         if not text and not message.attachments:
@@ -138,8 +180,10 @@ def run_discord_bot():
                     break
 
         async with message.channel.typing():
+            from core.user_identity import canonical_user_id
+
             result = _process_message(
-                str(message.author.id),
+                canonical_user_id("discord", message.author.id),
                 message.author.display_name,
                 text,
                 image_path=image_path
@@ -164,9 +208,14 @@ def run_discord_bot():
     @bot.tree.command(name="noddoo", description=f"Habla con {agent}")
     @app_commands.describe(mensaje=f"Tu pregunta o comando para {agent}")
     async def slash_noddoo(interaction: discord.Interaction, mensaje: str):
+        from core.user_identity import canonical_user_id
+
+        if not await _slash_autorizado(interaction, "noddoo"):
+            return
+
         await interaction.response.defer()
         result = _process_message(
-            str(interaction.user.id),
+            canonical_user_id("discord", interaction.user.id),
             interaction.user.display_name,
             mensaje
         )
@@ -180,6 +229,8 @@ def run_discord_bot():
 
     @bot.tree.command(name="limpiar", description=f"Reinicia la conversación con {agent}")
     async def slash_limpiar(interaction: discord.Interaction):
+        if not await _slash_autorizado(interaction, "limpiar"):
+            return
         try:
             from ai.claude_brain import clear_conversation
             clear_conversation()
@@ -192,6 +243,8 @@ def run_discord_bot():
 
     @bot.tree.command(name="ayuda", description=f"Ver comandos de {agent}")
     async def slash_ayuda(interaction: discord.Interaction):
+        if not await _slash_autorizado(interaction, "ayuda"):
+            return
         embed = discord.Embed(
             title=f"{agent} — Comandos",
             color=0x0096FF

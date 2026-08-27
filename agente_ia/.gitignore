@@ -44,3 +44,15 @@ workspace/**/*.tar.gz
 workspace/**/*.mp4
 workspace/**/*.mov
 workspace/**/*.pdf
+
+# Identidades autorizadas de los canales remotos: contiene los IDs personales de
+# Telegram/Discord del dueño. No se versiona (el repo puede ser publico). Perderlo es
+# seguro por diseno: sin el archivo, `core/authorized_users.py` deniega a todo remitente
+# remoto en vez de abrir el bot. Ver authorized_users.example.json para la plantilla.
+authorized_users.json
+
+# Copias de seguridad que genera el propio agente (migracion de memoria, destilacion de
+# MEMORY.md). Son datos personales y ademas se regeneran solas: no van al repositorio.
+*.bak
+*.bak-*
+MEMORY.md.bak
