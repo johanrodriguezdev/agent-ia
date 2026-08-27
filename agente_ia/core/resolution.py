@@ -69,6 +69,7 @@ def _denied_message(exc: ActionDenied) -> str:
 _MATCHED_BY_DIALOG = "pending_dialog"
 _MATCHED_BY_DIALOG_CANCEL = "pending_dialog:cancel"
 _MATCHED_BY_DIALOG_OPEN = "task_tool:dialog_open"
+_MATCHED_BY_STANDING_INTENT = "standing_intent"
 
 #: Cancelación explícita (CA-06). Se exige coincidencia EXACTA de la frase normalizada:
 #: "cancela la reunión del lunes" es contenido de un slot, no una cancelación.
@@ -220,6 +221,43 @@ def _execute_completed_dialog(
         text=f"{result}\n\n{_DIALOG_CLOSING}", matched_by=_MATCHED_BY_DIALOG, channel=channel,
     )
 
+
+
+def _append_standing_intents(
+    result: ResolutionResult, text: str, user_id: str,
+) -> ResolutionResult:
+    """Cuelga a la respuesta los recordatorios que la frase del usuario haya disparado.
+
+    Se comprueba sobre lo que dijo el USUARIO, no sobre la respuesta del agente: una
+    intención tiene que dispararse cuando *tú* mencionas el tema, no cuando el agente lo
+    menciona al responderte —eso haría que se disparase a sí misma.
+
+    Igual que la repregunta pendiente, no se pega a un resultado denegado: mezclar un aviso
+    de seguridad con un recordatorio conversacional degrada el aviso.
+    """
+    if result.denied or not text.strip():
+        return result
+
+    # La frase que CREA una intención contiene, por fuerza, el tema que la dispara: sin
+    # esta salida, pedir "cuando hable del contador recuérdame X" respondía confirmando la
+    # anotación y, acto seguido, recordándola. Absurdo, y además gastaba un disparo.
+    if result.matched_by == _MATCHED_BY_STANDING_INTENT:
+        return result
+
+    try:
+        from core.standing_intents import formatear_aviso, standing_intents
+
+        disparadas = standing_intents.comprobar(text, user_id)
+    except Exception as e:
+        # Un recordatorio que falla no puede impedir que llegue la respuesta.
+        logger.warning(f"Fallo comprobando intenciones permanentes: {e}")
+        return result
+
+    if not disparadas:
+        return result
+
+    logger.info(f"[Intenciones] {len(disparadas)} disparada(s) por la frase del usuario")
+    return replace(result, text=f"{result.text}\n\n{formatear_aviso(disparadas)}")
 
 def _append_pending_question(
     result: ResolutionResult, user_id: str, channel: "ChannelType",
@@ -464,6 +502,65 @@ def _try_task_tool(text: str, channel: "ChannelType", user_id: str) -> Optional[
     return None
 
 
+# ─────────────────────────────────────────────
+#  Intenciones permanentes — "cuando vuelva a hablar de X, recuérdame Y"
+#
+#  Va ANTES de `_try_task_tool` a propósito. Estas frases contienen "recuérdame", que es
+#  disparador de `task_create`, así que sin este resolver la petición se leía como un
+#  recordatorio por reloj y el agente preguntaba "¿para cuándo?" — justo el dato que esta
+#  clase de recordatorio no tiene, porque no depende del reloj sino de la ocasión.
+# ─────────────────────────────────────────────
+
+#: Grupo 1 = la condición ("vuelva a hablar del contador"), grupo 2 = qué recordar.
+#: Se exige la estructura completa —condición temporal + verbo de recordar— para no capturar
+#: un "recuérdame llamar al contador mañana", que sí es por reloj y debe seguir su camino.
+_STANDING_INTENT_RE = re.compile(
+    r"\b(?:cuando|cuándo|la\s+pr[oó]xima\s+vez\s+que|cada\s+vez\s+que|si\s+(?:vuelvo|vuelva|menciono|hablo))"
+    r"(?P<condicion>.{3,90}?)"
+    r"\b(?:recu[eé]rdame|recordarme|acu[eé]rdame|av[ií]same|no\s+me\s+dejes\s+olvidar)\b"
+    r"(?P<accion>.{3,160})",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _try_standing_intent(
+    text: str, channel: "ChannelType", user_id: str,
+) -> Optional[ResolutionResult]:
+    """Crea un recordatorio condicionado a que vuelva a aparecer un tema."""
+    match = _STANDING_INTENT_RE.search(text)
+    if match is None:
+        return None
+
+    from core.standing_intents import extraer_triggers, standing_intents
+
+    condicion = match.group("condicion").strip()
+    accion = match.group("accion").strip(" .,;:")
+    if not accion:
+        return None
+
+    triggers = extraer_triggers(condicion)
+    if not triggers:
+        # La condición no tiene ninguna palabra específica ("cuando quieras", "cuando
+        # puedas"). No hay forma de reconocer el momento, así que se deja seguir: el resto
+        # de resolvers lo tratarán como lo que parezca.
+        logger.info(f"[Intención] sin disparadores utilizables en: '{condicion[:40]}'")
+        return None
+
+    intent = standing_intents.crear(user_id, accion, triggers)
+    if intent is None:
+        return None
+
+    temas = ", ".join(f"«{t}»" for t in intent.triggers)
+    return ResolutionResult(
+        text=(
+            f"Anotado{vocative()}. Se lo recordaré la próxima vez que hablemos de "
+            f"{temas}: {intent.descripcion}"
+        ),
+        matched_by=_MATCHED_BY_STANDING_INTENT,
+        channel=channel,
+    )
+
+
 def _try_capability(text: str, channel: "ChannelType", user_id: str) -> Optional[ResolutionResult]:
     """`os_integration/capabilities_router.py:try_capability()` — ya gatea directo dentro
     de `execute_capability()` (línea 59), sin levantar `ActionDenied` (retorna el string de
@@ -569,6 +666,7 @@ RESOLVERS = [
     ("routine", _try_routine),
     ("autopilot", _try_autopilot),
     ("learned", _try_learned),
+    ("standing_intent", _try_standing_intent),
     ("task_tool", _try_task_tool),
     ("capability", _try_capability),
     ("intent", _try_intent),
@@ -615,6 +713,11 @@ def resolve(
             # la respuesta lleva colgada la pregunta pendiente. Vive acá y no dentro de un
             # resolver porque el desvío lo puede resolver cualquiera de los 7.
             result = _append_pending_question(result, user_id, resolved_channel)
+            # Y por el mismo motivo, acá: una intención permanente puede dispararse diga lo
+            # que diga el usuario, así que el sitio es después de resolver, no dentro de un
+            # resolver concreto. Va DESPUÉS de la repregunta para que el recordatorio quede
+            # al final, que es donde se lee.
+            result = _append_standing_intents(result, text, user_id)
             logger.info(f"resolve() resuelto por '{result.matched_by}'")
             return result
 
