@@ -5,6 +5,7 @@ import tempfile
 from typing import Dict, List, Tuple, Any
 from skills.base_skill import BaseSkill
 from ai.llm_provider import generate_response
+from core.address import vocative, vocative_start
 
 class ScreenAnalysisSkill(BaseSkill):
     @property
@@ -46,7 +47,7 @@ class ScreenAnalysisSkill(BaseSkill):
         try:
             import pyautogui
         except ImportError:
-            return "Señor, no puedo ver su pantalla porque no tengo instalada la librería 'pyautogui'. (pip install pyautogui)"
+            return f"{vocative_start()}no puedo ver su pantalla porque no tengo instalada la librería 'pyautogui'. (pip install pyautogui)"
 
         # 1. Tomar captura de pantalla
         time.sleep(1) # Pequeña pausa por si el usuario acaba de cambiar de ventana

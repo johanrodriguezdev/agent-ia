@@ -6,6 +6,7 @@ import logging
 from typing import Dict, List, Tuple, Any
 from skills.base_skill import BaseSkill
 from ai.llm_provider import generate_response
+from core.address import vocative, vocative_start
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +55,7 @@ class CodeExecutionSkill(BaseSkill):
         """
         task = params.get("task", "")
         if not task:
-            return "Señor, por favor sea más específico con lo que desea que programe y ejecute."
+            return f"{vocative_start()}por favor sea más específico con lo que desea que programe y ejecute."
 
         system_prompt = (
             "Eres el núcleo lógico de un agente de IA autónomo (Estilo OpenClaw/Devin). "
@@ -115,7 +116,7 @@ class CodeExecutionSkill(BaseSkill):
                         print(f"[CodeExecutionSkill] Self-Healing Intento {attempt+1}/{max_retries}...")
                         
                 except subprocess.TimeoutExpired:
-                    output_msg = "Señor, el script tardó demasiado tiempo en ejecutarse y fue abortado."
+                    output_msg = f"{vocative_start()}el script tardó demasiado tiempo en ejecutarse y fue abortado."
                     break
                 finally:
                     try:

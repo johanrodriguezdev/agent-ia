@@ -27,6 +27,7 @@ import asyncio
 import tempfile
 import logging
 from pathlib import Path
+from core.address import vocative, vocative_start
 
 logging.basicConfig(
     format="%(asctime)s [Discord] %(levelname)s: %(message)s",
@@ -185,7 +186,7 @@ def run_discord_bot():
         except Exception:
             pass
         await interaction.response.send_message(
-            "Historial reiniciado. Listo para nuevas órdenes, Señor.",
+            f"Historial reiniciado. Listo para nuevas órdenes{vocative()}.",
             ephemeral=True
         )
 

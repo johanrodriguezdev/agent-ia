@@ -1,5 +1,5 @@
 ---
-description: Inicia un REQ nuevo — activa el flujo completo de 8 agentes desde orion-coordinador
+description: Inicia un REQ nuevo — activa el flujo completo de agentes desde orion-coordinador
 ---
 
 # /nuevo-req
@@ -29,6 +29,6 @@ $ARGUMENTS
    - Entregar el REQ a `orion-spec`
 3. A partir de ahí, el flujo sigue en orden estricto:
    `orion-coordinador → orion-spec (⏸️ pausa) → orion-baseline → orion-architect (⏸️ pausa)
-    → orion-security? (si aplica) → orion-dev → orion-tester → orion-qa
-    → humano (prueba manual) → mensaje de commit`
+    → orion-ui? (si es categoría UI o hay referencia visual) → orion-security? (si aplica)
+    → orion-dev → orion-tester → orion-qa → humano (prueba manual) → mensaje de commit`
 4. Nunca saltar agentes ni escribir código antes de que `orion-dev` tenga luz verde.

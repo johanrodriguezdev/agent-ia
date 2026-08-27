@@ -12,9 +12,10 @@ import {
   onGuiStateChanged, onWakeStateChanged, onThemeChanged, onChipsLoaded,
   onConversationListUpdated, onConversationCleared, onConversationRemoved,
   onTurnsLoaded, onMessageAppended, onTypingStarted, onTypingStopped,
-  onConfirmationRequested, onFileAttached, onErrorOccurred,
+  onConfirmationRequested, onFileAttached, onErrorOccurred, onWindowMaximizedChanged,
   onTasksLoaded, onProjectsLoaded, onProjectConversationsLoaded, onProjectRemoved,
   onSecurityOverridesLoaded, onSecurityOverrideSaved, onSecurityOverrideSaveRejected,
+  onProfileLoaded, onProfileSaved,
 } from "./bridge_client.js";
 import {
   initSidebar, renderConversationList, clearActiveConversation, removeConversationFromList,
@@ -27,14 +28,14 @@ import {
 } from "./composer.js";
 import { initTheme, applyTheme } from "./theme.js";
 import { showConfirmModal } from "./confirm_modal.js";
-import { initWindowChrome } from "./window_chrome.js";
+import { initWindowChrome, setMaximizedState } from "./window_chrome.js";
 import { openTasksPanel, renderTasks } from "./tasks_panel.js";
 import {
   openProjectsPanel, renderProjects, renderProjectConversations, handleProjectRemoved,
 } from "./projects_panel.js";
 import {
   openSettingsPanel, renderSecurityOverrides, handleSecurityOverrideSaved,
-  handleSecurityOverrideRejected,
+  handleSecurityOverrideRejected, renderProfile, handleProfileSaved,
 } from "./settings_panel.js";
 
 const GREETINGS_BY_HOUR = [
@@ -48,11 +49,12 @@ function timeBasedGreeting() {
   return match ? match.text : "Buenas noches";
 }
 
-function setAgentIdentity() {
-  // CA-46: avatar = círculo con la inicial del agente; inyectado como variable global por
-  // `MainWindow` (ver `ui/webview/main_window.py::_inject_agent_name_script`) — más
-  // simple que ampliar el contrato de `Bridge` (§4) para un valor estático.
-  const agentName = (window.__ORION_AGENT_NAME__ || "ORION").trim();
+function setAgentIdentity(name) {
+  // CA-46: avatar = círculo con la inicial del agente. El valor inicial lo inyecta
+  // `MainWindow` como variable global (ver `main_window.py::_inject_agent_name_script`);
+  // cuando el usuario lo cambia en Configuración, `profile_loaded` trae el nombre nuevo y
+  // esta misma función lo repinta sin reiniciar.
+  const agentName = (name || window.__ORION_AGENT_NAME__ || "ORION").trim();
   const upper = agentName.toUpperCase();
 
   document.getElementById("agent-name-label").textContent = upper;
@@ -106,6 +108,7 @@ async function bootstrap() {
     // eslint-disable-next-line no-console
     console.error("[bridge:error_occurred]", message);
   });
+  onWindowMaximizedChanged(setMaximizedState);
 
   // REQ-016: botones "Tareas"/"Proyectos" del sidebar + señales de datos de sus modales.
   document.getElementById("tasks-btn").addEventListener("click", openTasksPanel);
@@ -117,6 +120,15 @@ async function bootstrap() {
 
   // REQ-019: botón "Configuración" del sidebar + señales de la sección "Seguridad".
   document.getElementById("settings-btn").addEventListener("click", openSettingsPanel);
+  // Perfil: `profile_loaded` llega tanto al abrir la sección como después de guardar, así
+  // que renombrar al agente se refleja en la ventana al instante, sin reiniciar.
+  onProfileLoaded((json) => {
+    const profile = JSON.parse(json);
+    renderProfile(profile);
+    setAgentIdentity(profile.agent_name);
+  });
+  onProfileSaved((json) => handleProfileSaved(JSON.parse(json)));
+
   onSecurityOverridesLoaded((json) => renderSecurityOverrides(JSON.parse(json)));
   onSecurityOverrideSaved((rowId, level) => handleSecurityOverrideSaved(rowId, level));
   onSecurityOverrideSaveRejected((rowId) => handleSecurityOverrideRejected(rowId));

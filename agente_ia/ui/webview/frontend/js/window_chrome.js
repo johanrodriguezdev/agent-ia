@@ -33,6 +33,10 @@ function edgeAt(x, y) {
   return null;
 }
 
+export function setMaximizedState(maximized) {
+  document.documentElement.dataset.maximized = maximized ? "true" : "false";
+}
+
 export function initWindowChrome() {
   document.addEventListener("mousemove", (evt) => {
     const edge = edgeAt(evt.clientX, evt.clientY);

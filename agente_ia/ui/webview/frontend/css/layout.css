@@ -20,6 +20,16 @@ html, body {
   overflow: hidden;
 }
 
+/* Maximizado: sin gutter ni esquinas redondeadas, para que la ventana llene la pantalla
+   como cualquier otra app. El gutter y el redondeo solo aplican en tamaño normal, donde
+   la sombra flotante sobre el escritorio sí tiene sentido. */
+:root[data-maximized="true"] #app-shell {
+  inset: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
 /* -------------------------------------------------------------- window chrome (CA-01, CA-02) */
 
 #window-chrome {

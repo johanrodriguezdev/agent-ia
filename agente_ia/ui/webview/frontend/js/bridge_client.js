@@ -51,6 +51,12 @@ export function unassignConversationFromProject(conversationId) { _bridge.unassi
 export function requestProjectConversations(projectId) { _bridge.request_project_conversations(projectId); }
 export function requestDeleteProject(projectId) { _bridge.request_delete_project(projectId); }
 
+// ------------------------------------------------------------ JS → Python (perfil)
+export function requestProfile() { _bridge.request_profile(); }
+export function saveProfile(agentName, pronunciation, displayName, userTitle) {
+  _bridge.save_profile(agentName, pronunciation, displayName, userTitle);
+}
+
 // ------------------------------------------------------------ JS → Python (REQ-019)
 export function requestSecurityOverrides() { _bridge.request_security_overrides(); }
 export function saveSecurityOverride(rowId, level) { _bridge.save_security_override(rowId, level); }
@@ -70,12 +76,17 @@ export function onConfirmationRequested(cb) { _bridge.confirmation_requested.con
 export function onFileAttached(cb) { _bridge.file_attached.connect(cb); }
 export function onChipsLoaded(cb) { _bridge.chips_loaded.connect(cb); }
 export function onErrorOccurred(cb) { _bridge.error_occurred.connect(cb); }
+export function onWindowMaximizedChanged(cb) { _bridge.window_maximized_changed.connect(cb); }
 
 // ------------------------------------------------------------ Python → JS (REQ-016)
 export function onTasksLoaded(cb) { _bridge.tasks_loaded.connect(cb); }
 export function onProjectsLoaded(cb) { _bridge.projects_loaded.connect(cb); }
 export function onProjectConversationsLoaded(cb) { _bridge.project_conversations_loaded.connect(cb); }
 export function onProjectRemoved(cb) { _bridge.project_removed.connect(cb); }
+
+// ------------------------------------------------------------ Python → JS (perfil)
+export function onProfileLoaded(cb) { _bridge.profile_loaded.connect(cb); }
+export function onProfileSaved(cb) { _bridge.profile_saved.connect(cb); }
 
 // ------------------------------------------------------------ Python → JS (REQ-019)
 export function onSecurityOverridesLoaded(cb) { _bridge.security_overrides_loaded.connect(cb); }

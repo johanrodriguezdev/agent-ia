@@ -28,6 +28,18 @@ confirmation_module = sys.modules["core.confirmation"]
 sm_module = sys.modules["core.security_manager"]
 
 
+@pytest.fixture(autouse=True)
+def _tratamiento_fijo(monkeypatch):
+    """Fija el tratamiento en "Señor" para toda la suite.
+
+    Desde que el usuario puede elegirlo en Configuración, el texto de las respuestas sale
+    de `config.json`; sin esto los asserts literales dependerían del `config.json` real de
+    quien corre los tests (`.claude/rules/testing.md`: un test no lee configuración real).
+    """
+    import core.address as address
+    monkeypatch.setattr(address, "get_user_title", lambda: "Señor")
+
+
 def _make_update(user_id=111, chat_id=222, text=None, args=None):
     update = MagicMock()
     update.effective_user.id = user_id

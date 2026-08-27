@@ -9,6 +9,7 @@ Handlers que conectan las intenciones con las funciones reales del sistema.
 from os_integration import process_mgr, browser, file_system, system_ctrl, wiki_api
 from ai.memory_manager import memory as unified_memory
 from automation import pc_controller
+from core.address import vocative, vocative_start
 
 # Memoria semántica integrada en UnifiedMemory
 SEMANTIC_MEMORY_AVAILABLE = True
@@ -37,7 +38,7 @@ def handle_close_app(params: dict) -> str:
     app_name = params.get("app_name", "")
     if app_name:
         return system_ctrl.close_app(app_name, params.get("channel"))
-    return "No me indicó qué programa cerrar, Señor."
+    return f"No me indicó qué programa cerrar{vocative()}."
 
 def handle_search_web(params: dict) -> str:
     query = params.get("query", "")
@@ -131,7 +132,7 @@ def handle_chat(params: dict) -> str:
     query = params.get("query", "")
 
     if not query:
-        return "Dígame, Señor. Estoy a su disposición."
+        return f"Dígame{vocative()}. Estoy a su disposición."
 
     # ── Paso 2: Consultar a Claude ─────────────────────────────────
     if CLAUDE_AVAILABLE:
@@ -143,7 +144,7 @@ def handle_chat(params: dict) -> str:
     # Si anthropic no está instalado o no hay API key, Glass responde
     # de forma elegante en lugar de un error feo.
     return (
-        "Señor, ese comando no está en mis protocolos actuales. "
+        f"{vocative_start()}ese comando no está en mis protocolos actuales. "
         "Para activar mi inteligencia conversacional avanzada, "
         "configure la variable ANTHROPIC_API_KEY e instale la librería anthropic."
     )

@@ -677,14 +677,6 @@ una regresión de este REQ, se deja registrado para que quede trazado.
   verificación de los 28 CA.
 
 ## Log de transiciones
-2026-08-20 | EN_PRUEBAS → EN_QA | orion-tester | 28/28 CA de SPEC-019 en PASS
-(`pruebas/test-results-019.md`); suite completa sin regresiones atribuibles a REQ-019 (2
-fallos pre-existentes ajenos, 1 fallo flaky descartado); 21 checks de verificación
-independiente adicional (0 FAIL) sobre CA-02/CA-03/CA-06/CA-08/CA-16/CA-21; desviación de
-`_on_security_override_error()` evaluada como justificada; coexistencia REQ-018/REQ-019
-confirmada estructuralmente independiente; CSV actualizado vía `update-tracker.mjs`; handoff
-emitido a `orion-qa`
-
 2026-08-20 | — → NUEVO | orion-coordinador | REQ creado
 2026-08-20 | NUEVO → EN_SPEC → SPEC_APROBADO | orion-spec | SPEC-019.md aprobada por Johan tal
 cual, sin ajustes; CSV actualizado vía `update-tracker.mjs` (`Aprobacion_SPEC=APROBADO`,
@@ -728,3 +720,10 @@ emitido a `@orion-dev`
 bloqueantes del handoff de `orion-security` resueltas; 480 passed / 2 failed
 (pre-existentes, ajenos) en la suite completa; CSV actualizado vía `update-tracker.mjs`
 (Estado → EN_PRUEBAS); NO se ejecutó `git commit`; handoff emitido a `orion-tester`
+2026-08-20 | EN_PRUEBAS → EN_QA | orion-tester | 28/28 CA de SPEC-019 en PASS
+(`pruebas/test-results-019.md`); suite completa sin regresiones atribuibles a REQ-019 (2
+fallos pre-existentes ajenos, 1 fallo flaky descartado); 21 checks de verificación
+independiente adicional (0 FAIL) sobre CA-02/CA-03/CA-06/CA-08/CA-16/CA-21; desviación de
+`_on_security_override_error()` evaluada como justificada; coexistencia REQ-018/REQ-019
+confirmada estructuralmente independiente; CSV actualizado vía `update-tracker.mjs`; handoff
+emitido a `orion-qa`
