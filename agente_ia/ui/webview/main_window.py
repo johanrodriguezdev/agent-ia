@@ -13,6 +13,7 @@ clase) — nunca `showMaximized()` (§5.1, evita los márgenes extra que DWM añ
 maximizado+frameless en Windows).
 """
 
+import json
 import logging
 import os
 
@@ -125,6 +126,21 @@ class MainWindow(QMainWindow):
         self.bridge.set_confirmation_adapter(self._confirmation_adapter)
         register_confirmation_adapter(ChannelType.DESKTOP, self._confirmation_adapter.confirm)
 
+        # Renombrar al agente desde Configuración se aplica sin reiniciar: el título de la
+        # ventana y la bandeja son los dos lugares que el frontend no puede repintar.
+        self.bridge.profile_saved.connect(self._on_profile_saved)
+
+    def _on_profile_saved(self, payload_json: str) -> None:
+        try:
+            payload = json.loads(payload_json)
+        except json.JSONDecodeError as e:
+            logger.error(f"perfil guardado con JSON inválido, no se renombró la ventana: {e}")
+            return
+        self._agent_name = str(payload.get("agent_name", self._agent_name)).upper()
+        self.setWindowTitle(f"{self._agent_name} — Panel de control")
+        if getattr(self, "tray_icon", None) is not None:
+            self.tray_icon.setToolTip(f"{self._agent_name} — Panel de control")
+
     def _fit_to_screen(self) -> None:
         """CA-04 — clampea siempre contra el área de trabajo disponible (excluye la
         barra de tareas), llamado ANTES de `show()` (que invoca `main.py`, no esta
@@ -189,13 +205,23 @@ class MainWindow(QMainWindow):
         )
         self.web_view.load(QUrl.fromLocalFile(_INDEX_HTML))
 
+    def changeEvent(self, event) -> None:
+        """El gutter transparente y las esquinas redondeadas de `#app-shell` (layout.css)
+        solo tienen sentido en tamaño normal: maximizado dejaban un borde visible que
+        impedía que la app se viera a pantalla completa. El frontend necesita saber el
+        estado para anularlos, y `showMaximized()` no es el único camino (Win+↑, doble
+        click en la barra), por eso se escucha el cambio de estado de la ventana."""
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.WindowStateChange:
+            self.bridge.window_maximized_changed.emit(self.isMaximized())
+
     def closeEvent(self, event) -> None:
         """CA-01 — portado sin cambios de comportamiento: cerrar minimiza a la bandeja en
         vez de terminar el proceso (idéntico a `JarvisMainWindow.closeEvent()`)."""
         event.ignore()
         self.hide()
         self.tray_icon.showMessage(
-            "Noddoo",
+            self._agent_name,
             "Continuo ejecutándome en segundo plano.",
             QSystemTrayIcon.MessageIcon.Information,
             2000,

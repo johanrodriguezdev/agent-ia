@@ -1,22 +1,32 @@
 // ui/webview/frontend/js/settings_panel.js
-// REQ-019/CA-12..CA-19 — pantalla nueva "Configuración": modal con navegación lateral por
-// secciones (patrón de referencia "WorkBuddy AI", ver SPEC-019 "Diseño de UI") + panel de
-// contenido con tarjetas. v1 tiene una sola sección poblada, "Seguridad", que muestra una
-// fila por cada acción de la categoría v1 (arquitectura-019.md §3.1) con su nivel efectivo
-// actual y un <select> que solo ofrece el nivel vigente o niveles superiores (CA-16).
+// Pantalla "Configuración": modal con navegación lateral por secciones + panel de
+// contenido con tarjetas.
+//
+// Secciones:
+//   - "Perfil"     — nombre del agente, palabra de activación, nombre del usuario y
+//                    cómo quiere que el agente lo trate. Se aplica al instante (sin
+//                    reiniciar): al guardar, Python re-emite el perfil y la ventana se
+//                    actualiza en vivo (ver app.js).
+//   - "Seguridad"  — REQ-019/CA-12..CA-19: una fila por acción de la categoría v1
+//                    (arquitectura-019.md §3.1) con su nivel efectivo y un <select> que
+//                    solo ofrece el nivel vigente o superiores (CA-16). A diferencia de
+//                    "Perfil", este cambio SÍ requiere reiniciar (CA-10).
 //
 // REGLA DE SEGURIDAD (arquitectura-015.md §10.1, extendida por arquitectura-016.md §10,
 // arquitectura-019.md §6): cualquier campo recibido de Python (label, description,
-// effective_level/base_level, opciones) se inserta EXCLUSIVAMENTE vía
-// textContent/setAttribute — nunca innerHTML/insertAdjacentHTML. Verificado además por un
-// grep estructural en tests/test_webview_safe_dom_insertion.py.
+// effective_level/base_level, opciones, valores del perfil) se inserta EXCLUSIVAMENTE vía
+// textContent/value/setAttribute — nunca innerHTML/insertAdjacentHTML. Verificado además
+// por un grep estructural en tests/test_webview_safe_dom_insertion.py.
 //
-// Modelo "aplicar al elegir" (arquitectura-019.md §4.2): cada fila es un <select> que al
-// disparar `change` guarda de inmediato — no existe un botón de guardado separado ni un
-// estado "elegido pero no guardado" que cerrar el modal pueda descartar (satisface CA-18
-// por construcción, sin inventar un segundo mecanismo de "descartar").
+// Modelo "aplicar al elegir" en Seguridad (arquitectura-019.md §4.2): cada fila es un
+// <select> que al disparar `change` guarda de inmediato — no existe un botón de guardado
+// separado ni un estado "elegido pero no guardado" que cerrar el modal pueda descartar
+// (satisface CA-18 por construcción). "Perfil" sí usa botón, porque son campos de texto
+// libre: guardar en cada tecla escribiría el config en disco decenas de veces.
 
-import { requestSecurityOverrides, saveSecurityOverride } from "./bridge_client.js";
+import {
+  requestSecurityOverrides, saveSecurityOverride, requestProfile, saveProfile,
+} from "./bridge_client.js";
 
 const LEVEL_LABELS = {
   green: "Sin confirmar",
@@ -24,14 +34,47 @@ const LEVEL_LABELS = {
   red: "Bloqueado",
 };
 
+const PROFILE_FIELDS = [
+  {
+    key: "agent_name",
+    label: "Nombre del agente",
+    hint: "Cómo se llama tu asistente. Aparece en la ventana y en la bandeja del sistema.",
+    placeholder: "O.R.I.O.N",
+  },
+  {
+    key: "agent_pronunciation",
+    label: "Palabra de activación",
+    hint: "Cómo suena el nombre al decirlo en voz alta. Es lo que escucha para despertarse.",
+    placeholder: "orion",
+  },
+  {
+    key: "display_name",
+    label: "Tu nombre completo",
+    hint: "Para que el agente sepa con quién está hablando.",
+    placeholder: "Tu nombre y apellido",
+  },
+  {
+    key: "user_title",
+    label: "Cómo debe dirigirse a ti",
+    hint: "El trato que usa al hablarte. Déjalo vacío si prefieres que no use ninguno.",
+    placeholder: "Señor",
+  },
+];
+
+const SECTIONS = [
+  { id: "perfil", label: "Perfil" },
+  { id: "seguridad", label: "Seguridad" },
+];
+
 let _panelOpen = false;
 let _pendingRowId = null;   // guard contra doble click/doble evento en la MISMA fila
+let _activeSection = "perfil";
 
 export function openSettingsPanel() {
   if (_panelOpen) return;
   _panelOpen = true;
+  _activeSection = "perfil";
   renderShell();
-  requestSecurityOverrides();   // CA-19: carga perezosa, solo acá
 }
 
 export function closeSettingsPanel() {
@@ -71,20 +114,152 @@ function renderShell() {
   const nav = document.createElement("nav");
   nav.className = "settings-nav";
   const navList = document.createElement("ul");
-  const navItem = document.createElement("li");
-  navItem.className = "settings-nav-item active";
-  navItem.textContent = "Seguridad";   // única sección poblada en v1 — texto propio
-  navList.appendChild(navItem);
+  for (const section of SECTIONS) {
+    const navItem = document.createElement("li");
+    navItem.className = "settings-nav-item";
+    navItem.classList.toggle("active", section.id === _activeSection);
+    navItem.tabIndex = 0;
+    navItem.textContent = section.label;   // texto propio
+    navItem.addEventListener("click", () => selectSection(section.id));
+    navItem.addEventListener("keydown", (evt) => {
+      if (evt.key === "Enter" || evt.key === " ") {
+        evt.preventDefault();
+        selectSection(section.id);
+      }
+    });
+    navList.appendChild(navItem);
+  }
   nav.appendChild(navList);
 
   const content = document.createElement("div");
   content.className = "settings-content";
+  content.id = "settings-content";
+
+  layout.append(nav, content);
+  box.append(header, layout);
+  overlay.appendChild(box);
+  root.appendChild(overlay);
+
+  renderActiveSection();
+}
+
+function selectSection(sectionId) {
+  if (sectionId === _activeSection) return;
+  _activeSection = sectionId;
+  for (const item of document.querySelectorAll(".settings-nav-item")) {
+    const match = SECTIONS.find((s) => s.label === item.textContent);
+    item.classList.toggle("active", Boolean(match) && match.id === sectionId);
+  }
+  renderActiveSection();
+}
+
+function renderActiveSection() {
+  const content = document.getElementById("settings-content");
+  if (!content) return;
+  content.replaceChildren();
 
   const banner = document.createElement("div");
   banner.id = "settings-banner";
   banner.className = "settings-banner";
   banner.hidden = true;
+  content.appendChild(banner);
 
+  if (_activeSection === "perfil") {
+    content.appendChild(buildProfileCard());
+    requestProfile();          // carga perezosa: solo al entrar en la sección
+  } else {
+    content.appendChild(buildSecurityCard());
+    requestSecurityOverrides();   // CA-19: carga perezosa, solo acá
+  }
+}
+
+// ---------------------------------------------------------------- sección "Perfil"
+
+function buildProfileCard() {
+  const card = document.createElement("div");
+  card.className = "settings-card";
+
+  const cardTitle = document.createElement("div");
+  cardTitle.className = "settings-card-title";
+  cardTitle.textContent = "Perfil";   // texto propio
+  card.appendChild(cardTitle);
+
+  for (const field of PROFILE_FIELDS) {
+    const row = document.createElement("div");
+    row.className = "settings-row";
+
+    const info = document.createElement("div");
+    info.className = "settings-row-info";
+    const labelEl = document.createElement("label");
+    labelEl.className = "settings-row-label";
+    labelEl.textContent = field.label;
+    labelEl.setAttribute("for", `profile-${field.key}`);
+    const hintEl = document.createElement("span");
+    hintEl.className = "settings-row-desc";
+    hintEl.textContent = field.hint;
+    info.append(labelEl, hintEl);
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "settings-row-input";
+    input.id = `profile-${field.key}`;
+    input.dataset.profileKey = field.key;
+    input.placeholder = field.placeholder;
+    input.autocomplete = "off";
+
+    row.append(info, input);
+    card.appendChild(row);
+  }
+
+  const actions = document.createElement("div");
+  actions.className = "settings-card-actions";
+  const saveBtn = document.createElement("button");
+  saveBtn.type = "button";
+  saveBtn.id = "profile-save-btn";
+  saveBtn.className = "settings-primary-btn";
+  saveBtn.textContent = "Guardar";
+  saveBtn.addEventListener("click", submitProfile);
+  actions.appendChild(saveBtn);
+  card.appendChild(actions);
+
+  return card;
+}
+
+function submitProfile() {
+  const saveBtn = document.getElementById("profile-save-btn");
+  const values = {};
+  for (const field of PROFILE_FIELDS) {
+    const input = document.getElementById(`profile-${field.key}`);
+    values[field.key] = input ? input.value : "";
+  }
+
+  if (!values.agent_name.trim()) {
+    showSettingsBanner("El nombre del agente no puede quedar vacío.", true);
+    return;
+  }
+
+  if (saveBtn) saveBtn.disabled = true;
+  saveProfile(
+    values.agent_name, values.agent_pronunciation, values.display_name, values.user_title,
+  );
+}
+
+export function renderProfile(profile) {
+  for (const field of PROFILE_FIELDS) {
+    const input = document.getElementById(`profile-${field.key}`);
+    if (input) input.value = profile[field.key] || "";   // §10.1 — nunca innerHTML
+  }
+}
+
+export function handleProfileSaved(_profile) {
+  const saveBtn = document.getElementById("profile-save-btn");
+  if (saveBtn) saveBtn.disabled = false;
+  showSettingsBanner("Cambios guardados.", false);
+}
+
+// ---------------------------------------------------------------- sección "Seguridad"
+
+function buildSecurityCard() {
   const card = document.createElement("div");
   card.className = "settings-card";
   const cardTitle = document.createElement("div");
@@ -92,19 +267,13 @@ function renderShell() {
   cardTitle.textContent = "Seguridad";   // texto propio
   const list = document.createElement("div");
   list.id = "security-section-list";
-
   card.append(cardTitle, list);
-  content.append(banner, card);
-  layout.append(nav, content);
-
-  box.append(header, layout);
-  overlay.appendChild(box);
-  root.appendChild(overlay);
+  return card;
 }
 
 export function renderSecurityOverrides(rows) {
   const list = document.getElementById("security-section-list");
-  if (!list) return;   // panel ya cerrado antes de que llegara la respuesta
+  if (!list) return;   // panel ya cerrado (o sección cambiada) antes de que llegara la respuesta
   list.replaceChildren();
 
   if (rows.length === 0) {

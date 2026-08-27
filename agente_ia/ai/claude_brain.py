@@ -2,6 +2,7 @@ import os
 import json
 import re
 from datetime import datetime
+from core.address import vocative, vocative_start
 
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL = "claude-sonnet-4-5"
@@ -182,15 +183,15 @@ def ask_claude(
         error_str = str(e)
 
         if "API_KEY" in error_str:
-            return f"Señor, verifique la configuración de su API Key. ({error_str})"
+            return f"{vocative_start()}verifique la configuración de su API Key. ({error_str})"
         elif "rate" in error_str.lower() or "quota" in error_str.lower():
-            return "Señor, he excedido el límite de API. Verifique sus créditos disponibles."
+            return f"{vocative_start()}he excedido el límite de API. Verifique sus créditos disponibles."
         elif "connection" in error_str.lower() or "network" in error_str.lower():
-            return "Señor, no tengo acceso fluido de red en este momento."
+            return f"{vocative_start()}no tengo acceso fluido de red en este momento."
         else:
             if history and history[-1]["role"] == "user":
                 history.pop()
-            return f"Señor, mi módulo de inteligencia ha encontrado un inconveniente: {error_str}"
+            return f"{vocative_start()}mi módulo de inteligencia ha encontrado un inconveniente: {error_str}"
 
 
 def clear_conversation(user_id: str = "default"):

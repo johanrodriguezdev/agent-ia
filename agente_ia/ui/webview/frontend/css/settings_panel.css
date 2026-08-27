@@ -40,6 +40,17 @@
   border-radius: 8px;
   font-size: 13px;
   color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.settings-nav-item:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.settings-nav-item:focus-visible {
+  outline: 2px solid var(--text-accent);
+  outline-offset: -2px;
 }
 
 .settings-nav-item.active {
@@ -118,4 +129,59 @@
 
 .settings-row-select:disabled {
   opacity: 0.6;
+}
+
+/* -------------------------------------------------------------- sección "Perfil" */
+
+/* Los campos de texto son más anchos que los <select> de Seguridad: el nombre completo
+   del usuario no entra cómodo en el ancho de una etiqueta de nivel. */
+.settings-row-input {
+  flex: none;
+  width: 220px;
+  max-width: 45%;
+  border: 1px solid var(--border);
+  background-color: var(--bg-input);
+  color: var(--text-primary);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.settings-row-input:focus-visible {
+  outline: none;
+  border-color: var(--text-accent);
+}
+
+.settings-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 14px;
+}
+
+.settings-primary-btn {
+  border: none;
+  border-radius: 8px;
+  background-color: var(--text-accent);
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 20px;
+  cursor: pointer;
+  transition: opacity 150ms;
+}
+
+.settings-primary-btn:hover {
+  opacity: 0.88;
+}
+
+.settings-primary-btn:focus-visible {
+  outline: 2px solid var(--text-accent);
+  outline-offset: 2px;
+}
+
+.settings-primary-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
 }

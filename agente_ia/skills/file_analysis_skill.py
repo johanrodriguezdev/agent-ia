@@ -2,6 +2,7 @@ import os
 from typing import Dict, List, Tuple, Any
 from skills.base_skill import BaseSkill
 from ai.llm_provider import generate_response
+from core.address import vocative, vocative_start
 
 class FileAnalysisSkill(BaseSkill):
     @property
@@ -45,7 +46,7 @@ class FileAnalysisSkill(BaseSkill):
     def execute(self, intent: str, params: Dict[str, Any]) -> str:
         filename = params.get("filename", "").strip()
         if not filename:
-            return "Señor, no logré identificar el nombre del archivo que desea que analice."
+            return f"{vocative_start()}no logré identificar el nombre del archivo que desea que analice."
 
         # Buscar el archivo en el directorio actual o en rutas comunes
         target_path = None
@@ -82,10 +83,10 @@ class FileAnalysisSkill(BaseSkill):
                     break
 
         if not target_path:
-            return f"Lo lamento, Señor. No pude encontrar el archivo '{filename}'."
+            return f"Lo lamento{vocative()}. No pude encontrar el archivo '{filename}'."
 
         if not os.path.isfile(target_path):
-            return f"Señor, '{target_path}' no es un archivo válido o es un directorio."
+            return f"{vocative_start()}'{target_path}' no es un archivo válido o es un directorio."
 
         # Identificar extensión
         ext = os.path.splitext(target_path)[1].lower()
@@ -103,7 +104,7 @@ class FileAnalysisSkill(BaseSkill):
                             text_pages.append(reader.pages[i].extract_text() or "")
                         content = "\n".join(text_pages)[:10000]
                 except ImportError:
-                    return "Señor, para leer PDFs necesito la librería 'PyPDF2'. Puede instalarla ejecutando: pip install PyPDF2"
+                    return f"{vocative_start()}para leer PDFs necesito la librería 'PyPDF2'. Puede instalarla ejecutando: pip install PyPDF2"
             
             elif ext in [".docx", ".doc"]:
                 try:
@@ -112,7 +113,7 @@ class FileAnalysisSkill(BaseSkill):
                     full_text = [para.text for para in doc.paragraphs]
                     content = "\n".join(full_text)[:10000]
                 except ImportError:
-                    return "Señor, para leer documentos de Word necesito la librería 'python-docx'. Puede instalarla ejecutando: pip install python-docx"
+                    return f"{vocative_start()}para leer documentos de Word necesito la librería 'python-docx'. Puede instalarla ejecutando: pip install python-docx"
             
             elif ext in [".xlsx", ".xls"]:
                 try:
@@ -121,7 +122,7 @@ class FileAnalysisSkill(BaseSkill):
                     df = pd.read_excel(target_path, sheet_name=0)
                     content = df.head(100).to_csv(index=False)[:10000]
                 except ImportError:
-                    return "Señor, para leer archivos Excel necesito las librerías 'pandas' y 'openpyxl'. Instálelas con: pip install pandas openpyxl"
+                    return f"{vocative_start()}para leer archivos Excel necesito las librerías 'pandas' y 'openpyxl'. Instálelas con: pip install pandas openpyxl"
                     
             else:
                 # Lectura como texto plano por defecto (txt, py, json, md, csv, etc)
@@ -132,7 +133,7 @@ class FileAnalysisSkill(BaseSkill):
                 content += "\n... [Contenido truncado]"
                 
         except UnicodeDecodeError:
-            return "Señor, el archivo parece tener una codificación extraña o binaria que no puedo procesar directamente."
+            return f"{vocative_start()}el archivo parece tener una codificación extraña o binaria que no puedo procesar directamente."
         except Exception as e:
             return f"Hubo un error al intentar leer y analizar el archivo: {e}"
 

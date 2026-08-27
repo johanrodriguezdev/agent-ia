@@ -14,6 +14,7 @@ import threading
 import time
 import logging
 from typing import Callable, Optional
+from core.address import vocative, vocative_start
 
 logging.basicConfig(
     format="%(asctime)s [Scheduler] %(levelname)s: %(message)s",
@@ -128,7 +129,7 @@ class TaskScheduler:
             f"⏰ *RECORDATORIO*{priority_line}\n\n"
             f"📋 *{title}*\n"
             f"🆔 Tarea #{task_id}\n\n"
-            f"Señor, es momento de atender esta tarea.\n"
+            f"{vocative_start()}es momento de atender esta tarea.\n"
             f"Use /completar {task_id} cuando la finalice."
         )
 
@@ -154,7 +155,7 @@ class TaskScheduler:
     def _notify_local(self, title: str, task_id):
         try:
             from ui.tts_engine import speak
-            speak(f"Señor, recuerde: {title}")
+            speak(f"{vocative_start()}recuerde: {title}")
         except Exception:
             pass
         try:

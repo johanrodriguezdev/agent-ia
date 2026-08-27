@@ -17,6 +17,7 @@ import tempfile
 import logging
 import subprocess
 from pathlib import Path
+from core.address import vocative, vocative_start
 
 logging.basicConfig(
     format="%(asctime)s [Telegram] %(levelname)s: %(message)s",
@@ -66,8 +67,13 @@ def _clean_for_tts(text: str) -> str:
         agent_name = get_agent_name()
         agent_pron = get_agent_pronunciation()
         if agent_name.lower() != agent_pron.lower():
-            # Reemplazar ignorando mayúsculas/minúsculas usando re
-            text = re.sub(r'(?i)\b' + agent_name + r'\b', agent_pron, text)
+            # Reemplazar ignorando mayúsculas/minúsculas usando re. `re.escape` es
+            # obligatorio: el nombre viene de Configuración y puede traer puntos
+            # ("O.R.I.O.N", donde `.` sería comodín) o paréntesis, que sin escapar rompen
+            # la expresión. `\b` solo aplica si el nombre termina en carácter de palabra.
+            pattern = (r'(?i)\b' + re.escape(agent_name)
+                       + (r'\b' if agent_name[-1:].isalnum() else ''))
+            text = re.sub(pattern, agent_pron, text)
     except Exception:
         pass
 
@@ -233,7 +239,7 @@ async def _send_response(update, context, response, send_voice: bool = False):
             with open(response.image_path, "rb") as img:
                 await update.message.reply_photo(
                     photo=img,
-                    caption="Captura de pantalla, Señor."
+                    caption=f"Captura de pantalla{vocative()}."
                 )
         except Exception as e:
             logger.warning(f"Error enviando captura: {e}")
@@ -291,7 +297,7 @@ async def cmd_start(update, context):
         f"/memoria — ver mi historial\n"
         f"/limpiar — reiniciar conversación\n"
         f"/ayuda — todos los comandos\n\n"
-        f"¿En qué puedo asistirle, Señor?",
+        f"¿En qué puedo asistirle{vocative()}?",
         parse_mode="Markdown"
     )
 
@@ -331,7 +337,7 @@ async def cmd_voz(update, context):
     context.user_data["voice_mode"] = True
     ffmpeg_info = "Nota de voz nativa" if FFMPEG_AVAILABLE else "Archivo MP3 (instala FFmpeg para nota de voz nativa)"
     await update.message.reply_text(
-        f"*Modo voz activado, Señor.*\n\n"
+        f"*Modo voz activado{vocative()}.*\n\n"
         f"Voz: {GLASS_VOICE}\n"
         f"Audio: {ffmpeg_info}\n\n"
         f"Use /texto para desactivarlo.",
@@ -342,7 +348,7 @@ async def cmd_voz(update, context):
 async def cmd_texto(update, context):
     context.user_data["voice_mode"] = False
     await update.message.reply_text(
-        "Modo texto activado, Señor. Solo responderé con texto."
+        f"Modo texto activado{vocative()}. Solo responderé con texto."
     )
 
 
@@ -369,7 +375,7 @@ async def cmd_limpiar(update, context):
     if session:
         session.clear_history()
     await update.message.reply_text(
-        "Historial de conversación reiniciado, Señor. Listo para nuevas órdenes."
+        f"Historial de conversación reiniciado{vocative()}. Listo para nuevas órdenes."
     )
 
 
@@ -439,7 +445,7 @@ async def cmd_nueva(update, context):
 
     if not text:
         await update.message.reply_text(
-            "*¿Qué tarea desea agregar, Señor?*\n\n"
+            f"*¿Qué tarea desea agregar{vocative()}?*\n\n"
             "Uso: /nueva [descripción de la tarea]\n\n"
             "Ejemplos:\n"
             "• /nueva recuérdame mañana a las 9am llamar al banco\n"
@@ -477,7 +483,7 @@ async def cmd_nueva(update, context):
             remind_at=remind_at.isoformat()
         )
         await update.message.reply_text(
-            f"✅ *Tarea registrada, Señor.*\n\n"
+            f"✅ *Tarea registrada{vocative()}.*\n\n"
             f"📋 *{text}*\n"
             f"🆔 #{task_id}\n"
             f"⏰ Recordatorio: en 1 hora\n\n"
@@ -496,7 +502,7 @@ async def cmd_completar(update, context):
 
     if not context.args:
         await update.message.reply_text(
-            "Indique el número de tarea, Señor.\n"
+            f"Indique el número de tarea{vocative()}.\n"
             "Uso: /completar [id]\n\n"
             "Use /tareas para ver sus tareas pendientes."
         )
@@ -505,7 +511,7 @@ async def cmd_completar(update, context):
     try:
         task_id = int(context.args[0])
     except ValueError:
-        await update.message.reply_text("El ID de tarea debe ser un número, Señor.")
+        await update.message.reply_text(f"El ID de tarea debe ser un número{vocative()}.")
         return
 
     # REQ-018/CA-10 — mismo criterio que cmd_nueva(): auditoría vía require_confirmation()
@@ -522,12 +528,12 @@ async def cmd_completar(update, context):
     if success:
         await update.message.reply_text(
             f"☑️ *Tarea #{task_id} completada.*\n\n"
-            f"Excelente trabajo, Señor. Tarea archivada.",
+            f"Excelente trabajo{vocative()}. Tarea archivada.",
             parse_mode="Markdown"
         )
     else:
         await update.message.reply_text(
-            f"No encontré la tarea #{task_id} en sus pendientes, Señor."
+            f"No encontré la tarea #{task_id} en sus pendientes{vocative()}."
         )
 
 
@@ -542,7 +548,7 @@ async def cmd_eliminar(update, context):
 
     if not context.args:
         await update.message.reply_text(
-            "Indique el número de tarea, Señor.\n"
+            f"Indique el número de tarea{vocative()}.\n"
             "Uso: /eliminar [id]\n\n"
             "Use /tareas para ver sus tareas."
         )
@@ -551,7 +557,7 @@ async def cmd_eliminar(update, context):
     try:
         task_id = int(context.args[0])
     except ValueError:
-        await update.message.reply_text("El ID de tarea debe ser un número, Señor.")
+        await update.message.reply_text(f"El ID de tarea debe ser un número{vocative()}.")
         return
 
     # REQ-018/CA-09, Hallazgo E (security-audit-018.md, re-chequeo) — reserva SÍNCRONA,
@@ -562,7 +568,7 @@ async def cmd_eliminar(update, context):
     # ya en el hilo worker).
     if not telegram_confirmation_adapter.reserve_pending(user_id):
         await update.message.reply_text(
-            "Ya tenés una confirmación pendiente, Señor — respondé sí/no primero."
+            f"Ya tenés una confirmación pendiente{vocative()} — respondé sí/no primero."
         )
         return
 
@@ -584,19 +590,19 @@ async def cmd_eliminar(update, context):
 
     if not confirmed:
         await update.message.reply_text(
-            f"Eliminación de la tarea #{task_id} cancelada, Señor."
+            f"Eliminación de la tarea #{task_id} cancelada{vocative()}."
         )
         return
 
     success = task_manager.delete_task(task_id, user_id)
     if success:
         await update.message.reply_text(
-            f"🗑 *Tarea #{task_id} eliminada, Señor.*",
+            f"🗑 *Tarea #{task_id} eliminada{vocative()}.*",
             parse_mode="Markdown"
         )
     else:
         await update.message.reply_text(
-            f"No encontré la tarea #{task_id} en su lista, Señor."
+            f"No encontré la tarea #{task_id} en su lista{vocative()}."
         )
 
 
@@ -686,7 +692,7 @@ async def handle_voice(update, context):
 
     if not transcribed:
         await update.message.reply_text(
-            "No pude entender el audio, Señor. ¿Podría repetirlo?"
+            f"No pude entender el audio{vocative()}. ¿Podría repetirlo?"
         )
         return
 
@@ -721,11 +727,11 @@ async def _handle_shutdown(update, context, send_voice: bool = False):
         details="telegram:_handle_shutdown",
         user_id=str(getattr(user, "id", "desconocido")),
     ):
-        msg = "Lo siento, Señor. Por razones de seguridad no puedo apagar el PC desde Telegram."
+        msg = f"Lo siento{vocative()}. Por razones de seguridad no puedo apagar el PC desde Telegram."
         await update.message.reply_text(msg)
         return
     msg = (
-        "Iniciando secuencia de apagado, Señor.\n"
+        f"Iniciando secuencia de apagado{vocative()}.\n"
         "El equipo se apagará en 10 segundos.\n\n"
         "Envíe 'cancela apagado' para abortar."
     )
@@ -751,11 +757,11 @@ async def _handle_restart(update, context, send_voice: bool = False):
         details="telegram:_handle_restart",
         user_id=str(getattr(user, "id", "desconocido")),
     ):
-        msg = "Lo siento, Señor. Por razones de seguridad no puedo reiniciar el PC desde Telegram."
+        msg = f"Lo siento{vocative()}. Por razones de seguridad no puedo reiniciar el PC desde Telegram."
         await update.message.reply_text(msg)
         return
     msg = (
-        "Iniciando secuencia de reinicio, Señor.\n"
+        f"Iniciando secuencia de reinicio{vocative()}.\n"
         "El equipo se reiniciará en 10 segundos.\n\n"
         "Envíe 'cancela reinicio' para abortar."
     )
@@ -800,7 +806,7 @@ async def handle_photo(update, context):
         response = GlassGateway().process(msg)
     except Exception as e:
         from channels.gateway import GlassResponse
-        response = GlassResponse(text=f"No pude analizar la imagen, Señor: {str(e)[:80]}")
+        response = GlassResponse(text=f"No pude analizar la imagen{vocative()}: {str(e)[:80]}")
     finally:
         try:
             os.unlink(tmp)
@@ -848,7 +854,7 @@ async def handle_document(update, context):
         response = GlassGateway().process(msg)
     except Exception as e:
         from channels.gateway import GlassResponse
-        response = GlassResponse(text=f"No pude procesar el archivo, Señor: {str(e)[:80]}")
+        response = GlassResponse(text=f"No pude procesar el archivo{vocative()}: {str(e)[:80]}")
     finally:
         try:
             os.unlink(filepath)
@@ -862,7 +868,7 @@ async def handle_error(update, context):
     logger.error(f"Error: {context.error}")
     if update and update.message:
         await update.message.reply_text(
-            "Error inesperado, Señor. Por favor intente de nuevo."
+            f"Error inesperado{vocative()}. Por favor intente de nuevo."
         )
 
 

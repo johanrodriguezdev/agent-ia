@@ -1,6 +1,8 @@
 import json
 import os
 import logging
+import re
+import unicodedata
 
 try:
     from dotenv import load_dotenv
@@ -16,6 +18,7 @@ DEFAULT_CONFIG = {
     "agent_name": "noddoo",
     "agent_pronunciation": "nodo",
     "display_name": "",
+    "user_title": "Señor",
     "weather_city": "",
     "ui_theme": "dark",
 }
@@ -47,6 +50,8 @@ def load_config():
                 config["agent_pronunciation"] = DEFAULT_CONFIG["agent_pronunciation"]
             if "display_name" not in config:
                 config["display_name"] = DEFAULT_CONFIG["display_name"]
+            if "user_title" not in config:
+                config["user_title"] = DEFAULT_CONFIG["user_title"]
             if "weather_city" not in config:
                 config["weather_city"] = DEFAULT_CONFIG["weather_city"]
             if "ui_theme" not in config:
@@ -81,8 +86,38 @@ def get_agent_name() -> str:
 
 
 def set_agent_name(new_name: str):
+    """Persist the agent's name, preserving the capitalization the user typed.
+
+    Antes se guardaba en minúsculas, lo que arruinaba nombres estilizados como
+    "O.R.I.O.N" en la ventana y la bandeja. Las comparaciones que necesitan
+    insensibilidad a mayúsculas (`get_wake_words()`) ya normalizan por su cuenta.
+    """
     config = load_config()
-    config["agent_name"] = new_name.strip().lower()
+    config["agent_name"] = new_name.strip()
+    save_config(config)
+
+
+def set_agent_pronunciation(pronunciation: str) -> None:
+    """Persist how the agent's name sounds, para la detección de wake word."""
+    config = load_config()
+    config["agent_pronunciation"] = pronunciation.strip()
+    save_config(config)
+
+
+def get_user_title() -> str:
+    """Return cómo el agente se dirige al usuario (por defecto "Señor").
+
+    Acceso de configuración puro — igual que `get_display_name()`. Una cadena vacía es
+    una elección válida del usuario ("que no me trate de ninguna forma"), y quien
+    construye la frase decide qué hacer con ella; esta capa no aplica política.
+    """
+    config = load_config()
+    return config.get("user_title", DEFAULT_CONFIG["user_title"])
+
+
+def set_user_title(title: str) -> None:
+    config = load_config()
+    config["user_title"] = title.strip()
     save_config(config)
 
 
@@ -155,16 +190,50 @@ def get_discord_token() -> str:
     return _get_config_value("discord_token")
 
 
+def normalize_for_match(text: str) -> str:
+    """Normaliza texto para comparar contra una transcripción de voz.
+
+    Debe producir la MISMA forma que `nlp.parser.clean_text()` aplica al texto
+    transcrito, o las wake words nunca coincidirían. La diferencia clave es la
+    puntuación *dentro* de una palabra: un nombre estilizado como "O.R.I.O.N" tiene que
+    colapsar a "orion" (que es lo que el reconocedor devuelve al oírlo), no a "o r i o n".
+
+    No se importa `clean_text` acá a propósito: `config_manager` es una dependencia base
+    de casi todo el proyecto y no debe arrastrar el paquete `nlp` (que carga el
+    clasificador) solo para normalizar una cadena.
+    """
+    lowered = text.lower().strip()
+    without_accents = "".join(
+        c for c in unicodedata.normalize("NFD", lowered)
+        if unicodedata.category(c) != "Mn"
+    )
+    # Los separadores internos de un acrónimo se borran ("o.r.i.o.n" -> "orion"); el resto
+    # de los caracteres no alfanuméricos pasan a espacio, igual que en `clean_text()`.
+    without_dots = re.sub(r"(?<=\w)[.\-_'’](?=\w)", "", without_accents)
+    cleaned = re.sub(r"[^a-z0-9 ]", " ", without_dots)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
 def get_wake_words() -> list[str]:
-    name = get_agent_name().lower()
-    pronunciation = get_agent_pronunciation().lower()
+    """Return las frases que despiertan al agente, ya normalizadas para comparar.
 
-    bases = {name, pronunciation}
+    Todas salen normalizadas con `normalize_for_match()`: antes se devolvían crudas, así
+    que un nombre con acento ("Sofía") o con puntos ("A.R.I.A") no coincidía NUNCA con la
+    transcripción — que sí llega normalizada. Solo funcionaba "orion" por la lista de
+    variantes fonéticas de más abajo, que está escrita a mano.
+    """
+    name = normalize_for_match(get_agent_name())
+    pronunciation = normalize_for_match(get_agent_pronunciation())
 
-    if "orion" in name or "orion" in pronunciation:
+    bases = {b for b in (name, pronunciation) if b}
+    if not bases:
+        bases = {normalize_for_match(DEFAULT_CONFIG["agent_name"])}
+
+    # Variantes fonéticas de "orion": lo que suelen devolver los motores de voz al oírlo.
+    if "orion" in bases:
         bases.update([
-            "hay gris", "ahí gris", "ay gris", "y gris",
-            "orion", "orion", "iris", "idris", "ygris", "hi gris"
+            "hay gris", "ahi gris", "ay gris", "y gris",
+            "iris", "idris", "ygris", "hi gris",
         ])
 
     words = []
@@ -175,7 +244,7 @@ def get_wake_words() -> list[str]:
             f"oye {b}",
             f"hola {b}",
             f"despierta {b}",
-            f"hey {b} despierta"
+            f"hey {b} despierta",
         ])
 
-    return sorted(list(set(words)), key=len, reverse=True)
+    return sorted(set(words), key=len, reverse=True)

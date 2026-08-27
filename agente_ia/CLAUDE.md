@@ -9,12 +9,13 @@ orion-coordinador
   → orion-spec (⏸️ pausa: aprobación humana)
     → orion-baseline
       → orion-architect (⏸️ pausa: aprobación humana)
-        → orion-security? (solo si aplica — REQ de SEGURIDAD)
-          → orion-dev
-            → orion-tester (↩️ orion-dev si FAIL)
-              → orion-qa (↩️ orion-dev si RECHAZADO)
-                → Humano (prueba manual)
-                  → Mensaje de commit sugerido
+        → orion-ui? (solo si aplica — REQ de UI o con referencia visual)
+          → orion-security? (solo si aplica — REQ de SEGURIDAD)
+            → orion-dev
+              → orion-tester (↩️ orion-dev si FAIL)
+                → orion-qa (↩️ orion-dev si RECHAZADO)
+                  → Humano (prueba manual)
+                    → Mensaje de commit sugerido
 ```
 
 ## Comandos disponibles

@@ -4,6 +4,7 @@ import urllib.error
 from typing import Dict, List, Tuple, Any
 from skills.base_skill import BaseSkill
 from ai.llm_provider import generate_response
+from core.address import vocative, vocative_start
 
 class WebBrowsingSkill(BaseSkill):
     @property
@@ -46,7 +47,7 @@ class WebBrowsingSkill(BaseSkill):
         instruction = params.get("instruction", "Resume los puntos clave de este artículo web.")
         
         if not url:
-            return "Señor, necesito que me proporcione una URL válida (http:// o https://) en su mensaje para poder entrar y leerla."
+            return f"{vocative_start()}necesito que me proporcione una URL válida (http:// o https://) en su mensaje para poder entrar y leerla."
             
         try:
             req = urllib.request.Request(
@@ -79,7 +80,7 @@ class WebBrowsingSkill(BaseSkill):
             text_content = text_content[:15000]
             
             if len(text_content) < 50:
-                return "Señor, pude acceder a la web, pero el contenido está bloqueado o requiere iniciar sesión, por lo que no puedo leer el texto interno."
+                return f"{vocative_start()}pude acceder a la web, pero el contenido está bloqueado o requiere iniciar sesión, por lo que no puedo leer el texto interno."
                 
             system_prompt = (
                 "Eres el módulo 'Web Crawler' de un agente de IA experto. Acabas de entrar a la URL indicada por el usuario y este es el contenido extraído de la web. "
@@ -94,6 +95,6 @@ class WebBrowsingSkill(BaseSkill):
             return f"*Crawler Web Activado* 🌐\n\n{ai_response}"
             
         except urllib.error.URLError as e:
-            return f"Señor, los sistemas de red bloquearon la petición o no pude acceder a la página web: {e}"
+            return f"{vocative_start()}los sistemas de red bloquearon la petición o no pude acceder a la página web: {e}"
         except Exception as e:
             return f"Fallo en mi sistema de navegación web: {e}"

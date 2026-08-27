@@ -8,6 +8,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Optional
 from enum import Enum
+from core.address import vocative, vocative_start
 
 logger = logging.getLogger(__name__)
 
@@ -154,13 +155,13 @@ class GlassGateway:
             session.save_memory(text, "Captura de pantalla enviada al chat")
 
             return GlassResponse(
-                text="Aquí tiene la captura de pantalla, Señor.",
+                text=f"Aquí tiene la captura de pantalla{vocative()}.",
                 speak=True,
                 image_path=tmp_path
             )
         except Exception as e:
             return GlassResponse(
-                text=f"No pude tomar la captura, Señor: {str(e)[:60]}",
+                text=f"No pude tomar la captura{vocative()}: {str(e)[:60]}",
                 speak=True
             )
 

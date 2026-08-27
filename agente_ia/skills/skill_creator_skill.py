@@ -30,6 +30,7 @@ SKILLS_DIR = os.path.dirname(__file__)
 SKILL_TEMPLATE = '''
 from typing import Dict, List, Tuple, Any
 from skills.base_skill import BaseSkill
+from core.address import vocative, vocative_start
 
 class {class_name}(BaseSkill):
     """
@@ -114,7 +115,7 @@ class SkillCreatorSkill(BaseSkill):
             return self._modify_skill(params.get("raw_text", ""))
         elif intent == "DELETE_SKILL":
             return self._delete_skill(params.get("raw_text", ""))
-        return "No entendí qué operación realizar sobre las skills, Señor."
+        return f"No entendí qué operación realizar sobre las skills{vocative()}."
 
     # ─────────────────────────────────────────────────────────────────
     #  CREAR SKILL
@@ -151,7 +152,7 @@ El código debe ser completamente funcional y no tener errores de sintaxis.
             return self._process_generated_code(response, user_request)
 
         except Exception as e:
-            return f"Señor, ocurrió un error al generar la skill: {str(e)}"
+            return f"{vocative_start()}ocurrió un error al generar la skill: {str(e)}"
 
     def _process_generated_code(self, llm_response: str, original_request: str) -> str:
         """Extrae, valida y guarda el código generado por el LLM."""
@@ -165,7 +166,7 @@ El código debe ser completamente funcional y no tener errores de sintaxis.
 
         if not code_match:
             return (
-                "Señor, el motor de IA no generó código válido. "
+                f"{vocative_start()}el motor de IA no generó código válido. "
                 "Intente reformular la petición con más detalles."
             )
 
@@ -176,7 +177,7 @@ El código debe ser completamente funcional y no tener errores de sintaxis.
             ast.parse(code)
         except SyntaxError as e:
             return (
-                f"Señor, detecté un error de sintaxis en el código generado "
+                f"{vocative_start()}detecté un error de sintaxis en el código generado "
                 f"(línea {e.lineno}: {e.msg}). No lo instalé para proteger el sistema. "
                 "Intente de nuevo para que el LLM lo regenere."
             )
@@ -184,7 +185,7 @@ El código debe ser completamente funcional y no tener errores de sintaxis.
         # 3. Extraer nombre de clase y generar nombre de archivo
         class_match = re.search(r'class\s+(\w+)\s*\(', code)
         if not class_match:
-            return "Señor, no pude identificar el nombre de la clase en el código generado."
+            return f"{vocative_start()}no pude identificar el nombre de la clase en el código generado."
 
         class_name = class_match.group(1)
         # Convertir PascalCase a snake_case para el nombre de archivo
@@ -196,7 +197,7 @@ El código debe ser completamente funcional y no tener errores de sintaxis.
         # 4. Verificar que no sobreescriba archivos del sistema
         protected = ['base_skill.py', 'skill_manager.py', 'skill_creator_skill.py', '__init__.py']
         if file_name in protected:
-            return f"Señor, no puedo sobreescribir el archivo protegido del sistema: {file_name}"
+            return f"{vocative_start()}no puedo sobreescribir el archivo protegido del sistema: {file_name}"
 
         # 5. Guardar el archivo
         skill_path = os.path.join(SKILLS_DIR, file_name)
@@ -213,7 +214,7 @@ El código debe ser completamente funcional y no tener errores de sintaxis.
 
         action = "actualizada" if already_existed else "creada e instalada"
         return (
-            f"✅ Señor, la skill **{class_name}** ha sido {action} exitosamente.\n"
+            f"✅ {vocative_start()}la skill **{class_name}** ha sido {action} exitosamente.\n"
             f"📁 Archivo: `skills/{file_name}`\n"
             f"🔄 {reload_msg}\n"
             f"Ya puede usar la nueva habilidad inmediatamente."
@@ -239,7 +240,7 @@ El código debe ser completamente funcional y no tener errores de sintaxis.
         if not target_file:
             skills_list = ', '.join([s.replace('.py', '') for s in skill_files])
             return (
-                f"Señor, no identifiqué qué skill desea modificar. "
+                f"{vocative_start()}no identifiqué qué skill desea modificar. "
                 f"Las skills disponibles son: {skills_list}"
             )
 
@@ -274,7 +275,7 @@ Mantén la estructura BaseSkill intacta. No expliques nada."""
             skills = skill_manager.get_all_skills()
 
             if not skills:
-                return "Señor, actualmente no hay skills modulares cargadas."
+                return f"{vocative_start()}actualmente no hay skills modulares cargadas."
 
             lines = ["📦 **Skills instaladas en Noddoo:**\n"]
             for skill in skills:
@@ -305,15 +306,15 @@ Mantén la estructura BaseSkill intacta. No expliques nada."""
                 break
 
         if not target_file:
-            return "Señor, no identifiqué qué skill desea eliminar. Especifique el nombre."
+            return f"{vocative_start()}no identifiqué qué skill desea eliminar. Especifique el nombre."
 
         if target_file in protected:
-            return f"Señor, no puedo eliminar el archivo protegido del sistema: {target_file}"
+            return f"{vocative_start()}no puedo eliminar el archivo protegido del sistema: {target_file}"
 
         skill_path = os.path.join(SKILLS_DIR, target_file)
         os.remove(skill_path)
         self._reload_skill_manager()
-        return f"✅ Señor, la skill `{target_file}` ha sido eliminada del sistema."
+        return f"✅ {vocative_start()}la skill `{target_file}` ha sido eliminada del sistema."
 
     # ─────────────────────────────────────────────────────────────────
     #  UTILIDADES

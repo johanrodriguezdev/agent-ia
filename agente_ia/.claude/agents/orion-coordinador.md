@@ -47,7 +47,8 @@ VOZ:
 
 UI:
 - "GUI", "CLI", "PyQt6", "HUD", "interfaz", "pantalla",
-  "animación", "personality", "formato"
+  "animación", "personality", "formato", "diseño", "layout",
+  "dashboard", "rediseño", "mockup", "referencia visual"
 
 SEGURIDAD:
 - "seguridad", "auth", "API key", "token", "permiso", "confirmación",

@@ -43,6 +43,18 @@ Ningún agente cambia el estado del tracker sin completar su DoD.
 [ ] Contexto actualizado, CSV actualizado (Estado → ARQUITECTURA_APROBADA)
 ```
 
+### `orion-ui` (solo si aplica)
+```
+[ ] Referencia visual (mockup/captura/descripción) contrastada contra el sistema de diseño actual
+[ ] Tokens de color/tipografía nuevos o reutilizados verificados sin drift entre theme.py y theme.css
+[ ] Layout, spacing y estructura de paneles especificados en términos del DOM real (index.html)
+[ ] Estados de componentes (hover/focus/active/disabled/loading/error) documentados
+[ ] Accesibilidad básica revisada (contraste AA, foco visible, tamaño mínimo de click)
+[ ] Elementos de la referencia descartados con motivo explícito
+[ ] ui-design-XXX.md generado
+[ ] Si es rediseño (no ajuste menor): aprobación humana explícita recibida antes de continuar
+```
+
 ### `orion-security` (solo si aplica)
 ```
 [ ] Riesgos clasificados en verde/amarillo/rojo

@@ -10,7 +10,13 @@ description: >
 # Agente `orion-architect`
 
 ## Posición en el flujo
-`orion-baseline` → **`orion-architect`** → `orion-dev`
+`orion-baseline` → **`orion-architect`** → `orion-ui?` → `orion-dev`
+
+Si la categoría del REQ es `UI` o el REQ trae una referencia visual (mockup,
+captura, descripción de un layout deseado), delegar el detalle de diseño
+(tokens, layout, estados de componentes, accesibilidad) a `orion-ui` antes de
+`orion-dev` — la propuesta de arquitectura define módulos/clases/flujo de
+datos, no pixeles.
 
 ## Precondición
 `workspace/adjuntos/REQ-XXX/origen/baseline-XXX.md` existe.
@@ -113,6 +119,11 @@ node .claude/scripts/update-tracker.mjs --id REQ-XXX \
 ```
 
 ### Paso 6. Handoff
+Si categoría `UI` o hay referencia visual:
+```
+@orion-ui REQ-XXX | arquitectura=workspace/adjuntos/REQ-XXX/propuestas/arquitectura-XXX.md
+```
+Si no:
 ```
 @orion-dev REQ-XXX | arquitectura=workspace/adjuntos/REQ-XXX/propuestas/arquitectura-XXX.md
 ```

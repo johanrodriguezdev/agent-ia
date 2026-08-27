@@ -42,6 +42,7 @@ from router.dispatcher import dispatch
 from skills.skill_manager import skill_manager
 from intent.classifier import classify_command
 from agents.skill_tools import register_dispatcher_tool, register_skill_tools
+from core.address import vocative, vocative_start
 
 orchestrator.register_legacy_dispatcher(dispatch)
 orchestrator.register_classifier(classify_command)
@@ -89,14 +90,14 @@ class _ProactiveAssistant:
         )
 
 _proactive_assistant = _ProactiveAssistant()
-proactive_engine.register_trigger(_proactive_assistant, "startup", "¿Necesita algo, Señor?")
-proactive_engine.register_trigger(_proactive_assistant, "hourly", "¿Todo en orden, Señor?")
-proactive_engine.register_trigger(_proactive_assistant, "daily:08:00", "Buenos días, Señor. ¿Qué necesita para hoy?")
+proactive_engine.register_trigger(_proactive_assistant, "startup", f"¿Necesita algo{vocative()}?")
+proactive_engine.register_trigger(_proactive_assistant, "hourly", f"¿Todo en orden{vocative()}?")
+proactive_engine.register_trigger(_proactive_assistant, "daily:08:00", f"Buenos días{vocative()}. ¿Qué necesita para hoy?")
 
 from ui.cli import CLI
 from voice.wake_word import listen_for_wake_word
 from ui.personality import get_random_greeting
-from config_manager import get_agent_name
+from config_manager import get_agent_name, normalize_for_match
 
 def main(boot_mode=None, gui_active=False):
     ui = CLI(gui_active=gui_active)
@@ -118,7 +119,7 @@ def main(boot_mode=None, gui_active=False):
         if choice == 'q':
             proactive_engine.stop()
             task_scheduler.stop()   # simetría con proactive_engine — TaskScheduler.stop() ya existe
-            ui.display_output("Apagando todos los sistemas, Señor. ¡Que tenga un excelente día!", read_aloud=True)
+            ui.display_output(f"Apagando todos los sistemas{vocative()}. ¡Que tenga un excelente día!", read_aloud=True)
             break
             
         while True:
@@ -127,22 +128,26 @@ def main(boot_mode=None, gui_active=False):
             if choice == '1':
                 command = ui.get_text_command()
             elif choice == '2':
-                ui.display_output("Micrófono activado. Estoy escuchando, Señor.", read_aloud=True)
+                ui.display_output(f"Micrófono activado. Estoy escuchando{vocative()}.", read_aloud=True)
                 command = ui.get_voice_command()
             elif choice == '3':
                 wake_result = listen_for_wake_word()
                 
                 if wake_result is True:
-                    ui.display_output("Dígame, Señor.", read_aloud=True)
+                    ui.display_output(f"Dígame{vocative()}.", read_aloud=True)
                     command = ui.get_voice_command()
                 elif isinstance(wake_result, str) and wake_result:
                     command = wake_result
                 else:
                     break
                     
-                agent_name = get_agent_name().lower()
-                if command.strip().lower() in ["descansa", f"{agent_name} descansa", "apágate", "salir"]:
-                    ui.display_output("Entendido, Señor. Pasando a modo de bajo consumo. Avíseme si me necesita.", read_aloud=True)
+                # Se normaliza igual que las wake words: con un nombre como "O.R.I.O.N"
+                # la comparación cruda ("o.r.i.o.n descansa") jamás coincidiría con lo
+                # que devuelve el reconocedor de voz ("orion descansa").
+                agent_name = normalize_for_match(get_agent_name())
+                spoken = normalize_for_match(command)
+                if spoken in ["descansa", f"{agent_name} descansa", "apagate", "salir"]:
+                    ui.display_output(f"Entendido{vocative()}. Pasando a modo de bajo consumo. Avíseme si me necesita.", read_aloud=True)
                     break
 
             if not command:
@@ -167,7 +172,7 @@ def main(boot_mode=None, gui_active=False):
             from intent.intentions import Intent
             _pre_intent, _pre_params = classify_command(command)
             if _pre_intent == Intent.TEACH_COMMAND:
-                ui.display_output("Por supuesto, Señor. ¿Cuál será la frase de activación?", read_aloud=True)
+                ui.display_output(f"Por supuesto{vocative()}. ¿Cuál será la frase de activación?", read_aloud=True)
                 phrase = ui.get_voice_command() if choice in ['2', '3'] else ui.get_text_command()
                 if not phrase: continue
 
@@ -178,7 +183,7 @@ def main(boot_mode=None, gui_active=False):
                 from learning.command_learning import save_custom_command
                 actions_list = [a.strip() for a in actions_text.replace(" y ", ",").replace(" luego ", ",").split(",")]
                 save_custom_command(phrase, actions_list)
-                ui.display_output(f"Protocolo '{phrase}' cargado y listo para usar, Señor.", read_aloud=True)
+                ui.display_output(f"Protocolo '{phrase}' cargado y listo para usar{vocative()}.", read_aloud=True)
                 if choice == '3': continue
                 else: break
 
@@ -193,7 +198,7 @@ def main(boot_mode=None, gui_active=False):
 
             # ✅ BUG CORREGIDO: display_output solo una vez aquí
             ui.display_output(result, read_aloud=True)
-            ui.display_output("¿Desea que realice alguna otra acción, Señor?", read_aloud=True)
+            ui.display_output(f"¿Desea que realice alguna otra acción{vocative()}?", read_aloud=True)
             
             from ai.memory_manager import memory
             memory.store(f"{command} | {result}", category="interaction")

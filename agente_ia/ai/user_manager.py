@@ -17,6 +17,7 @@ import sqlite3
 import datetime
 from pathlib import Path
 from typing import Optional
+from core.address import vocative, vocative_start
 
 # Directorio base donde se guardan los datos de cada usuario
 USERS_DIR = Path(__file__).parent.parent / "users_data"
@@ -136,7 +137,7 @@ class UserSession:
             from ai.memory_manager import memory
             return memory.get_summary(self.user_id)
         except Exception:
-            return "No tengo recuerdos registrados aún, Señor."
+            return f"No tengo recuerdos registrados aún{vocative()}."
 
     # ── Perfil MEMORY.md ───────────────────────────────────────────
 

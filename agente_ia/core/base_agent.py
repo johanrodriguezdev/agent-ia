@@ -2,6 +2,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Dict, List, Callable, Any
 
+from config_manager import get_agent_name
 from core.security_manager import ActionDenied
 
 logger = logging.getLogger(__name__)
@@ -72,7 +73,7 @@ class DynamicAgentFactory:
     def _generate_prompt(self, task: str, tools: List[AgentTool]) -> str:
         tool_list = "\n".join(f"- {t.name}: {t.description}" for t in tools)
         return (
-            f"Eres un agente especializado de Noddoo.\n\n"
+            f"Eres un agente especializado de {get_agent_name()}.\n\n"
             f"Tu tarea: {task}\n\n"
             f"Herramientas disponibles:\n{tool_list}\n\n"
             f"Responde de manera concisa y directa. Si no puedes completar la tarea, "

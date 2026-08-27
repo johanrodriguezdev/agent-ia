@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, Optional
 
 from core.security_manager import ActionDenied, RiskLevel, format_details, security_manager
+from core.address import vocative, vocative_start
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +113,7 @@ def _task_create_invoke(params: dict) -> str:
     )
     if result:
         return task_manager.format_task_created(result)
-    return "No pude interpretar esa tarea, Señor."
+    return f"No pude interpretar esa tarea{vocative()}."
 
 
 def _task_list_invoke(params: dict) -> str:
@@ -137,13 +138,13 @@ def _task_complete_invoke(params: dict) -> str:
     if task_id is not None:
         success = task_manager.complete_task(task_id, user_id)
         if success:
-            return f"☑️ *Excelente, Señor.* He marcado la tarea #{task_id} como completada."
-        return f"No encontré ninguna tarea pendiente con el ID #{task_id}, Señor."
+            return f"☑️ *Excelente{vocative()}.* He marcado la tarea #{task_id} como completada."
+        return f"No encontré ninguna tarea pendiente con el ID #{task_id}{vocative()}."
 
     pending_tasks = task_manager.list_tasks(user_id, status="pending")
 
     if not pending_tasks:
-        return "No tiene ninguna tarea pendiente en este momento, Señor."
+        return f"No tiene ninguna tarea pendiente en este momento{vocative()}."
 
     if len(pending_tasks) == 1:
         task = pending_tasks[0]
@@ -154,7 +155,7 @@ def _task_complete_invoke(params: dict) -> str:
         )
 
     resp = (
-        "He notado que tiene varias tareas pendientes, Señor. ¿Podría indicarme el "
+        f"He notado que tiene varias tareas pendientes{vocative()}. ¿Podría indicarme el "
         "número de la tarea que completó? (Ej: 'listo tarea 2')\n\nSus tareas pendientes:\n"
     )
     for t in pending_tasks:
@@ -225,16 +226,16 @@ def _task_complete_all_invoke(params: dict) -> str:
     pending_tasks = task_manager.list_tasks(user_id, status="pending", limit=_TASK_COMPLETE_ALL_LIMIT)
 
     if not pending_tasks:
-        return "No tiene ninguna tarea pendiente en este momento, Señor."
+        return f"No tiene ninguna tarea pendiente en este momento{vocative()}."
 
     completed = [t for t in pending_tasks if task_manager.complete_task(t["id"], user_id)]
 
     if not completed:
-        return "No pude completar ninguna tarea, Señor. Intente nuevamente."
+        return f"No pude completar ninguna tarea{vocative()}. Intente nuevamente."
 
     n = len(completed)
     lines = "\n".join(f"• #{t['id']} - {t['title']}" for t in completed)
-    header = f"☑️ *¡Trabajo terminado!* Completé {n} tarea{'s' if n != 1 else ''}, Señor:\n"
+    header = f"☑️ *¡Trabajo terminado!* Completé {n} tarea{'s' if n != 1 else ''}{vocative()}:\n"
 
     footer = ""
     if len(pending_tasks) >= _TASK_COMPLETE_ALL_LIMIT:

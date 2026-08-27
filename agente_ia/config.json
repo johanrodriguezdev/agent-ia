@@ -1,11 +1,12 @@
 {
-    "agent_name": "Noddoo",
-    "agent_pronunciation": "Nodo",
+    "agent_name": "O.R.I.O.N",
+    "agent_pronunciation": "orion",
     "ai_provider": "deepseek",
     "ai_model": "deepseek-chat",
     "vision_provider": "",
     "fallback_provider": "",
-    "display_name": "",
+    "display_name": "Johan Rodriguez Pe\u00f1a",
     "weather_city": "",
-    "ui_theme": "light"
+    "ui_theme": "light",
+    "user_title": "Se\u00f1or Johan"
 }

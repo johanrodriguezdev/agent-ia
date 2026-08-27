@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from typing import Any, List, Optional
 
 import numpy as np
+from core.address import vocative, vocative_start
 
 logger = logging.getLogger(__name__)
 
@@ -430,7 +431,7 @@ class UnifiedMemory:
     def get_summary(self, user_id: str = "default") -> str:
         important = self.get_important_memories(user_id, min_importance=0.7, limit=10)
         if not important:
-            return "Aún no tengo recuerdos importantes tuyos, Señor."
+            return f"Aún no tengo recuerdos importantes tuyos{vocative()}."
         lines = ["Esto es lo que recuerdo de ti:\n"]
         for mem in important:
             trunc = mem.text[:120] + "..." if len(mem.text) > 120 else mem.text

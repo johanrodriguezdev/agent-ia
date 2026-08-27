@@ -3,6 +3,7 @@ import datetime
 import logging
 from pathlib import Path
 import pyautogui
+from core.address import vocative, vocative_start
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +69,7 @@ def close_app(app_name: str, channel=None) -> str:
     """
     import subprocess
     if not app_name:
-        return "No me indicó qué programa cerrar, Señor."
+        return f"No me indicó qué programa cerrar{vocative()}."
     app_aliases = {
         "chrome": "chrome.exe", "google chrome": "chrome.exe",
         "firefox": "firefox.exe", "mozilla": "firefox.exe",
@@ -97,14 +98,14 @@ def close_app(app_name: str, channel=None) -> str:
             capture_output=True, text=True, timeout=5
         )
         if process_name.lower() not in check.stdout.lower():
-            return f"El programa '{app_name}' no parece estar ejecutándose, Señor."
+            return f"El programa '{app_name}' no parece estar ejecutándose{vocative()}."
         result = subprocess.run(
             ["taskkill", "/IM", process_name, "/F"],
             capture_output=True, text=True, timeout=10
         )
         if result.returncode == 0:
             logger.info(f"Programa '{app_name}' cerrado por el usuario")
-            return f"Programa '{app_name}' cerrado exitosamente, Señor."
+            return f"Programa '{app_name}' cerrado exitosamente{vocative()}."
         else:
             return f"No pude cerrar '{app_name}': {result.stderr.strip()}"
     except subprocess.TimeoutExpired:
