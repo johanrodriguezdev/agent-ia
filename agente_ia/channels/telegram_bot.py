@@ -687,6 +687,49 @@ async def _intercept_no_autorizado(update, context):
     raise ApplicationHandlerStop
 
 
+async def _procesar(update, msg):
+    """Procesa un mensaje dejando al agente capaz de pedir confirmación por el chat.
+
+    Sin esto, cualquier acción amarilla que el agente intente desde Telegram —escribir en
+    una aplicación, pulsar algo— muere con "denegado por security_manager": el adaptador
+    de confirmación exige saber a qué chat preguntar, y ese dato solo lo tenía el comando
+    `/eliminar`. El agente con herramientas nunca lo recibió, así que la excepción de canal
+    que le abría `pc_type` y `pc_click` no servía de nada en la práctica.
+
+    Van juntas dos cosas, y la segunda no es opcional:
+
+    - La **reserva y el contexto**, que le dicen al adaptador a quién preguntar. Se reserva
+      antes de empezar aunque la mayoría de los mensajes no vayan a confirmar nada, y se
+      suelta al terminar si no se usó.
+    - Sacar el procesamiento del hilo del event loop. `process()` es síncrono y bloquea:
+      si se ejecuta aquí, el bot se queda sordo mientras dura, y la respuesta que está
+      esperando —el "sí" del usuario— no puede llegar nunca. Sería un bloqueo mutuo con
+      el reloj corriendo hasta el timeout.
+    """
+    from channels.gateway import GlassGateway
+    from channels.telegram_confirmation_adapter import telegram_confirmation_adapter
+
+    user = update.effective_user
+    user_id = str(getattr(user, "id", "")) if user is not None else ""
+    chat = update.effective_chat
+
+    reservado = False
+    if user_id and chat is not None:
+        reservado = telegram_confirmation_adapter.reserve_pending(user_id, especulativa=True)
+        if reservado:
+            # Debe quedar puesto ANTES de `to_thread`: es lo que copia el contexto al hilo
+            # worker. Si no se pudo reservar hay otra confirmación en curso para este
+            # usuario; se procesa igual, pero sin contexto, así que una acción amarilla
+            # que aparezca por el camino se deniega en vez de colarse en la espera ajena.
+            telegram_confirmation_adapter.set_request_context(user_id, chat.id)
+
+    try:
+        return await asyncio.to_thread(GlassGateway().process, msg)
+    finally:
+        if reservado:
+            telegram_confirmation_adapter.release_pending(user_id)
+
+
 async def handle_text(update, context):
     from channels.gateway import GlassGateway, GlassMessage, MessageType
 
@@ -715,7 +758,7 @@ async def handle_text(update, context):
         text=text, channel="telegram",
         msg_type=MessageType.TEXT
     )
-    response = GlassGateway().process(msg)
+    response = await _procesar(update, msg)
     await _send_response(update, context, response, send_voice=voice_mode)
 
 
@@ -761,7 +804,7 @@ async def handle_voice(update, context):
         text=transcribed, channel="telegram",
         msg_type=MessageType.VOICE
     )
-    response = GlassGateway().process(msg)
+    response = await _procesar(update, msg)
     await _send_response(update, context, response, send_voice=True)
 
 
@@ -856,7 +899,7 @@ async def handle_photo(update, context):
             msg_type=MessageType.IMAGE,
             image_path=tmp
         )
-        response = GlassGateway().process(msg)
+        response = await _procesar(update, msg)
     except Exception as e:
         from channels.gateway import GlassResponse
         response = GlassResponse(text=f"No pude analizar la imagen{vocative()}: {str(e)[:80]}")
@@ -904,7 +947,7 @@ async def handle_document(update, context):
             channel="telegram",
             msg_type=MessageType.TEXT
         )
-        response = GlassGateway().process(msg)
+        response = await _procesar(update, msg)
     except Exception as e:
         from channels.gateway import GlassResponse
         response = GlassResponse(text=f"No pude procesar el archivo{vocative()}: {str(e)[:80]}")

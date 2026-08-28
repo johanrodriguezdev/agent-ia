@@ -551,3 +551,138 @@ def test_acceso_el_canal_consultado_es_siempre_telegram(monkeypatch):
     asyncio.run(telegram_bot._intercept_no_autorizado(_update_de("111"), _context_con_bot()))
 
     assert vistos == ["telegram"]
+
+
+# --- REQ-021 — el agente con herramientas puede confirmar por el chat --------------------
+#
+# Bug real: pedirle a O.R.I.O.N. por Telegram que escribiera en otra aplicación devolvía
+# "denegado por security_manager". `pc_type` estaba habilitada para Telegram por excepción
+# de canal, pero el adaptador de confirmación solo lo cableaba `cmd_eliminar()`: nadie
+# decía a qué chat preguntar, así que `confirm()` fallaba cerrado por falta de contexto.
+# El agente nunca llegó a preguntar nada; la acción moría antes.
+
+
+def _mensaje_falso():
+    from channels.gateway import GlassMessage, MessageType
+    return GlassMessage(
+        user_id="owner", user_name="Johan", text="escribe hola en el bloc",
+        channel="telegram", msg_type=MessageType.TEXT,
+    )
+
+
+def test_req021_procesar_deja_el_contexto_para_que_el_agente_pueda_preguntar(monkeypatch):
+    """Es la línea exacta que faltaba: sin contexto, toda acción amarilla se denegaba."""
+    import channels.telegram_confirmation_adapter as adapter_mod
+
+    update, _ = _make_update(user_id=300, chat_id=777)
+    visto = {}
+
+    def fake_process(_msg):
+        visto["ctx"] = adapter_mod._request_ctx.get()
+        visto["reservado"] = telegram_confirmation_adapter.has_pending("300")
+        return MagicMock(text="ok")
+
+    monkeypatch.setattr("channels.gateway.GlassGateway.process", staticmethod(fake_process))
+
+    asyncio.run(telegram_bot._procesar(update, _mensaje_falso()))
+
+    assert visto["ctx"] == ("300", 777)
+    assert visto["reservado"] is True
+
+
+def test_req021_procesar_no_corre_en_el_hilo_del_event_loop(monkeypatch):
+    """Si corriera ahí, esperar la confirmación dejaría al bot sordo y el "sí" del usuario
+    no podría llegar nunca: un bloqueo mutuo hasta el timeout."""
+    import threading
+
+    update, _ = _make_update(user_id=301)
+    visto = {}
+
+    async def _correr():
+        visto["loop"] = threading.current_thread().ident
+        return await telegram_bot._procesar(update, _mensaje_falso())
+
+    def fake_process(_msg):
+        visto["worker"] = threading.current_thread().ident
+        return MagicMock(text="ok")
+
+    monkeypatch.setattr("channels.gateway.GlassGateway.process", staticmethod(fake_process))
+
+    asyncio.run(_correr())
+
+    assert visto["worker"] != visto["loop"]
+
+
+def test_req021_una_conversacion_normal_no_deja_reserva_colgando(monkeypatch):
+    """La mayoría de los mensajes no confirman nada; si la reserva no se soltara, la
+    siguiente confirmación de verdad quedaría bloqueada."""
+    update, _ = _make_update(user_id=302)
+    monkeypatch.setattr(
+        "channels.gateway.GlassGateway.process",
+        staticmethod(lambda _msg: MagicMock(text="son las tres")),
+    )
+
+    asyncio.run(telegram_bot._procesar(update, _mensaje_falso()))
+
+    assert telegram_confirmation_adapter.has_pending("302") is False
+
+
+def test_req021_si_process_revienta_tampoco_queda_reserva(monkeypatch):
+    update, _ = _make_update(user_id=303)
+
+    def _explota(_msg):
+        raise RuntimeError("sin conexión")
+
+    monkeypatch.setattr("channels.gateway.GlassGateway.process", staticmethod(_explota))
+
+    with pytest.raises(RuntimeError):
+        asyncio.run(telegram_bot._procesar(update, _mensaje_falso()))
+
+    assert telegram_confirmation_adapter.has_pending("303") is False
+
+
+def test_req021_pc_type_desde_telegram_llega_a_preguntar(monkeypatch):
+    """El caso completo, de punta a punta: la acción amarilla ya no muere en el gate, sino
+    que llega a preguntar por el chat."""
+    update, _ = _make_update(user_id=304, chat_id=888)
+    preguntas = []
+
+    def fake_confirm(action_name, mensaje):
+        preguntas.append((action_name, mensaje))
+        return True
+
+    monkeypatch.setitem(
+        confirmation_module._ADAPTERS, ChannelType.TELEGRAM, fake_confirm
+    )
+
+    def fake_process(_msg):
+        permitido = security_manager.require_confirmation(
+            "pc_type", ChannelType.TELEGRAM, details="tool:pc_type", user_id="304",
+        )
+        return MagicMock(text="escrito" if permitido else "denegado")
+
+    monkeypatch.setattr("channels.gateway.GlassGateway.process", staticmethod(fake_process))
+
+    respuesta = asyncio.run(telegram_bot._procesar(update, _mensaje_falso()))
+
+    assert preguntas, "pc_type debía preguntar por el chat, no morir en el gate"
+    assert preguntas[0][0] == "pc_type"
+    assert respuesta.text == "escrito"
+
+
+def test_req021_un_segundo_mensaje_mientras_piensa_no_se_pierde(monkeypatch):
+    """Con la reserva tomada pero sin preguntar todavía, lo que el usuario escriba es
+    conversación, no una respuesta: consumirlo lo haría desaparecer en silencio."""
+    update, _ = _make_update(user_id=305)
+    visto = {}
+
+    def fake_process(_msg):
+        # El agente sigue pensando; el usuario escribe otra cosa.
+        visto["consumido"] = telegram_confirmation_adapter.resolve("305", "y también esto")
+        return MagicMock(text="ok")
+
+    monkeypatch.setattr("channels.gateway.GlassGateway.process", staticmethod(fake_process))
+
+    asyncio.run(telegram_bot._procesar(update, _mensaje_falso()))
+
+    assert visto["consumido"] is False
