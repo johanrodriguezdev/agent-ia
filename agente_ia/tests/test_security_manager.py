@@ -812,19 +812,51 @@ def test_ca03_todas_las_yellow_restantes_siguen_bloqueadas_en_telegram():
     ejecutarse (en vez de copiarla a mano), para que este test no se desincronice en
     silencio si en el futuro se registra una acción YELLOW nueva (p. ej. vía el override de
     REQ-019) sin agregarla a CHANNEL_ACTION_EXCEPTIONS."""
+    # Las excepciones se leen del propio módulo, no de una copia a mano: así el test sigue
+    # detectando una acción YELLOW nueva que se cuele sin declarar, que es su cometido,
+    # mientras que declarar una a propósito no lo rompe. La lista concreta se fija aparte,
+    # en `test_ca03_las_excepciones_declaradas_son_las_esperadas`, para que ampliarla siga
+    # exigiendo tocar un test conscientemente.
+    from core.security_manager import CHANNEL_ACTION_EXCEPTIONS
+
+    declaradas = {
+        accion for canal, accion in CHANNEL_ACTION_EXCEPTIONS
+        if canal == ChannelType.TELEGRAM
+    }
     todas_las_yellow = [
         name for name, level in security_manager._actions.items()
         if level == RiskLevel.YELLOW
     ]
-    yellow_a_verificar = [n for n in todas_las_yellow if n != "delete_task"]
+    yellow_a_verificar = [n for n in todas_las_yellow if n not in declaradas]
     # Guardrail del propio test: si esto queda vacío, el test dejó de probar algo real.
     assert len(yellow_a_verificar) >= 15
 
     for action_name in yellow_a_verificar:
         assert security_manager.is_action_allowed(action_name, ChannelType.TELEGRAM) is False, (
-            f"'{action_name}' quedó alcanzable en Telegram — CHANNEL_ACTION_EXCEPTIONS "
-            f"debería contener únicamente (ChannelType.TELEGRAM, 'delete_task')"
+            f"'{action_name}' quedó alcanzable en Telegram sin estar declarado en "
+            f"CHANNEL_ACTION_EXCEPTIONS"
         )
+
+
+def test_ca03_las_excepciones_declaradas_son_las_esperadas():
+    """Fija QUÉ acciones YELLOW pueden alcanzarse desde Telegram.
+
+    Cada una está ahí por un motivo concreto y sigue siendo YELLOW: pasa por el adaptador
+    de confirmación conversacional y pregunta por el chat antes de actuar. Ampliar esta
+    lista debe ser una decisión consciente, no el efecto secundario de registrar una
+    herramienta nueva.
+    """
+    from core.security_manager import CHANNEL_ACTION_EXCEPTIONS
+
+    declaradas = {
+        accion for canal, accion in CHANNEL_ACTION_EXCEPTIONS
+        if canal == ChannelType.TELEGRAM
+    }
+
+    assert declaradas == {
+        "delete_task",                      # REQ-018
+        "pc_type", "pc_key", "pc_click",    # control del escritorio en remoto
+    }
 
 
 def test_ca11_channel_allowed_levels_telegram_sin_cambios():

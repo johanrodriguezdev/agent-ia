@@ -83,6 +83,21 @@ CHANNEL_ALLOWED_LEVELS: Dict[ChannelType, List[RiskLevel]] = {
 # arquitectura-018.md §3/§4.1).
 CHANNEL_ACTION_EXCEPTIONS: set[tuple[ChannelType, str]] = {
     (ChannelType.TELEGRAM, "delete_task"),
+    # Control del escritorio desde Telegram. El caso que lo motiva es concreto: estar lejos
+    # del equipo, pedir una captura para ver en qué punto quedó el trabajo, y a partir de
+    # eso escribir o confirmar algo. Sin estas excepciones el canal remoto queda limitado a
+    # lo verde y ese flujo es imposible.
+    #
+    # Se habilitan aquí y NO bajando su nivel a verde, que es la diferencia importante:
+    # siguen siendo YELLOW, así que cada una pasa por el adaptador de confirmación
+    # conversacional de Telegram y pregunta por el chat antes de actuar. El dueño ve qué se
+    # va a escribir y dónde antes de que ocurra, que es justo lo que no puede ver estando
+    # lejos del PC.
+    #
+    # `pc_screenshot` no aparece porque es GREEN: mira, no toca.
+    (ChannelType.TELEGRAM, "pc_type"),
+    (ChannelType.TELEGRAM, "pc_key"),
+    (ChannelType.TELEGRAM, "pc_click"),
 }
 
 _CHANNEL_STR_MAP: Dict[str, ChannelType] = {
@@ -456,8 +471,8 @@ def _register_intent_actions():
     sm = security_manager
     green_intents = [
         "OPEN_APP", "SEARCH_WEB", "OPEN_FOLDER", "LIST_FILES", "CREATE_FILE", "GET_TIME",
-        "TAKE_SCREENSHOT", "WIKIPEDIA_SUMMARY", "RECALL_MEMORY", "TEACH_COMMAND", "PC_CLICK",
-        "PC_TYPE", "PC_SCROLL", "SYS_VOL_UP", "SYS_VOL_DOWN", "SYS_MUTE", "AUTOPILOT",
+        "TAKE_SCREENSHOT", "WIKIPEDIA_SUMMARY", "RECALL_MEMORY", "TEACH_COMMAND",
+        "SYS_VOL_UP", "SYS_VOL_DOWN", "SYS_MUTE", "AUTOPILOT",
         "CALCULATE", "SEARCH_FILES", "FOLDER_SIZE", "FIND_LARGEST", "SYSTEM_INFO", "CPU_INFO",
         "RAM_INFO", "CHAT", "UNKNOWN", "FILE_ANALYSIS", "PLAY_MUSIC", "ANALYZE_SCREEN",
         "LIST_SKILLS", "GET_WEATHER", "BROWSE_WEB",
@@ -465,6 +480,17 @@ def _register_intent_actions():
     yellow_intents = [
         "CLOSE_APP", "SYS_POWER_OFF", "EXECUTE_CODE", "CREATE_SKILL", "MODIFY_SKILL",
         "DELETE_SKILL",
+        # Entrada sintética de teclado y ratón. Estaban en verde —se ejecutaban sin
+        # preguntar— y eso no encaja con lo que de verdad hacen: `PC_TYPE` es un
+        # `pyautogui.write()` sobre la ventana que tenga el foco EN ESE MOMENTO, y quien
+        # ordena la acción no sabe cuál es. El mismo comando puede rellenar un buscador o
+        # escribir dentro de un documento que el usuario estaba editando. `PC_CLICK` y
+        # `PC_SCROLL` tienen el mismo problema: actúan sobre lo que haya delante.
+        #
+        # Al pasar a amarillo quedan además bloqueadas en los canales remotos por
+        # CHANNEL_ALLOWED_LEVELS, que es lo prudente para una acción cuyo efecto depende de
+        # algo que no se ve desde el otro lado.
+        "PC_CLICK", "PC_TYPE", "PC_SCROLL",
     ]
     for name in green_intents:
         sm.register_action(name, RiskLevel.GREEN)
