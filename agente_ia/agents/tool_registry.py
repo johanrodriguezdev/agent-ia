@@ -531,22 +531,38 @@ register_tool(ToolSpec(
 # ─────────────────────────────────────────────
 
 def _pc_screenshot_invoke(params: dict) -> str:
-    """Captura la pantalla y devuelve la ruta. El canal decide si además la envía."""
-    import os
-    import tempfile
+    """Captura la pantalla y la registra como la vigente para calcular clics."""
+    from os_integration.screen_vision import capturar
 
-    try:
-        import pyautogui
-    except ImportError:
-        return "No tengo instalado lo necesario para tomar capturas."
+    captura = capturar()
+    if captura is None:
+        return "No pude tomar la captura de pantalla."
+    return (
+        f"Captura tomada ({captura.ancho}x{captura.alto}). "
+        f"Identificador: {captura.frame_id}. Archivo: {captura.ruta}"
+    )
 
-    try:
-        destino = os.path.join(tempfile.gettempdir(), "orion_captura.png")
-        pyautogui.screenshot().save(destino)
-        return f"Captura tomada: {destino}"
-    except Exception as e:
-        logger.warning(f"Fallo tomando la captura: {e}")
-        return f"No pude tomar la captura: {e}"
+
+def _pc_look_invoke(params: dict) -> str:
+    """Mira la pantalla y cuenta qué hay, o localiza un elemento concreto."""
+    from os_integration.screen_vision import capturar, describir, localizar
+
+    captura = capturar()
+    if captura is None:
+        return "No pude tomar la captura de pantalla."
+
+    objetivo = (params.get("buscar") or params.get("target") or "").strip()
+    if not objetivo:
+        return f"[captura {captura.frame_id}] {describir(captura)}"
+
+    coords, motivo = localizar(captura, objetivo)
+    if coords is None:
+        return motivo
+    return (
+        f"«{objetivo}» está en x={coords[0]}, y={coords[1]} "
+        f"(captura {captura.frame_id}). Usa esas coordenadas y ese identificador para "
+        f"hacer clic, sin volver a capturar."
+    )
 
 
 def _pc_type_invoke(params: dict) -> str:
@@ -582,13 +598,27 @@ def _pc_key_invoke(params: dict) -> str:
 
 
 def _pc_click_invoke(params: dict) -> str:
+    """Hace clic, pero solo con coordenadas de la captura vigente.
+
+    Una coordenada solo significa algo respecto de la captura de la que salió. Si entre
+    mirar y pulsar la pantalla cambió, el clic aterriza en otro sitio — y con el ratón eso
+    no es un error recuperable, es haber pulsado algo que nadie eligió. Es la comprobación
+    que OpenClaw hace atando cada acción al `frameId` de su captura.
+    """
     from automation.pc_controller import click_position
+    from os_integration.screen_vision import validar_para_clic
 
     try:
         x = int(params.get("x"))
         y = int(params.get("y"))
     except (TypeError, ValueError):
         return "Necesito las coordenadas x e y del punto donde hacer clic."
+
+    frame_id = str(params.get("frame_id") or params.get("captura") or "").strip()
+    valido, motivo = validar_para_clic(frame_id)
+    if not valido:
+        return motivo
+
     return click_position(x, y)
 
 
@@ -642,18 +672,46 @@ register_tool(ToolSpec(
 register_tool(ToolSpec(
     name="pc_click",
     description=(
-        "Hace clic en un punto concreto de la pantalla. Las coordenadas se sacan de una "
-        "captura reciente: toma primero 'pc_screenshot' y no reutilices coordenadas viejas, "
-        "porque la pantalla puede haber cambiado."
+        "Hace clic en un punto de la pantalla. Las coordenadas deben venir de 'pc_look' o "
+        "'pc_screenshot', y hay que pasar el identificador de esa captura: si la pantalla "
+        "cambió entre mirar y pulsar, el clic se rechaza en vez de aterrizar donde no debe."
     ),
     parameters_schema={
         "type": "object",
         "properties": {
             "x": {"type": "integer", "description": "Coordenada horizontal en píxeles."},
             "y": {"type": "integer", "description": "Coordenada vertical en píxeles."},
+            "frame_id": {
+                "type": "string",
+                "description": "Identificador de la captura de la que salen las coordenadas.",
+            },
         },
-        "required": ["x", "y"],
+        "required": ["x", "y", "frame_id"],
     },
     risk_level=RiskLevel.YELLOW,
     invoke=_pc_click_invoke,
+))
+
+
+register_tool(ToolSpec(
+    name="pc_look",
+    description=(
+        "Mira la pantalla del usuario y cuenta qué hay. Sin argumentos describe lo que se "
+        "ve —qué aplicación está delante, si hay un diálogo esperando respuesta—. Con "
+        "'buscar' localiza un elemento concreto ('el botón Aceptar', 'el campo de "
+        "búsqueda') y devuelve sus coordenadas para poder pulsarlo con 'pc_click'. "
+        "Úsala cuando el usuario no esté delante del equipo y necesites saber qué pasa."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "buscar": {
+                "type": "string",
+                "description": "Elemento a localizar. Vacío para describir la pantalla entera.",
+            },
+        },
+    },
+    # GREEN: observa, no toca. Lo que se hace DESPUÉS con esas coordenadas sí es YELLOW.
+    risk_level=RiskLevel.GREEN,
+    invoke=_pc_look_invoke,
 ))
