@@ -347,6 +347,44 @@ class SecurityManager:
         allowed = self.get_allowed_levels(channel)
         return level in allowed
 
+    def explain_denial(self, action_name: str, channel) -> str:
+        """Return en una frase por qué se denegó una acción, para decírselo al usuario.
+
+        `require_confirmation()` solo devuelve un booleano, así que quien la llama no puede
+        distinguir "esto no se puede desde aquí" de "no llegaste a confirmar" — y acaba
+        enseñando un "denegado por security_manager" que no le dice nada a nadie. Esto lo
+        reconstruye leyendo la misma clasificación, sin ejecutar ni auditar nada: solo se
+        invoca después de una denegación, para explicarla.
+
+        No revela más de lo que el usuario ya sabe al ver la denegación: qué acción era y
+        por qué no salió. Nunca los parámetros ni el estado interno.
+        """
+        channel = self.resolve_channel(channel)
+        level = self.classify_action(action_name)
+        canal = channel.value
+
+        if level is None:
+            return f"«{action_name}» no está clasificada, y lo que no está clasificado no se ejecuta."
+        if level == RiskLevel.RED:
+            return f"«{action_name}» es una acción de riesgo alto y no se ejecuta desde {canal}."
+        if level == RiskLevel.YELLOW:
+            if not self.is_action_allowed(action_name, channel):
+                return (
+                    f"«{action_name}» necesita confirmación y no está habilitada desde "
+                    f"{canal}."
+                )
+            from core.confirmation import get_confirmation_adapter
+
+            if get_confirmation_adapter(channel) is None:
+                return (
+                    f"«{action_name}» necesita confirmación, pero por {canal} no hay forma "
+                    f"de pedírtela ahora mismo."
+                )
+            # Estaba habilitada y había cómo preguntar: o se respondió que no, o se agotó
+            # el tiempo de espera sin respuesta.
+            return f"no se confirmó «{action_name}»."
+        return f"«{action_name}» no se pudo ejecutar desde {canal}."
+
     def require_confirmation(self, action_name: str, channel, details: str = "", user_id: str = "default") -> bool:
         """Punto central único de decisión de seguridad para O.R.I.O.N.
 

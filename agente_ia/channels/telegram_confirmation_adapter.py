@@ -48,6 +48,17 @@ _request_ctx: "contextvars.ContextVar[Optional[Tuple[str, int]]]" = contextvars.
 class _PendingConfirmation:
     event: threading.Event = field(default_factory=threading.Event)
     result: bool = False
+    #: Si el próximo mensaje del usuario debe leerse como respuesta a esta confirmación.
+    #:
+    #: Hay dos formas de reservar y solo se distinguen en esto. `/eliminar` reserva
+    #: **comprometido**: se sabe que va a preguntar, así que desde el primer instante
+    #: cualquier mensaje del usuario es su respuesta — es lo que cerró la ventana del
+    #: Hallazgo E y por eso el valor por defecto es True. El camino del agente reserva
+    #: **especulativo**: la mayoría de los mensajes no confirman nada, y mientras el agente
+    #: aún está pensando no se ha preguntado nada, así que un segundo mensaje es
+    #: conversación normal y consumirlo lo haría desaparecer. Ahí empieza en False y pasa a
+    #: True en cuanto la pregunta sale por el chat.
+    consume_respuestas: bool = True
 
 
 class TelegramConfirmationAdapter:
@@ -77,7 +88,7 @@ class TelegramConfirmationAdapter:
         with self._lock:
             return user_id in self._pending
 
-    def reserve_pending(self, user_id: str) -> bool:
+    def reserve_pending(self, user_id: str, especulativa: bool = False) -> bool:
         """REQ-018/CA-09, Hallazgo E (security-audit-018.md, re-chequeo) — reserva SÍNCRONA
         de _pending[user_id], pensada para invocarse desde cmd_eliminar() ANTES de lanzar el
         hilo worker de asyncio.to_thread(). Es la verificación atómica y autoritativa de
@@ -86,11 +97,18 @@ class TelegramConfirmationAdapter:
         hilo worker efectivamente empieza a ejecutarse), cierra por completo — no solo
         acota — la ventana donde un segundo mensaje casi simultáneo del mismo usuario podía
         colarse antes de que la entrada existiera. Retorna False si ya había una
-        confirmación pendiente para este usuario (no reserva una segunda)."""
+        confirmación pendiente para este usuario (no reserva una segunda).
+
+        `especulativa=True` es para quien reserva sin saber todavía si va a preguntar —el
+        camino del agente con herramientas, que reserva al empezar CUALQUIER mensaje—. La
+        reserva vale igual para excluir a otra, pero no empieza a consumir mensajes como
+        respuestas hasta que la pregunta salga de verdad (ver `consume_respuestas`)."""
         with self._lock:
             if user_id in self._pending:
                 return False
-            self._pending[user_id] = _PendingConfirmation()
+            self._pending[user_id] = _PendingConfirmation(
+                consume_respuestas=not especulativa
+            )
             return True
 
     def confirm(self, action_name: str, message: str) -> bool:
@@ -121,6 +139,10 @@ class TelegramConfirmationAdapter:
             return False
 
         try:
+            # Se marca ANTES de enviar: en cuanto el mensaje salga, la respuesta puede
+            # llegar de inmediato, y `resolve()` solo consume lo que ya fue preguntado.
+            with self._lock:
+                pending.consume_respuestas = True
             self._send_message(chat_id, message)
             answered_in_time = pending.event.wait(timeout=CONFIRM_TIMEOUT_SECONDS)
             with self._lock:
@@ -172,13 +194,31 @@ class TelegramConfirmationAdapter:
         caso el caller NO debe reenviar el texto a GlassGateway().process(). Retorna False
         si no había ninguna pendiente (mensaje normal, se procesa como siempre)."""
         with self._lock:
-            pending = self._pending.pop(user_id, None)
-            if pending is None:
+            pending = self._pending.get(user_id)
+            if pending is None or not pending.consume_respuestas:
+                # Reservado pero todavía sin preguntar: el agente sigue pensando y este
+                # mensaje es conversación normal, no una respuesta. Consumirlo aquí lo
+                # haría desaparecer sin que el usuario se enterase.
                 return False
+            self._pending.pop(user_id, None)
             # CA-06 — único criterio de "sí", igual que _desktop_confirm/WebViewConfirmationAdapter.
             pending.result = text.strip().lower() in ("sí", "si", "yes", "s")
         pending.event.set()
         return True
+
+    def release_pending(self, user_id: str) -> None:
+        """Libera una reserva que nunca llegó a usarse.
+
+        La reserva se toma al empezar a procesar cualquier mensaje, porque no se sabe de
+        antemano si el agente pedirá confirmación. La mayoría de las veces no la pide, y
+        entonces hay que soltarla: si no, el usuario quedaría con una confirmación
+        fantasma que bloquearía la siguiente de verdad. Nunca toca una que ya se preguntó
+        —esa está esperando respuesta legítimamente—.
+        """
+        with self._lock:
+            pending = self._pending.get(user_id)
+            if pending is not None and not pending.consume_respuestas:
+                del self._pending[user_id]
 
 
 telegram_confirmation_adapter = TelegramConfirmationAdapter()

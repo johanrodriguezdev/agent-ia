@@ -96,7 +96,13 @@ def execute_tool(name: str, params: dict, channel, user_id: str = "default") -> 
     if not security_manager.require_confirmation(
         spec.name, channel, details=format_details(f"tool:{spec.name}", params), user_id=user_id
     ):
-        raise ActionDenied(spec.name, channel, "denegado por security_manager")
+        # El motivo se pregunta aparte porque `require_confirmation()` solo devuelve un
+        # booleano. Sin esto el usuario recibe "denegado por security_manager", que no
+        # distingue "no se puede desde Telegram" de "no llegaste a responder" y no le deja
+        # ninguna pista de qué hacer a continuación.
+        raise ActionDenied(
+            spec.name, channel, security_manager.explain_denial(spec.name, channel)
+        )
 
     # Se anuncia DESPUÉS del gate: si la acción se va a denegar, no tiene sentido decir que
     # se está haciendo. Este es el punto por el que pasan todas las herramientas, así que

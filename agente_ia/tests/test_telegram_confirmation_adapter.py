@@ -336,3 +336,77 @@ def test_send_message_future_result_timeout_no_impide_seguir_esperando_respuesta
         assert result_holder["r"] is True
     finally:
         _stop_loop(loop, thread)
+
+
+# --- REQ-021 — reserva especulativa del camino del agente --------------------------------
+#
+# El comando /eliminar sabe que va a preguntar, así que reserva comprometido y desde ese
+# instante cualquier mensaje del usuario es la respuesta (Hallazgo E). El agente con
+# herramientas no lo sabe: reserva al empezar CUALQUIER mensaje, y la mayoría no confirman
+# nada. Si esa reserva consumiera mensajes desde el principio, todo lo que el usuario
+# escribiera mientras el agente piensa desaparecería sin dejar rastro.
+
+
+def test_req021_reserva_especulativa_no_se_come_los_mensajes_mientras_piensa():
+    adapter = TelegramConfirmationAdapter()
+    adapter.reserve_pending("u1", especulativa=True)
+
+    # El usuario escribe otra cosa mientras el agente todavía trabaja.
+    assert adapter.resolve("u1", "ah y también revisa el correo") is False
+
+
+def test_req021_la_reserva_comprometida_sigue_consumiendo_desde_el_primer_instante():
+    """Hallazgo E: es el comportamiento que /eliminar necesita y que no debe cambiar."""
+    adapter = TelegramConfirmationAdapter()
+    adapter.reserve_pending("u1")
+
+    assert adapter.resolve("u1", "sí") is True
+
+
+def test_req021_tras_preguntar_la_especulativa_si_consume():
+    adapter, bot, loop, thread = _make_adapter_with_loop()
+    try:
+        adapter.reserve_pending("u1", especulativa=True)
+        holder = {}
+        _confirm_in_new_thread(adapter, "u1", 42, "pc_type", "¿seguro?", holder, "r")
+        time.sleep(0.2)                       # deja que la pregunta salga
+
+        assert adapter.resolve("u1", "sí") is True
+        time.sleep(0.2)
+        assert holder["r"] is True
+    finally:
+        _stop_loop(loop, thread)
+
+
+def test_req021_una_reserva_sin_usar_se_libera():
+    """Si no se soltara, el usuario arrastraría una confirmación fantasma que bloquearía
+    la siguiente de verdad."""
+    adapter = TelegramConfirmationAdapter()
+    adapter.reserve_pending("u1", especulativa=True)
+
+    adapter.release_pending("u1")
+
+    assert adapter.has_pending("u1") is False
+    assert adapter.reserve_pending("u1", especulativa=True) is True
+
+
+def test_req021_liberar_no_cancela_una_confirmacion_ya_preguntada():
+    """El `finally` del camino del agente corre también cuando SÍ se preguntó: si soltara
+    esa entrada, la respuesta del usuario llegaría a un hueco y la acción se perdería."""
+    adapter, bot, loop, thread = _make_adapter_with_loop()
+    try:
+        adapter.reserve_pending("u1", especulativa=True)
+        holder = {}
+        _confirm_in_new_thread(adapter, "u1", 42, "pc_click", "¿seguro?", holder, "r")
+        time.sleep(0.2)
+
+        adapter.release_pending("u1")
+
+        assert adapter.has_pending("u1") is True
+        assert adapter.resolve("u1", "sí") is True
+    finally:
+        _stop_loop(loop, thread)
+
+
+def test_req021_liberar_algo_que_no_existe_no_revienta():
+    TelegramConfirmationAdapter().release_pending("nadie")

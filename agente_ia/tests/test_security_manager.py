@@ -879,3 +879,68 @@ def test_regresion_proactive_trigger_desktop_is_action_allowed_sin_cambios():
     GREEN, canal DESKTOP, sin intersección con la excepción nueva. Confirma que CA-02 es
     aditivo, no cambia ningún comportamiento existente."""
     assert security_manager.is_action_allowed("proactive_trigger", ChannelType.DESKTOP) is True
+
+
+# --- REQ-021 — explicar la denegación en vez de "denegado por security_manager" ----------
+#
+# El usuario pidió por Telegram que O.R.I.O.N. escribiera en otra aplicación y recibió
+# "denegado por security_manager". Ese texto no distingue "no se puede desde aquí" de "no
+# llegaste a confirmar", así que no hay forma de saber si insistir, cambiar de canal o
+# responder algo. Cada motivo tiene que sonar distinto.
+
+
+def test_req021_una_accion_sin_clasificar_lo_dice():
+    texto = security_manager.explain_denial("inventada_xyz", ChannelType.TELEGRAM)
+
+    assert "no está clasificada" in texto
+
+
+def test_req021_una_accion_roja_lo_dice():
+    texto = security_manager.explain_denial("format_disk", ChannelType.DESKTOP)
+
+    assert "riesgo alto" in texto
+
+
+def test_req021_una_amarilla_no_habilitada_en_el_canal_nombra_el_canal():
+    """Es distinto de haber cancelado: aquí ni siquiera se llegó a preguntar."""
+    texto = security_manager.explain_denial("shutdown", ChannelType.TELEGRAM)
+
+    assert "telegram" in texto
+    assert "no está habilitada" in texto
+
+
+def test_req021_si_no_hay_como_preguntar_se_dice(monkeypatch):
+    import core.confirmation as confirmation
+
+    monkeypatch.setattr(confirmation, "get_confirmation_adapter", lambda _c: None)
+
+    texto = security_manager.explain_denial("pc_type", ChannelType.TELEGRAM)
+
+    assert "no hay forma de pedírtela" in texto
+
+
+def test_req021_una_confirmacion_no_respondida_se_distingue_de_una_prohibicion(monkeypatch):
+    """El caso más común y el más confuso de todos si no se explica."""
+    import core.confirmation as confirmation
+
+    monkeypatch.setattr(confirmation, "get_confirmation_adapter", lambda _c: (lambda a, m: True))
+
+    texto = security_manager.explain_denial("pc_type", ChannelType.TELEGRAM)
+
+    assert "no se confirmó" in texto
+    assert "no está habilitada" not in texto
+
+
+def test_req021_el_gate_de_herramientas_propaga_el_motivo(monkeypatch):
+    """Lo que ve el usuario sale de aquí: si el gate no lo propaga, no sirve de nada."""
+    import agents.tool_registry as tr
+
+    monkeypatch.setattr(
+        security_manager, "require_confirmation", lambda *a, **kw: False
+    )
+
+    with pytest.raises(tr.ActionDenied) as exc:
+        tr.execute_tool("pc_type", {"text": "hola"}, ChannelType.TELEGRAM, user_id="u1")
+
+    assert "security_manager" not in str(exc.value)
+    assert "pc_type" in str(exc.value)
