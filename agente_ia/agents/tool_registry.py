@@ -517,3 +517,143 @@ register_tool(ToolSpec(
     risk_level=RiskLevel.GREEN,
     invoke=_intent_cancel_invoke,
 ))
+
+
+# ─────────────────────────────────────────────
+#  Control del escritorio como herramientas del modelo
+#
+#  Escribir y hacer clic existían solo como intents del clasificador, que resuelve UNA
+#  acción por mensaje y necesita que la frase se parezca a su entrenamiento. Eso hacía
+#  imposible el caso real que las motivó: estar lejos del PC, pedir una captura por
+#  Telegram, y a partir de lo que se ve pedir que escriba algo y confirme. Son tres pasos
+#  encadenados y con contexto entre ellos — exactamente lo que un modelo con herramientas
+#  sabe hacer y un clasificador de intents no.
+# ─────────────────────────────────────────────
+
+def _pc_screenshot_invoke(params: dict) -> str:
+    """Captura la pantalla y devuelve la ruta. El canal decide si además la envía."""
+    import os
+    import tempfile
+
+    try:
+        import pyautogui
+    except ImportError:
+        return "No tengo instalado lo necesario para tomar capturas."
+
+    try:
+        destino = os.path.join(tempfile.gettempdir(), "orion_captura.png")
+        pyautogui.screenshot().save(destino)
+        return f"Captura tomada: {destino}"
+    except Exception as e:
+        logger.warning(f"Fallo tomando la captura: {e}")
+        return f"No pude tomar la captura: {e}"
+
+
+def _pc_type_invoke(params: dict) -> str:
+    from automation.pc_controller import type_text
+
+    texto = params.get("text") or params.get("texto") or ""
+    if not texto:
+        return "Necesito saber qué texto escribir."
+    return type_text(str(texto))
+
+
+def _pc_key_invoke(params: dict) -> str:
+    """Pulsa una tecla o combinación: Enter, Escape, ctrl+s..."""
+    try:
+        import pyautogui
+    except ImportError:
+        return "No tengo instalado lo necesario para pulsar teclas."
+
+    combo = (params.get("key") or params.get("tecla") or "").strip()
+    if not combo:
+        return "Necesito saber qué tecla pulsar."
+
+    try:
+        partes = [p.strip().lower() for p in combo.replace("+", " ").split() if p.strip()]
+        if len(partes) > 1:
+            pyautogui.hotkey(*partes)
+        else:
+            pyautogui.press(partes[0])
+        return f"Pulsado: {combo}"
+    except Exception as e:
+        logger.warning(f"Fallo pulsando '{combo}': {e}")
+        return f"No pude pulsar '{combo}': {e}"
+
+
+def _pc_click_invoke(params: dict) -> str:
+    from automation.pc_controller import click_position
+
+    try:
+        x = int(params.get("x"))
+        y = int(params.get("y"))
+    except (TypeError, ValueError):
+        return "Necesito las coordenadas x e y del punto donde hacer clic."
+    return click_position(x, y)
+
+
+register_tool(ToolSpec(
+    name="pc_screenshot",
+    description=(
+        "Toma una captura de la pantalla del PC y devuelve la ruta del archivo. Úsala "
+        "cuando el usuario no esté delante del equipo y necesite ver qué hay, o antes de "
+        "escribir o hacer clic para saber sobre qué estás actuando."
+    ),
+    parameters_schema={"type": "object", "properties": {}},
+    # GREEN: mira, no toca. Mismo nivel que el intent TAKE_SCREENSHOT que ya existía.
+    risk_level=RiskLevel.GREEN,
+    invoke=_pc_screenshot_invoke,
+))
+
+register_tool(ToolSpec(
+    name="pc_type",
+    description=(
+        "Escribe texto con el teclado en la ventana que tenga el foco en ese momento. "
+        "Si el usuario te dice qué escribir, ESCRÍBELO: es él quien sabe qué ventana dejó "
+        "abierta, y a menudo te lo pide precisamente porque está lejos del equipo. No hace "
+        "falta ver la pantalla antes ni pedir permiso — la confirmación ya la pide el "
+        "sistema por su cuenta. Usa 'pc_screenshot' solo si el usuario quiere ver algo."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {"text": {"type": "string", "description": "Qué escribir."}},
+        "required": ["text"],
+    },
+    # YELLOW: el efecto depende de qué ventana tenga el foco, y quien da la orden no lo ve.
+    risk_level=RiskLevel.YELLOW,
+    invoke=_pc_type_invoke,
+))
+
+register_tool(ToolSpec(
+    name="pc_key",
+    description=(
+        "Pulsa una tecla o combinación en la ventana con el foco: 'enter', 'escape', "
+        "'ctrl+s', 'alt+tab'. Para confirmar un diálogo suele bastar con 'enter'."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {"key": {"type": "string", "description": "Tecla o combinación."}},
+        "required": ["key"],
+    },
+    risk_level=RiskLevel.YELLOW,
+    invoke=_pc_key_invoke,
+))
+
+register_tool(ToolSpec(
+    name="pc_click",
+    description=(
+        "Hace clic en un punto concreto de la pantalla. Las coordenadas se sacan de una "
+        "captura reciente: toma primero 'pc_screenshot' y no reutilices coordenadas viejas, "
+        "porque la pantalla puede haber cambiado."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "x": {"type": "integer", "description": "Coordenada horizontal en píxeles."},
+            "y": {"type": "integer", "description": "Coordenada vertical en píxeles."},
+        },
+        "required": ["x", "y"],
+    },
+    risk_level=RiskLevel.YELLOW,
+    invoke=_pc_click_invoke,
+))
