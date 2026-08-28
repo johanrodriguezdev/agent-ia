@@ -91,3 +91,9 @@ ddgs
 # .env como GEMINI_API_KEY. Sin clave, la captura se toma pero no se interpreta, y se avisa.
 google-generativeai
 pillow
+
+# --- Arbol de accesibilidad (Windows) ---
+# UI Automation: el sistema ya sabe donde esta cada boton y como se llama. Da coordenadas
+# EXACTAS en milisegundos, sin gastar una llamada al modelo ni adivinar sobre una imagen.
+# No todas las apps lo exponen (Electron suele no hacerlo); ahi se cae a la vision.
+uiautomation
