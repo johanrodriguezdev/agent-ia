@@ -740,10 +740,10 @@ def _pc_find_invoke(params: dict) -> str:
     elemento, candidatos = buscar(objetivo)
     if elemento is None:
         if not candidatos:
-            return (
-                f"No encontré «{objetivo}», y la ventana activa no expone su contenido al "
-                f"árbol de accesibilidad. Usa 'pc_look' para mirarla."
-            )
+            # Sin candidatos no se sabe si el control no está o si la ventana entera está
+            # muda. `describir_ventana_activa` ya distingue los dos casos y, si la
+            # aplicación tiene el árbol apagado, dice cómo encenderlo.
+            return f"No encontré «{objetivo}». {describir_ventana_activa()}"
         nombres = ", ".join(f"«{c.nombre}»" for c in candidatos[:8])
         return (
             f"No encontré «{objetivo}». Lo que sí hay en esta ventana: {nombres}. "
@@ -778,8 +778,9 @@ register_tool(ToolSpec(
         "botones, campos, menús, pestañas. Devuelve su posición EXACTA. Es preferible a "
         "'pc_look' siempre que funcione, porque no adivina sobre una imagen ni gasta una "
         "llamada al modelo. Sin argumentos lista los controles disponibles. Si la "
-        "aplicación no expone su contenido (VS Code y otras basadas en Electron), lo dice "
-        "y entonces sí conviene usar 'pc_look'."
+        "aplicación no expone su contenido (VS Code y otras basadas en Electron), lo dice: "
+        "en ese caso suele poder arreglarse con 'pc_enable_tree', y mientras tanto sirve "
+        "'pc_look'."
     ),
     parameters_schema={
         "type": "object",
@@ -793,4 +794,60 @@ register_tool(ToolSpec(
     # GREEN: consulta el estado de la interfaz, no la modifica.
     risk_level=RiskLevel.GREEN,
     invoke=_pc_find_invoke,
+))
+
+
+def _pc_enable_tree_invoke(params: dict) -> str:
+    """Enciende el árbol de accesibilidad de una aplicación Electron.
+
+    Chromium no publica su interfaz salvo que se le pida al arrancar. Dejar el flag escrito
+    en la configuración de la aplicación convierte una ventana muda —VS Code daba 7
+    elementos— en una legible —221—, y con eso el agente deja de adivinar coordenadas sobre
+    una captura para leer la posición exacta de cada control.
+    """
+    from os_integration.electron_a11y import APPS, activar, detectar_app
+    from os_integration.ui_tree import leer_ventana_activa
+
+    app = (params.get("app") or "").strip().lower()
+    if not app:
+        # Sin indicación explícita, la aplicación es la que se tiene delante: es la que el
+        # usuario acaba de intentar manejar y la razón de que se llame a esta herramienta.
+        _, titulo = leer_ventana_activa()
+        app = detectar_app(titulo) or ""
+        if not app:
+            conocidas = ", ".join(sorted(APPS))
+            return (
+                f"No reconozco la aplicación de la ventana activa («{titulo}»), así que no "
+                f"sé dónde escribir su configuración. Puedo hacerlo en: {conocidas}."
+            )
+
+    _, mensaje = activar(app)
+    return mensaje
+
+
+register_tool(ToolSpec(
+    name="pc_enable_tree",
+    description=(
+        "Activa permanentemente el árbol de accesibilidad de una aplicación basada en "
+        "Electron (VS Code, Cursor, Windsurf), que por defecto no publica su interfaz. "
+        "Úsala cuando 'pc_find' informe de que la ventana no expone sus controles. Escribe "
+        "una línea en la configuración de la aplicación y requiere reiniciarla una vez; a "
+        "partir de ahí sus botones y campos se localizan con precisión exacta."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "app": {
+                "type": "string",
+                "description": (
+                    "Aplicación: 'vscode', 'vscode-insiders', 'cursor' o 'windsurf'. "
+                    "Vacío para usar la de la ventana activa."
+                ),
+            },
+        },
+    },
+    # YELLOW: modifica la configuración de otra aplicación del usuario. Es reversible y se
+    # guarda copia, pero cambia algo fuera de O.R.I.O.N. y eso se pregunta antes.
+    risk_level=RiskLevel.YELLOW,
+    invoke=_pc_enable_tree_invoke,
 ))

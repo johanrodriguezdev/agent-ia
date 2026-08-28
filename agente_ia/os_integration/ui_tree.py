@@ -21,8 +21,10 @@ la máquina real:
     VS Code              7 elementos   0.02 s   <- casi nada
 
 VS Code, como cualquier aplicación Electron, esconde su interfaz tras una "Chrome Legacy
-Window" y no publica el árbol salvo que se active la accesibilidad. Ahí este módulo devuelve
-poco y hay que caer a la visión.
+Window" y no publica el árbol salvo que se active la accesibilidad. Pero eso no es un
+callejón sin salida: es un interruptor apagado. Encendido —ver `electron_a11y.py`— la misma
+ventana pasa de 7 elementos a 221 en 0.30 s. Por eso, cuando aquí no se ve nada, el mensaje
+no se limita a sugerir la visión: dice que se puede encender y cómo.
 
 De ahí las dos protecciones que lleva: un tope de tiempo, porque hay aplicaciones que tardan
 segundos en responder, y un tope de elementos, porque una hoja de cálculo grande tiene miles
@@ -191,10 +193,17 @@ def describir_ventana_activa(maximo: int = 25) -> str:
     if not titulo:
         return "No pude identificar la ventana activa."
     if not elementos:
-        return (
-            f"Ventana activa: «{titulo}». No expone su contenido al árbol de accesibilidad "
-            f"(las aplicaciones tipo Electron suelen no hacerlo). Usa 'pc_look' para verla."
-        )
+        from os_integration.electron_a11y import diagnostico
+
+        return diagnostico(titulo, elementos)
+
+    from os_integration.electron_a11y import diagnostico, parece_electron_sin_arbol
+
+    # Una ventana Electron devuelve los botones de su marco y nada más. Eso no es "casi
+    # nada": es un árbol apagado que se puede encender, y decirlo es más útil que sugerir
+    # la visión como si no hubiera alternativa.
+    if parece_electron_sin_arbol(elementos, titulo):
+        return diagnostico(titulo, elementos)
 
     interactuables = [e for e in elementos if e.tipo in TIPOS_INTERACTUABLES]
     mostrar = interactuables[:maximo] or elementos[:maximo]
