@@ -715,3 +715,82 @@ register_tool(ToolSpec(
     risk_level=RiskLevel.GREEN,
     invoke=_pc_look_invoke,
 ))
+
+
+def _pc_find_invoke(params: dict) -> str:
+    """Localiza un control preguntándole al sistema, no adivinando sobre una imagen.
+
+    El árbol de accesibilidad da la posición EXACTA y el nombre real del control, en
+    milisegundos y sin gastar una llamada al modelo. Cuando la aplicación lo expone, es
+    mejor que la visión en todo. Cuando no —Electron y similares—, se dice y se sugiere
+    mirar, en vez de devolver unas coordenadas inventadas.
+    """
+    from os_integration.ui_tree import buscar, describir_ventana_activa, disponible
+
+    if not disponible():
+        return (
+            "No puedo leer el árbol de accesibilidad en este sistema. Usa 'pc_look' para "
+            "mirar la pantalla."
+        )
+
+    objetivo = (params.get("buscar") or params.get("target") or "").strip()
+    if not objetivo:
+        return describir_ventana_activa()
+
+    elemento, candidatos = buscar(objetivo)
+    if elemento is None:
+        if not candidatos:
+            return (
+                f"No encontré «{objetivo}», y la ventana activa no expone su contenido al "
+                f"árbol de accesibilidad. Usa 'pc_look' para mirarla."
+            )
+        nombres = ", ".join(f"«{c.nombre}»" for c in candidatos[:8])
+        return (
+            f"No encontré «{objetivo}». Lo que sí hay en esta ventana: {nombres}. "
+            f"Si ninguno es, usa 'pc_look' para mirar la pantalla."
+        )
+
+    aviso = ""
+    if len(candidatos) > 1:
+        otros = ", ".join(f"«{c.nombre}»" for c in candidatos[1:4])
+        aviso = f" (hay más coincidencias: {otros})"
+
+    # Las coordenadas del árbol son exactas y NO dependen de ninguna captura, así que se
+    # devuelve el identificador de la vigente —o se toma una— para que `pc_click` las
+    # acepte sin obligar al modelo a mirar antes.
+    from os_integration.screen_vision import capturar, ultima_captura
+
+    captura = ultima_captura()
+    if captura is None or not captura.esta_fresca():
+        captura = capturar()
+    frame = captura.frame_id if captura else "sin-captura"
+
+    return (
+        f"{elemento} — usa x={elemento.x}, y={elemento.y} con frame_id={frame} "
+        f"para hacer clic{aviso}."
+    )
+
+
+register_tool(ToolSpec(
+    name="pc_find",
+    description=(
+        "Localiza un control de la ventana activa preguntándole al sistema operativo: "
+        "botones, campos, menús, pestañas. Devuelve su posición EXACTA. Es preferible a "
+        "'pc_look' siempre que funcione, porque no adivina sobre una imagen ni gasta una "
+        "llamada al modelo. Sin argumentos lista los controles disponibles. Si la "
+        "aplicación no expone su contenido (VS Code y otras basadas en Electron), lo dice "
+        "y entonces sí conviene usar 'pc_look'."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "buscar": {
+                "type": "string",
+                "description": "Nombre del control, p. ej. 'Aceptar'. Vacío para listarlos.",
+            },
+        },
+    },
+    # GREEN: consulta el estado de la interfaz, no la modifica.
+    risk_level=RiskLevel.GREEN,
+    invoke=_pc_find_invoke,
+))
