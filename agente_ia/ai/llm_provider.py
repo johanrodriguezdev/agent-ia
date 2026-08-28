@@ -77,6 +77,17 @@ def get_provider_config():
     except Exception:
         return "anthropic", "", "", ""
 
+#: Modelo por defecto de cada proveedor de respaldo. Sin esto se le pedía al respaldo el
+#: modelo configurado para el principal — "deepseek-chat" no existe en Ollama, así que el
+#: respaldo fallaba por una razón distinta a la del principal y quedaba igual de inútil.
+_MODELO_POR_PROVEEDOR = {
+    "ollama": "qwen3:8b",
+    "openai": "gpt-4o-mini",
+    "anthropic": "claude-3-5-sonnet-20241022",
+    "gemini": "gemini-1.5-flash",
+}
+
+
 def generate_response(messages, system_prompt, image_path=None, tools=None):
     """`tools` (REQ-007, CA-03): lista opcional de dicts `{name, description,
     parameters_schema}`. Se reenvía al proveedor activo únicamente si soporta tool-calling
@@ -90,6 +101,12 @@ def generate_response(messages, system_prompt, image_path=None, tools=None):
     if image_path and os.path.exists(image_path):
         if vision_provider:
             active_provider = vision_provider
+            # Y con el proveedor cambia el modelo. `model_name` es el configurado para el
+            # principal —"deepseek-chat"—, y pedírselo a Gemini falla igual que pedirle
+            # "gemini-1.5-flash" a DeepSeek. Es el mismo descuido que tenía la cadena de
+            # respaldo: cambiar de proveedor sin cambiar de modelo garantiza el error.
+            if vision_provider != provider:
+                model_name = _MODELO_POR_PROVEEDOR.get(vision_provider, "")
 
     tools_supported = active_provider in ("anthropic", "deepseek", "openai")
     effective_tools = tools if (tools and tools_supported) else None
@@ -115,17 +132,6 @@ def generate_response(messages, system_prompt, image_path=None, tools=None):
             active_provider, e, messages, system_prompt, image_path, model_name,
             effective_tools, fallback_provider,
         )
-
-
-#: Modelo por defecto de cada proveedor de respaldo. Sin esto se le pedía al respaldo el
-#: modelo configurado para el principal — "deepseek-chat" no existe en Ollama, así que el
-#: respaldo fallaba por una razón distinta a la del principal y quedaba igual de inútil.
-_MODELO_POR_PROVEEDOR = {
-    "ollama": "qwen3:8b",
-    "openai": "gpt-4o-mini",
-    "anthropic": "claude-3-5-sonnet-20241022",
-    "gemini": "gemini-1.5-flash",
-}
 
 
 def _cadena_de_respaldo(activo, fallback_config) -> list:

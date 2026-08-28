@@ -84,3 +84,10 @@ pytest-qt
 # con proveedores intercambiables: anadir Brave o Tavily seria sumar una funcion y su clave.
 # beautifulsoup4 (ya listado arriba) extrae el texto legible de las paginas.
 ddgs
+
+# --- Vision: leer capturas de pantalla ---
+# Gemini interpreta las capturas para que el agente pueda decidir donde hacer clic estando
+# el usuario lejos del PC. Se declara como `vision_provider` en config.json; la clave va en
+# .env como GEMINI_API_KEY. Sin clave, la captura se toma pero no se interpreta, y se avisa.
+google-generativeai
+pillow
