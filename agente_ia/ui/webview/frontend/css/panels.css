@@ -131,3 +131,120 @@
   font-size: 13px;
   color: var(--text-secondary);
 }
+
+/* -------------------------------------------------------------- panel "Flujos" */
+/* La pantalla muestra flujos creados hablando: cada tarjeta es un flujo con sus pasos.
+   No hay constructor visual a proposito — aca se ve y se corrige, no se arma. */
+
+.panel-hint {
+  padding: 8px 14px 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.flow-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  background-color: var(--bg-secondary);
+}
+
+.flow-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.flow-name {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.flow-state {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+
+/* Solo tres estados se colorean: los que piden que el usuario haga algo o mire. El
+   resto se lee igual de bien en gris y no compite por atencion. */
+.flow-state-esperando { color: var(--text-accent); border-color: var(--text-accent); }
+.flow-state-fallido { color: var(--text-danger, #f85149); border-color: currentColor; }
+.flow-state-exitoso { color: var(--text-success, #3fb950); border-color: currentColor; }
+
+.flow-schedule {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-left: auto;
+}
+
+.flow-steps {
+  margin: 0 0 8px;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.flow-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.flow-step-omitido,
+.flow-step-pendiente { opacity: 0.55; }
+
+.flow-step-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.flow-step-action { font-family: var(--font-mono, monospace); }
+
+.flow-step-cond,
+.flow-step-result {
+  font-size: 11px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.flow-step-remove {
+  flex: none;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1.2;
+}
+
+.flow-step-remove:hover { color: var(--text-danger, #f85149); }
+
+.flow-step-remove:focus-visible {
+  outline: 2px solid var(--text-accent);
+  outline-offset: 2px;
+}
+
+.flow-reason {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.flow-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}

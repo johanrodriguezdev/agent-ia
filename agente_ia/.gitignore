@@ -68,3 +68,25 @@ ai/unified_memory.db
 tasks/tasks.db
 standing_intents.db
 workspace/dreams.md
+
+# Estado de cooldown de los proveedores de LLM (ai/provider_health.py). Es estado de
+# ejecucion de UNA maquina —a quien se le acabo la cuota y hasta cuando—, se regenera
+# solo, y perderlo solo cuesta reintentar una vez un proveedor caido. No se versiona.
+provider_cooldowns.json
+
+# Credenciales OAuth de los servidores MCP (core/mcp_oauth.py). Son tokens vivos,
+# equivalentes a una contrasena: NUNCA se versionan. Se regeneran con
+# `python -m core.mcp_manager login <servidor>`.
+mcp_tokens.json
+
+# Hasta que UID leyo el lector de correo en cada buzon (core/email_reader.py). Estado de
+# ejecucion de una maquina, se regenera solo. No se versiona.
+email_state.json
+
+# Adjuntos de correo que el usuario autorizo a guardar (core/email_attachments.py). Son
+# archivos de terceros en la maquina de uno: nunca se versionan.
+descargas_correo/
+
+# Interruptores de escritura de correo (core/email_capabilities.py). Configuracion de
+# seguridad de UNA maquina, decidida por el usuario. No se versiona.
+email_capabilities.json

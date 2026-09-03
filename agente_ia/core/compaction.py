@@ -140,8 +140,12 @@ def compactar(
 def _resumir_con_modelo(conversacion: str) -> Optional[str]:
     from ai.llm_provider import generate_response
 
+    # `tarea="ligera"`: resumir historial es trabajo interno y repetitivo que el usuario
+    # nunca lee tal cual. Si hay un modelo local o gratuito configurado en
+    # `task_providers`, esto se va ahí y deja de gastar cuota de pago.
     respuesta = generate_response(
         [{"role": "user", "content": _PROMPT.format(conversacion=conversacion)}],
         "Eres un resumidor de conversaciones. Respondes solo con el resumen pedido.",
+        tarea="ligera",
     )
     return respuesta if isinstance(respuesta, str) else getattr(respuesta, "text", None)

@@ -65,15 +65,81 @@ class ToolSpec:
 _REGISTRY: Dict[str, ToolSpec] = {}
 
 
-def register_tool(spec: ToolSpec) -> None:
-    """Registra el tool y, en el mismo paso, su nivel de riesgo declarado en
-    `security_manager`. Si el registro no llegara a correr por algún motivo, el
-    fail-closed de `security_manager.classify_action()` (REQ-005) sigue bloqueando
-    cualquier intento de invocar el tool — este registro es una capa adicional, no la
-    única defensa."""
-    security_manager.register_action(spec.name, spec.risk_level)
+def register_tool(spec: ToolSpec) -> bool:
+    """Registra el tool y, en el mismo paso, su nivel de riesgo en `security_manager`.
+
+    Return True si quedó registrado. Los tools LOCALES siempre lo quedan (comportamiento
+    de siempre; los callers existentes ignoran el retorno y no cambian). Un tool con
+    `origin` distinto de "local" pasa antes por `_admitir_tool_remoto()` y puede rechazarse.
+
+    Si el registro no llegara a correr por algún motivo, el fail-closed de
+    `security_manager.classify_action()` (REQ-005) sigue bloqueando cualquier intento de
+    invocar el tool — este registro es una capa adicional, no la única defensa.
+    """
+    nivel = spec.risk_level
+    if spec.origin != "local":
+        admitido, nivel = _admitir_tool_remoto(spec)
+        if not admitido:
+            return False
+
+    security_manager.register_action(spec.name, nivel)
     _REGISTRY[spec.name] = spec
-    logger.info(f"Tool registrado: '{spec.name}' (origin={spec.origin}, risk={spec.risk_level.value})")
+    logger.info(f"Tool registrado: '{spec.name}' (origin={spec.origin}, risk={nivel.value})")
+    return True
+
+
+def _admitir_tool_remoto(spec: ToolSpec) -> tuple:
+    """Decide si un tool que no es local entra, y con qué nivel. Return `(admitido, nivel)`.
+
+    Tres controles, en orden, todos fail-closed:
+
+    1. **Nombre calificado.** Tiene que ser `mcp__<servidor>__<tool>`. El nombre del tool
+       ES la `action_name` de `security_manager`: sin namespace, un servidor remoto que
+       publique `task_create` se registraría encima del local y heredaría su clasificación.
+    2. **Allow-list.** El usuario tiene que haber nombrado ese tool de ese servidor en
+       `mcp_allowlist.json`. Lo que no está nombrado no entra.
+    3. **Nivel de riesgo.** El nivel que DECLARA el servidor nunca puede dejarlo en verde:
+       un tercero no decide qué es inofensivo en esta máquina. Verde sube a amarillo (pide
+       confirmación); rojo se respeta como rojo. Es el mismo principio de REQ-019 —
+       `max(nuestro, ajeno)`, nunca `min`.
+    """
+    from core.remote_tools_policy import is_tool_allowed, parse_nombre_calificado
+
+    partes = parse_nombre_calificado(spec.name)
+    if partes is None:
+        logger.error(
+            f"Tool remoto '{spec.name}' rechazado: debe llamarse 'mcp__<servidor>__<tool>'. "
+            f"Sin namespace podría pisar la clasificación de un tool local."
+        )
+        return False, spec.risk_level
+
+    servidor, tool = partes
+    if not is_tool_allowed(servidor, tool):
+        logger.warning(
+            f"Tool remoto '{tool}' del servidor '{servidor}' rechazado: no está en "
+            f"mcp_allowlist.json. Agregalo ahí si de verdad lo querés habilitar."
+        )
+        return False, spec.risk_level
+
+    nivel = RiskLevel.YELLOW if spec.risk_level == RiskLevel.GREEN else spec.risk_level
+    if nivel != spec.risk_level:
+        logger.info(
+            f"Tool remoto '{spec.name}' se declaró '{spec.risk_level.value}'; se registra "
+            f"como '{nivel.value}': el riesgo de un tool remoto no lo decide el servidor."
+        )
+    return True, nivel
+
+
+def unregister_tool(name: str) -> bool:
+    """Saca un tool del registro. Return True si estaba. Pensado para la recarga de MCP.
+
+    NO se borra su clasificación de riesgo en `security_manager`, y es deliberado: si el
+    mismo nombre vuelve a registrarse más adelante con un nivel más bajo, conservar el
+    anterior hace que `register_action()` siga bloqueando la degradación de un ROJO. Un
+    tool ausente de `_REGISTRY` ya no se puede ejecutar —`execute_tool()` lo deniega por
+    "no registrado"—, así que la clasificación huérfana no habilita nada.
+    """
+    return _REGISTRY.pop(name, None) is not None
 
 
 def get_tool(name: str) -> Optional[ToolSpec]:

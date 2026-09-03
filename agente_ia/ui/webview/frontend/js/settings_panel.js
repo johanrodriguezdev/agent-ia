@@ -26,6 +26,7 @@
 
 import {
   requestSecurityOverrides, saveSecurityOverride, requestProfile, saveProfile,
+  requestEmailCapabilities, saveEmailCapability,
 } from "./bridge_client.js";
 
 const LEVEL_LABELS = {
@@ -169,7 +170,9 @@ function renderActiveSection() {
     requestProfile();          // carga perezosa: solo al entrar en la sección
   } else {
     content.appendChild(buildSecurityCard());
+    content.appendChild(buildEmailCapabilitiesCard());
     requestSecurityOverrides();   // CA-19: carga perezosa, solo acá
+    requestEmailCapabilities();   // mismo criterio: solo al entrar en la sección
   }
 }
 
@@ -350,4 +353,106 @@ function showSettingsBanner(message, isError) {
   banner.textContent = message;   // texto propio del frontend, no confiable solo por precaución — nunca innerHTML
   banner.classList.toggle("settings-banner-error", Boolean(isError));
   banner.hidden = false;
+}
+
+// ------------------------------------------------- "Capacidades del correo"
+//
+// Ojo con la diferencia, que es la razón de que esto NO sea una fila más de Seguridad:
+// las filas de arriba eligen CUÁNTA confirmación pide una acción (y solo se puede subir);
+// estas eligen si la función existe siquiera. Encender "Enviar correos" no baja ninguna
+// barrera — enviar sigue siendo ROJO y sigue pidiendo el PIN maestro. Apagado, ni se
+// llega a preguntar.
+
+let _pendingCapId = null;
+
+function buildEmailCapabilitiesCard() {
+  const card = document.createElement("div");
+  card.className = "settings-card";
+
+  const cardTitle = document.createElement("div");
+  cardTitle.className = "settings-card-title";
+  cardTitle.textContent = "Capacidades del correo";
+
+  const nota = document.createElement("div");
+  nota.className = "settings-row-desc";
+  nota.textContent =
+    "Vienen apagadas porque escriben sobre tu cuenta. Activarlas no quita las " +
+    "confirmaciones: solo permite que la función exista.";
+
+  const list = document.createElement("div");
+  list.id = "email-capabilities-list";
+  card.append(cardTitle, nota, list);
+  return card;
+}
+
+export function renderEmailCapabilities(rows) {
+  const list = document.getElementById("email-capabilities-list");
+  if (!list) return;   // el panel ya se cerró antes de que llegara la respuesta
+  list.replaceChildren();
+
+  if (!rows || rows.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "panel-empty";
+    empty.textContent = "No hay capacidades configurables.";
+    list.appendChild(empty);
+    return;
+  }
+
+  for (const row of rows) list.appendChild(buildCapabilityRow(row));
+}
+
+function buildCapabilityRow(row) {
+  const item = document.createElement("div");
+  item.className = "settings-row";
+  item.dataset.capId = row.id;
+
+  const info = document.createElement("div");
+  info.className = "settings-row-info";
+  const labelEl = document.createElement("span");
+  labelEl.className = "settings-row-label";
+  labelEl.textContent = row.label;              // nunca innerHTML
+  const descEl = document.createElement("span");
+  descEl.className = "settings-row-desc";
+  descEl.textContent = row.description;
+  info.append(labelEl, descEl);
+
+  const check = document.createElement("input");
+  check.type = "checkbox";
+  check.className = "settings-row-check";
+  check.checked = Boolean(row.enabled);
+  check.setAttribute("aria-label", row.label);
+  check.addEventListener("change", () => {
+    if (_pendingCapId === row.id) return;      // guard doble-click
+    _pendingCapId = row.id;
+    check.disabled = true;
+    saveEmailCapability(row.id, check.checked);
+  });
+
+  item.append(info, check);
+  return item;
+}
+
+export function handleEmailCapabilitySaved(capId, enabled) {
+  _pendingCapId = null;
+  const row = document.querySelector(`.settings-row[data-cap-id="${capId}"]`);
+  const check = row && row.querySelector("input");
+  if (check) {
+    check.disabled = false;
+    check.checked = Boolean(enabled);
+  }
+  showSettingsBanner(
+    enabled
+      ? "Activado. Se aplicará la próxima vez que abras la app, y seguirá pidiendo confirmación."
+      : "Desactivado. Se aplicará la próxima vez que abras la app.",
+    false,
+  );
+}
+
+export function handleEmailCapabilityRejected(capId) {
+  _pendingCapId = null;
+  const row = document.querySelector(`.settings-row[data-cap-id="${capId}"]`);
+  const check = row && row.querySelector("input");
+  if (check) check.disabled = false;
+  requestEmailCapabilities();   // re-sincroniza con la verdad del backend
+  showSettingsBanner("No se pudo aplicar ese cambio.", true);
 }

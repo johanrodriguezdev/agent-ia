@@ -90,7 +90,10 @@ class WebBrowsingSkill(BaseSkill):
             final_prompt = f"Instrucción solicitada: {instruction}\n\nContenido extraído de ({url}):\n\n{text_content}"
             messages = [{"role": "user", "content": final_prompt}]
             
-            ai_response = generate_response(messages, system_prompt)
+            # `tarea="ligera"`: resumir una página ya descargada es justo lo que un modelo
+            # pequeño hace bien — el contenido va en el prompt, no hace falta que el modelo
+            # lo sepa de antes.
+            ai_response = generate_response(messages, system_prompt, tarea="ligera")
             
             return f"*Crawler Web Activado* 🌐\n\n{ai_response}"
             

@@ -65,7 +65,24 @@ register_confirmation_adapter(ChannelType.DESKTOP, _desktop_confirm)
 register_dispatcher_tool()
 register_skill_tools(skill_manager)
 
-proactive_engine.set_notify_callback(lambda msg: logger.info(f"[Proactivo] {msg}"))
+# Servidores MCP declarados en config.json (`mcp_servers`). Va DESPUÉS de los tools
+# locales a propósito: así, si un servidor remoto intentara registrar un nombre que ya
+# existe, el local ya está puesto. En la práctica no puede pasar —`register_tool()` exige
+# el prefijo `mcp__` para todo lo remoto— pero el orden lo hace cierto por construcción y
+# no solo por la validación.
+#
+# Envuelto y no fatal: un servidor caído, lento o mal configurado no puede impedir que
+# O.R.I.O.N. arranque.
+try:
+    from core.mcp_manager import conectar_todos as _conectar_mcp
+
+    _resumen_mcp = _conectar_mcp()
+    for _servidor, _detalle in _resumen_mcp.items():
+        print(f"  [+] MCP '{_servidor}' — {_detalle}")
+except Exception as e:
+    logger.error(f"No se pudieron conectar los servidores MCP: {e}")
+
+proactive_engine.set_notify_callback(lambda msg: msg and logger.info(f"[Proactivo] {msg}"))
 
 # ── Registrar triggers proactivos ──────────────────────────────
 class _ProactiveAssistant:
@@ -89,7 +106,64 @@ class _ProactiveAssistant:
             user_id=(context or {}).get("user_id", "default")
         )
 
+class _EmailWatcher:
+    """Revisa el correo en segundo plano y devuelve el resumen para que se avise.
+
+    NO pasa por el orquestador, a diferencia de `_ProactiveAssistant`, y es deliberado: el
+    contenido de un correo no tiene por qué acercarse al camino que resuelve comandos del
+    usuario. Acá entra un disparo de reloj y sale texto ya resumido por
+    `core/email_reader.py`, que corrió como entrada no confiable.
+    """
+
+    def __init__(self):
+        self.name = "EmailWatcher"
+        self.tools = []
+
+    def can_handle(self, task: str) -> float:
+        return 0.0   # solo se invoca por horario, nunca por selección de agente
+
+    def execute(self, task: str, context: dict = None) -> str:
+        from core import email_reader
+
+        try:
+            resumen = email_reader.revisar()
+        except Exception as e:
+            logger.error(f"[Correo] fallo en la revisión proactiva: {e}")
+            return ""
+        return f"Correo nuevo:\n{resumen}" if resumen else ""
+
+
 _proactive_assistant = _ProactiveAssistant()
+
+# Solo se registra si el correo está configurado: sin cuenta, revisar cada hora sería
+# trabajo inútil y una línea de log confusa cada 60 minutos.
+try:
+    from core import email_reader as _email_reader
+
+    if _email_reader.esta_configurado():
+        # Configurable en config.json: "email": {"check_schedule": "daily:08:00"}. Los
+        # formatos son los de `core/proactive_engine.py::_should_fire()`.
+        _horario = str(_email_reader.cargar_config().get("check_schedule", "hourly")).strip()
+        proactive_engine.register_trigger(_EmailWatcher(), _horario, "revisar correo")
+        _cuentas = ", ".join(_email_reader.cargar_cuentas())
+        print(f"  [+] Vigilancia de correo — {_horario} ({_cuentas})")
+except Exception as e:
+    logger.error(f"No se pudo registrar la vigilancia de correo: {e}")
+
+try:
+    from core.flows import programar_todos, reanudar_pendientes
+
+    for _descripcion in programar_todos():
+        print(f"  [+] Flujo programado — {_descripcion}")
+
+    _pendientes = reanudar_pendientes()
+    if _pendientes:
+        print(f"  [!] {len(_pendientes)} flujo(s) quedaron a medias:")
+        for _aviso in _pendientes:
+            print(f"      {_aviso}")
+except Exception as e:
+    logger.error(f"No se pudieron preparar los flujos: {e}")
+
 proactive_engine.register_trigger(_proactive_assistant, "startup", f"¿Necesita algo{vocative()}?")
 proactive_engine.register_trigger(_proactive_assistant, "hourly", f"¿Todo en orden{vocative()}?")
 proactive_engine.register_trigger(_proactive_assistant, "daily:08:00", f"Buenos días{vocative()}. ¿Qué necesita para hoy?")
@@ -119,6 +193,12 @@ def main(boot_mode=None, gui_active=False):
         if choice == 'q':
             proactive_engine.stop()
             task_scheduler.stop()   # simetría con proactive_engine — TaskScheduler.stop() ya existe
+            try:
+                from core.mcp_manager import cerrar_todos as _cerrar_mcp
+
+                _cerrar_mcp()   # los servidores stdio son subprocesos: hay que terminarlos
+            except Exception as e:
+                logger.warning(f"No se pudieron cerrar los servidores MCP: {e}")
             ui.display_output(f"Apagando todos los sistemas{vocative()}. ¡Que tenga un excelente día!", read_aloud=True)
             break
             

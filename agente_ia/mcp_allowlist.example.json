@@ -1,0 +1,10 @@
+{
+  "_comentario": "Plantilla de mcp_allowlist.json. Copiala SIN el sufijo .example para activarla. Este archivo decide QUE herramientas remotas acepta O.R.I.O.N.; config.json (mcp_servers) decide a que se conecta. Sin este archivo no se habilita NINGUNA herramienta remota: es fail-closed a proposito.",
+
+  "notion": ["search", "create_page"],
+
+  "calendar": {
+    "tools": ["list_events", "read_*"],
+    "canales": ["desktop", "telegram"]
+  }
+}

@@ -15,6 +15,8 @@ import {
   onConfirmationRequested, onFileAttached, onErrorOccurred, onWindowMaximizedChanged,
   onTasksLoaded, onProjectsLoaded, onProjectConversationsLoaded, onProjectRemoved,
   onSecurityOverridesLoaded, onSecurityOverrideSaved, onSecurityOverrideSaveRejected,
+  onEmailCapabilitiesLoaded, onEmailCapabilitySaved, onEmailCapabilitySaveRejected,
+  onFlowsLoaded,
   onProfileLoaded, onProfileSaved,
 } from "./bridge_client.js";
 import {
@@ -30,12 +32,14 @@ import { initTheme, applyTheme } from "./theme.js";
 import { showConfirmModal } from "./confirm_modal.js";
 import { initWindowChrome, setMaximizedState } from "./window_chrome.js";
 import { openTasksPanel, renderTasks } from "./tasks_panel.js";
+import { openFlowsPanel, renderFlows } from "./flows_panel.js";
 import {
   openProjectsPanel, renderProjects, renderProjectConversations, handleProjectRemoved,
 } from "./projects_panel.js";
 import {
   openSettingsPanel, renderSecurityOverrides, handleSecurityOverrideSaved,
   handleSecurityOverrideRejected, renderProfile, handleProfileSaved,
+  renderEmailCapabilities, handleEmailCapabilitySaved, handleEmailCapabilityRejected,
 } from "./settings_panel.js";
 
 const GREETINGS_BY_HOUR = [
@@ -114,6 +118,8 @@ async function bootstrap() {
 
   // REQ-016: botones "Tareas"/"Proyectos" del sidebar + señales de datos de sus modales.
   document.getElementById("tasks-btn").addEventListener("click", openTasksPanel);
+  const flowsBtn = document.getElementById("flows-btn");
+  if (flowsBtn) flowsBtn.addEventListener("click", openFlowsPanel);
   document.getElementById("projects-btn").addEventListener("click", openProjectsPanel);
   onTasksLoaded((json) => renderTasks(JSON.parse(json)));
   onProjectsLoaded((json) => renderProjects(JSON.parse(json)));
@@ -134,6 +140,10 @@ async function bootstrap() {
   onSecurityOverridesLoaded((json) => renderSecurityOverrides(JSON.parse(json)));
   onSecurityOverrideSaved((rowId, level) => handleSecurityOverrideSaved(rowId, level));
   onSecurityOverrideSaveRejected((rowId) => handleSecurityOverrideRejected(rowId));
+  onEmailCapabilitiesLoaded((json) => renderEmailCapabilities(JSON.parse(json)));
+  onEmailCapabilitySaved((capId, enabled) => handleEmailCapabilitySaved(capId, enabled));
+  onEmailCapabilitySaveRejected((capId) => handleEmailCapabilityRejected(capId));
+  onFlowsLoaded((json) => renderFlows(JSON.parse(json)));
 
   requestInitialState();
 
