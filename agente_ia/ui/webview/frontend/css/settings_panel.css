@@ -131,6 +131,29 @@
   opacity: 0.6;
 }
 
+/* Interruptor de capacidad (correo). Se usa un checkbox y no un <select> a proposito:
+   estas filas son un si/no —la funcion existe o no existe—, no una escala de niveles
+   como las de arriba. El tamano minimo de click sigue la misma guia de accesibilidad
+   que el resto de los controles del panel. */
+.settings-row-check {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: 6px;
+  accent-color: var(--text-accent);
+  cursor: pointer;
+}
+
+.settings-row-check:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.settings-row-check:focus-visible {
+  outline: 2px solid var(--text-accent);
+  outline-offset: 2px;
+}
+
 /* -------------------------------------------------------------- sección "Perfil" */
 
 /* Los campos de texto son más anchos que los <select> de Seguridad: el nombre completo

@@ -60,6 +60,13 @@ export function saveProfile(agentName, pronunciation, displayName, userTitle) {
 // ------------------------------------------------------------ JS → Python (REQ-019)
 export function requestSecurityOverrides() { _bridge.request_security_overrides(); }
 export function saveSecurityOverride(rowId, level) { _bridge.save_security_override(rowId, level); }
+export function requestFlows() { _bridge.request_flows(); }
+export function runFlow(flowId) { _bridge.run_flow(flowId); }
+export function cancelFlow(flowId) { _bridge.cancel_flow(flowId); }
+export function requestDeleteFlow(flowId) { _bridge.request_delete_flow(flowId); }
+export function removeFlowStep(flowId, indice) { _bridge.remove_flow_step(flowId, indice); }
+export function requestEmailCapabilities() { _bridge.request_email_capabilities(); }
+export function saveEmailCapability(capId, enabled) { _bridge.save_email_capability(capId, enabled); }
 
 // ------------------------------------------------------------ Python → JS (§4.2)
 export function onConversationListUpdated(cb) { _bridge.conversation_list_updated.connect(cb); }
@@ -93,3 +100,7 @@ export function onProfileSaved(cb) { _bridge.profile_saved.connect(cb); }
 export function onSecurityOverridesLoaded(cb) { _bridge.security_overrides_loaded.connect(cb); }
 export function onSecurityOverrideSaved(cb) { _bridge.security_override_saved.connect(cb); }
 export function onSecurityOverrideSaveRejected(cb) { _bridge.security_override_save_rejected.connect(cb); }
+export function onFlowsLoaded(cb) { _bridge.flows_loaded.connect(cb); }
+export function onEmailCapabilitiesLoaded(cb) { _bridge.email_capabilities_loaded.connect(cb); }
+export function onEmailCapabilitySaved(cb) { _bridge.email_capability_saved.connect(cb); }
+export function onEmailCapabilitySaveRejected(cb) { _bridge.email_capability_save_rejected.connect(cb); }

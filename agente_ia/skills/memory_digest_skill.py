@@ -206,9 +206,12 @@ class MemoryDigestSkill(BaseSkill):
             lote = registros[inicio:inicio + TAMANO_LOTE]
             texto = "\n".join(f"- {r}" for r in lote)
             try:
+                # `tarea="ligera"`: extraer hechos de un lote es el caso de uso más caro y
+                # más mecánico que tiene el agente — corre sobre TODOS los registros.
                 respuesta = generate_response(
                     [{"role": "user", "content": _PROMPT_LOTE.format(lote=texto)}],
                     "Eres un extractor de hechos. Respondes solo con la lista pedida.",
+                    tarea="ligera",
                 )
             except Exception as e:
                 logger.warning(f"Lote {inicio // TAMANO_LOTE + 1} falló al destilar: {e}")
@@ -246,6 +249,7 @@ class MemoryDigestSkill(BaseSkill):
             [{"role": "user", "content": _PROMPT_CONSOLIDACION.format(
                 hechos="\n".join(hechos))}],
             "Eres un consolidador de memoria. Respondes solo con el documento pedido.",
+            tarea="ligera",
         )
         return respuesta if isinstance(respuesta, str) else ""
 

@@ -29,14 +29,41 @@ class ProactiveEngine:
         self._thread: threading.Thread = None
         self._global_active = True
         self._notify_callback: Callable = None
+        # Los triggers dejaron de registrarse solo al arrancar: un flujo programado se
+        # puede crear en caliente mientras el bucle está recorriendo la lista. Modificar
+        # una lista mientras otro hilo la itera es corrupción silenciosa, así que toda
+        # lectura y escritura de `_triggers` pasa por acá.
+        self._lock = threading.RLock()
 
     def set_notify_callback(self, callback: Callable):
         self._notify_callback = callback
 
-    def register_trigger(self, agent: BaseAgent, schedule: str, action: str, user_id: str = "default"):
+    def register_trigger(self, agent: BaseAgent, schedule: str, action: str,
+                         user_id: str = "default") -> ProactiveTrigger:
         trigger = ProactiveTrigger(agent, schedule, action, user_id)
-        self._triggers.append(trigger)
+        with self._lock:
+            self._triggers.append(trigger)
         logger.info(f"Trigger proactivo registrado: {agent.name} @ {schedule}")
+        return trigger
+
+    def unregister_trigger(self, agent_name: str) -> int:
+        """Quita los triggers de `agent_name`. Return cuántos se quitaron.
+
+        Hace falta para que un flujo cancelado o borrado deje de dispararse sin esperar a
+        que se reinicie la app.
+        """
+        with self._lock:
+            antes = len(self._triggers)
+            self._triggers = [t for t in self._triggers if t.agent.name != agent_name]
+            quitados = antes - len(self._triggers)
+        if quitados:
+            logger.info(f"Triggers de '{agent_name}' dados de baja: {quitados}")
+        return quitados
+
+    def triggers_activos(self) -> List[ProactiveTrigger]:
+        """Copia de la lista, para iterar sin bloquear ni exponer el estado interno."""
+        with self._lock:
+            return list(self._triggers)
 
     def start(self):
         if self._running:
@@ -74,7 +101,8 @@ class ProactiveEngine:
     def _check_triggers(self):
         now = datetime.now()
 
-        for trigger in self._triggers:
+        # Se itera una copia: un flujo programado puede registrarse mientras esto corre.
+        for trigger in self.triggers_activos():
             if not trigger.active:
                 continue
 
@@ -116,7 +144,12 @@ class ProactiveEngine:
 
         if sched.startswith("daily:"):
             try:
-                hour, minute = sched.split(":")[1].split(":")
+                # `sched.split(":")` sobre "daily:08:00" da ['daily','08','00'], así que
+                # `[1]` ya es la hora sola y volver a partirla por ":" devolvía una lista
+                # de un elemento: el desempaquetado a dos variables lanzaba ValueError, el
+                # `except` de abajo se lo tragaba, y este `return False` hacía que NINGÚN
+                # trigger diario disparara nunca. Se toman las dos partes de una vez.
+                _, hour, minute = sched.split(":", 2)
                 target = now.replace(hour=int(hour), minute=int(minute), second=0, microsecond=0)
 
                 if trigger.last_fired:

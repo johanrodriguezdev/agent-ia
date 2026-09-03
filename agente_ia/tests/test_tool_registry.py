@@ -8,6 +8,7 @@ mockeado cuando aplica.
 """
 
 import dataclasses
+import json
 
 import pytest
 
@@ -56,18 +57,33 @@ def test_toolspec_no_tiene_campo_de_usuario():
     assert not (field_names & prohibited), f"campos de usuario filtrados: {field_names & prohibited}"
 
 
-def test_tool_origen_remoto_mismo_contrato():
-    """CA-16: un `ToolSpec` con `origin='mcp_remote'` (sin cliente MCP real, fixture
-    estático) pasa por `execute_tool()` sin ninguna rama de código distinta a un tool
-    local."""
+def test_tool_origen_remoto_mismo_contrato(monkeypatch, tmp_path):
+    """CA-16: un `ToolSpec` con `origin='mcp_remote'` pasa por `execute_tool()` sin ninguna
+    rama de código distinta a un tool local.
+
+    Actualizado al agregar la política de tools remotos (`core/remote_tools_policy.py`):
+    ahora un tool remoto necesita nombre calificado y estar en la allow-list para
+    REGISTRARSE, y se registra en amarillo aunque se declare verde. Nada de eso cambia lo
+    que este test protege — que una vez registrado, la EJECUCIÓN es idéntica a la de un
+    tool local—, así que se le da al tool lo que la política pide y se verifica lo mismo
+    de siempre. Se mockea `input()` porque amarillo pide confirmación en DESKTOP.
+    """
+    from core import remote_tools_policy as politica
+
+    allowlist = tmp_path / "mcp_allowlist.json"
+    allowlist.write_text(json.dumps({"pruebas": ["remote_tool"]}), encoding="utf-8")
+    monkeypatch.setattr(politica, "MCP_ALLOWLIST_FILE", str(allowlist))
+    monkeypatch.setattr("builtins.input", lambda _: "sí")
+
     calls = []
 
     def _remote_invoke(params: dict) -> str:
         calls.append(params)
         return "resultado remoto simulado"
 
-    register_tool(ToolSpec(
-        name="_test_remote_tool",
+    nombre = politica.nombre_calificado("pruebas", "remote_tool")
+    assert register_tool(ToolSpec(
+        name=nombre,
         description="Tool remoto simulado (fixture SIGAIND)",
         parameters_schema={"type": "object", "properties": {"q": {"type": "string"}}},
         risk_level=RiskLevel.GREEN,
@@ -75,7 +91,7 @@ def test_tool_origen_remoto_mismo_contrato():
         origin="mcp_remote",
     ))
 
-    result = execute_tool("_test_remote_tool", {"q": "hola"}, ChannelType.DESKTOP, "default")
+    result = execute_tool(nombre, {"q": "hola"}, ChannelType.DESKTOP, "default")
     assert result == "resultado remoto simulado"
     assert calls == [{"q": "hola"}]
 

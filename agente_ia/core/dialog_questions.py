@@ -73,7 +73,10 @@ def ask_question(action: str, slot: str, slots: Dict[str, str]) -> str:
     try:
         from ai.llm_provider import generate_response
 
-        raw = generate_response([{"role": "user", "content": prompt}], _SYSTEM_PROMPT)
+        # `tarea="ligera"`: una repregunta corta y formulaica, con respaldo fijo si falla.
+        raw = generate_response(
+            [{"role": "user", "content": prompt}], _SYSTEM_PROMPT, tarea="ligera",
+        )
     except Exception as e:
         logger.warning(f"[Diálogo] el LLM no pudo redactar la repregunta ({e}); uso el respaldo")
         return respaldo

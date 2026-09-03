@@ -172,6 +172,10 @@ class Bridge(QObject):
     security_overrides_loaded = pyqtSignal(str)       # json: [{row_id, label, description, effective_level, base_level, options}]
     security_override_saved = pyqtSignal(str, str)    # row_id, nuevo_nivel — CA-10
     security_override_save_rejected = pyqtSignal(str)  # row_id — CA-21
+    email_capabilities_loaded = pyqtSignal(str)       # json: [{id, label, description, enabled}]
+    email_capability_saved = pyqtSignal(str, bool)    # id, nuevo estado
+    email_capability_save_rejected = pyqtSignal(str)  # id
+    flows_loaded = pyqtSignal(str)                    # json: [{id, nombre, estado, pasos, ...}]
 
     def __init__(self, main_window, parent=None):
         super().__init__(parent)
@@ -687,6 +691,150 @@ class Bridge(QObject):
         pantalla de Configuración, nunca desde request_initial_state()."""
         self.security_overrides_loaded.emit(json.dumps(_build_security_overrides_payload()))
 
+    # ------------------------------------------------------------ flujos durables
+    @pyqtSlot()
+    def request_flows(self) -> None:
+        """Carga perezosa: solo al abrir el panel de Flujos."""
+        self.flows_loaded.emit(json.dumps(_build_flows_payload()))
+
+    @pyqtSlot(int)
+    def run_flow(self, flow_id: int) -> None:
+        """Ejecuta un flujo desde la pantalla.
+
+        Va con `ChannelType.DESKTOP` porque hay alguien mirando: un paso amarillo puede
+        pedir confirmación de verdad, a diferencia del disparo por horario. Cada paso sigue
+        pasando por su gate — la pantalla no es una vía para saltárselo.
+        """
+        run_async(
+            self._run_flow_flow,
+            lambda _r: self.request_flows(),
+            lambda message: self._on_flow_error(message),
+            flow_id,
+        )
+
+    def _run_flow_flow(self, flow_id: int) -> None:
+        from core.flows import ejecutar, flow_store, reiniciar
+        from core.security_manager import ChannelType
+
+        flujo = flow_store.obtener(int(flow_id))
+        if flujo is None:
+            raise ValueError("el flujo ya no existe")
+        if flujo.terminado:
+            # "Ejecutar de nuevo": `ejecutar()` no toca un flujo terminado, así que sin
+            # esto el botón no haría nada.
+            reiniciar(flujo)
+        ejecutar(int(flow_id), canal=ChannelType.DESKTOP)
+
+    @pyqtSlot(int)
+    def cancel_flow(self, flow_id: int) -> None:
+        run_async(
+            self._cancel_flow_flow,
+            lambda _r: self.request_flows(),
+            lambda message: self._on_flow_error(message),
+            flow_id,
+        )
+
+    def _cancel_flow_flow(self, flow_id: int) -> None:
+        from core.flows import desprogramar, flow_store
+
+        flow_store.cancelar(int(flow_id))
+        desprogramar(int(flow_id))
+
+    @pyqtSlot(int)
+    def request_delete_flow(self, flow_id: int) -> None:
+        run_async(
+            self._delete_flow_flow,
+            lambda _r: self.request_flows(),
+            lambda message: self._on_flow_error(message),
+            flow_id,
+        )
+
+    def _delete_flow_flow(self, flow_id: int) -> None:
+        from core.flows import desprogramar, flow_store
+
+        desprogramar(int(flow_id))
+        flow_store.borrar(int(flow_id))
+
+    @pyqtSlot(int, int)
+    def remove_flow_step(self, flow_id: int, indice: int) -> None:
+        """Quita un paso de un flujo. Es la razón de ser de esta pantalla.
+
+        La pantalla existe para VER lo que se creó hablando y corregir un paso que salió
+        mal, no para armar flujos arrastrando cajas: el flujo se crea diciéndolo.
+        """
+        run_async(
+            self._remove_flow_step_flow,
+            lambda _r: self.request_flows(),
+            lambda message: self._on_flow_error(message),
+            flow_id, indice,
+        )
+
+    def _remove_flow_step_flow(self, flow_id: int, indice: int) -> None:
+        from core.flows import TERMINALES, flow_store
+
+        flujo = flow_store.obtener(int(flow_id))
+        if flujo is None:
+            raise ValueError("el flujo ya no existe")
+        if flujo.estado not in TERMINALES and flujo.paso_actual > 0:
+            # Sacar un paso de un flujo a medio correr desalinea `paso_actual` con la
+            # lista: lo ya hecho dejaría de coincidir con lo que dice el registro.
+            raise ValueError("no se puede editar un flujo que está a medio ejecutar")
+        if not 0 <= int(indice) < len(flujo.pasos):
+            raise ValueError("ese paso no existe")
+        if len(flujo.pasos) == 1:
+            raise ValueError("un flujo sin pasos no tiene sentido: borralo entero")
+
+        flujo.pasos.pop(int(indice))
+        flujo.paso_actual = 0
+        flujo.estado = "pendiente"
+        flujo.motivo = ""
+        for paso in flujo.pasos:
+            paso.estado, paso.resultado = "pendiente", ""
+        flow_store.guardar(flujo)
+
+    def _on_flow_error(self, message: str) -> None:
+        logger.warning(f"Operación sobre un flujo falló: {message}")
+        self.error_occurred.emit(str(message))
+        self.request_flows()
+
+    # ------------------------------------------------- capacidades de correo
+    @pyqtSlot()
+    def request_email_capabilities(self) -> None:
+        """Carga perezosa, igual que `request_security_overrides()`.
+
+        Estas filas NO son overrides de riesgo: son interruptores de "existe o no existe
+        esta función". Van juntas en la pantalla porque las dos son decisiones de
+        seguridad del usuario, pero no comparten mecanismo — enviar correo sigue siendo
+        ROJO con el interruptor encendido.
+        """
+        from core.email_capabilities import filas_para_ui
+
+        self.email_capabilities_loaded.emit(json.dumps(filas_para_ui()))
+
+    @pyqtSlot(str, bool)
+    def save_email_capability(self, cap_id: str, enabled: bool) -> None:
+        """Enciende o apaga una capacidad de escritura de correo.
+
+        El catálogo de `core/email_capabilities.py` es cerrado: un `cap_id` inventado por
+        JS se rechaza allá, no acá, para que la validación viva junto al dato.
+        """
+        run_async(
+            self._save_email_capability_flow,
+            lambda _result: self.email_capability_saved.emit(cap_id, enabled),
+            lambda message: self._on_email_capability_error(cap_id, message),
+            cap_id, enabled,
+        )
+
+    def _save_email_capability_flow(self, cap_id: str, enabled: bool) -> None:
+        from core.email_capabilities import activar
+
+        if not activar(cap_id, bool(enabled)):
+            raise ValueError(f"no se pudo guardar la capacidad '{cap_id}'")
+
+    def _on_email_capability_error(self, cap_id: str, message: str) -> None:
+        logger.warning(f"save_email_capability('{cap_id}') falló: {message}")
+        self.email_capability_save_rejected.emit(cap_id)
+
     @pyqtSlot(str, str)
     def save_security_override(self, row_id: str, level: str) -> None:
         """CA-21 — defensa en profundidad: revalida rank server-side sin importar qué
@@ -905,6 +1053,42 @@ def _build_profile_payload() -> Dict[str, Any]:
         "display_name": config_manager.get_display_name(),
         "user_title": config_manager.get_user_title(),
     }
+
+
+def _build_flows_payload() -> List[Dict[str, Any]]:
+    """Return los flujos del usuario en la forma que consume `flows_panel.js`.
+
+    Todo lo que sale de acá lo inserta JS con `textContent` (§10.1): el nombre de un flujo
+    y el resultado de un paso son texto que puede venir de un comando dictado o de la
+    salida de una acción, así que nunca es HTML de confianza.
+    """
+    from core.flows import TERMINALES, flow_store
+
+    payload: List[Dict[str, Any]] = []
+    for flujo in flow_store.listar():
+        payload.append({
+            "id": flujo.id,
+            "nombre": flujo.nombre,
+            "estado": flujo.estado,
+            "motivo": flujo.motivo,
+            "horario": flujo.horario,
+            "paso_actual": flujo.paso_actual,
+            "terminado": flujo.estado in TERMINALES,
+            # `editable` lo decide Python y no JS: es la misma condición que revalida
+            # `remove_flow_step()`, y así el botón no aparece cuando la operación se va a
+            # rechazar igual.
+            "editable": flujo.estado in TERMINALES or flujo.paso_actual == 0,
+            "pasos": [
+                {
+                    "accion": paso.accion,
+                    "estado": paso.estado,
+                    "resultado": paso.resultado,
+                    "condicion": paso.condicion.describir() if paso.condicion else "",
+                }
+                for paso in flujo.pasos
+            ],
+        })
+    return payload
 
 
 def _build_security_overrides_payload() -> List[Dict[str, Any]]:

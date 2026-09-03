@@ -62,6 +62,10 @@ class ChannelType(Enum):
     DISCORD = "discord"
     VOICE = "voice"
     API = "api"
+    # Canal de entrada NO CONFIABLE: correo, webhooks, cualquier texto que un tercero
+    # pueda originar sin ser un usuario autorizado. Existe para que ese contenido tenga
+    # dónde entrar sin llegar nunca al agente que controla el PC. Ver CHANNEL_ALLOWED_LEVELS.
+    EMAIL = "email"
     UNKNOWN = "unknown"
 
 
@@ -71,6 +75,25 @@ CHANNEL_ALLOWED_LEVELS: Dict[ChannelType, List[RiskLevel]] = {
     ChannelType.DISCORD: [RiskLevel.GREEN],
     ChannelType.VOICE: [RiskLevel.GREEN],
     ChannelType.API: [RiskLevel.GREEN],
+    # EMAIL es el único canal con lista VACÍA, y es deliberado: ni siquiera verde.
+    #
+    # El resto de los canales los origina un usuario autorizado; el correo (y a futuro los
+    # webhooks) los origina cualquiera del planeta. Un texto atacante que llegue acá no
+    # puede disparar NINGUNA acción, ni las verdes: `open_app` y `play_media` son verdes y
+    # bastarían para abrir una URL elegida por el atacante, y `recall_memory` para sacar
+    # información personal por un resumen. El canal sirve para LEER y RESUMIR — producir
+    # texto, no ejecutar.
+    #
+    # Es la traducción del `tools: {profile: "minimal"}` con que OpenClaw aísla su lector
+    # de correo (openclaw-main/docs/automation/imap.md). Si algún día una acción concreta
+    # tiene que habilitarse acá, va de a una por CHANNEL_ACTION_EXCEPTIONS —
+    # `is_action_allowed()` evalúa esa tabla ANTES que esta, así que la lista vacía no
+    # impide la excepción quirúrgica; obliga a justificarla caso por caso.
+    #
+    # Adicionalmente NO se registra adaptador de confirmación para EMAIL
+    # (`core/confirmation.py`): sin adaptador, todo YELLOW se deniega por fail-closed. La
+    # restricción no está escrita en ningún lado — es que no hay a quién preguntarle.
+    ChannelType.EMAIL: [],
     ChannelType.UNKNOWN: [RiskLevel.GREEN],
 }
 
@@ -106,6 +129,7 @@ _CHANNEL_STR_MAP: Dict[str, ChannelType] = {
     "discord": ChannelType.DISCORD,
     "voice": ChannelType.VOICE,
     "api": ChannelType.API,
+    "email": ChannelType.EMAIL,
     "unknown": ChannelType.UNKNOWN,
 }
 
@@ -119,6 +143,10 @@ AUDIT_DB = os.path.join(os.path.dirname(__file__), "..", "audit.db")
 _DETAILS_ALLOWED_KEYS = (
     "app_name", "app", "task", "raw_text", "skill_name", "name",
     "path", "filename", "folder", "query", "url", "direction",
+    # Enviar correo es ROJO: el prompt del PIN tiene que decir A QUIÉN y con qué asunto,
+    # o autorizarlo sería a ciegas. Van también al log de auditoría, que es justo donde
+    # se quiere poder reconstruir después qué se mandó y a dónde.
+    "destinatario", "asunto",
 )
 
 # Un `task`/`raw_text` puede traer código largo: se trunca para que el prompt siga siendo
@@ -383,6 +411,13 @@ class SecurityManager:
             # Estaba habilitada y había cómo preguntar: o se respondió que no, o se agotó
             # el tiempo de espera sin respuesta.
             return f"no se confirmó «{action_name}»."
+        if level == RiskLevel.GREEN and not self.is_action_allowed(action_name, channel):
+            # Solo puede pasar en un canal de entrada no confiable (EMAIL), que no ejecuta
+            # ninguna acción por inofensiva que sea.
+            return (
+                f"«{action_name}» no se ejecuta desde {canal}: ese canal solo lee y resume, "
+                f"no actúa."
+            )
         return f"«{action_name}» no se pudo ejecutar desde {canal}."
 
     def require_confirmation(self, action_name: str, channel, details: str = "", user_id: str = "default") -> bool:
@@ -408,6 +443,21 @@ class SecurityManager:
             self._log_audit(action_name, channel, "bloqueada_no_clasificada", user_id, details)
             return False
         if level == RiskLevel.GREEN:
+            # El verde también consulta la política de canal. Hasta acá no hacía falta:
+            # TODOS los canales tenían GREEN en `CHANNEL_ALLOWED_LEVELS` (y el default de
+            # `get_allowed_levels()` también es GREEN), así que el chequeo habría sido
+            # siempre cierto y se omitió. `ChannelType.EMAIL` es el primer canal con lista
+            # VACÍA —entrada no confiable, no ejecuta nada— y sin este chequeo su
+            # restricción no existiría: las acciones verdes seguirían pasando.
+            #
+            # Para los canales que ya existían el resultado es idéntico (verde sigue
+            # estando en sus listas), así que esto no relaja ni endurece nada previo.
+            if not self.is_action_allowed(action_name, channel):
+                logger.warning(
+                    f"Acción verde '{action_name}' no permitida en canal {channel.value}"
+                )
+                self._log_audit(action_name, channel, "bloqueada_canal", user_id, details)
+                return False
             self._log_audit(action_name, channel, "permitida", user_id, details)
             return True
         if level == RiskLevel.YELLOW:
@@ -488,6 +538,39 @@ def _register_default_actions():
     sm.register_action("open_app", RiskLevel.GREEN)
     sm.register_action("list_files", RiskLevel.GREEN)
     sm.register_action("proactive_trigger", RiskLevel.GREEN)
+    # Revisar el correo propio y pedir un resumen es lectura: verde, como `system_info`.
+    # Que sea verde NO relaja nada del lado del correo — lo que llega por IMAP entra por
+    # `ChannelType.EMAIL`, cuya política sigue vacía. Esto solo habilita que el DUEÑO
+    # pregunte "¿tengo correos?" desde escritorio, Telegram o voz.
+    sm.register_action("CHECK_EMAIL", RiskLevel.GREEN)
+    # Descargar un adjunto SÍ escribe en el disco un archivo que eligió un desconocido:
+    # amarillo, con confirmación en cada uso. El nombre del archivo llega al texto de
+    # confirmación porque `filename` está en `_DETAILS_ALLOWED_KEYS`, así que el "sí" se da
+    # sabiendo qué se guarda. Y no se habilita en ningún canal remoto: se confirma frente
+    # al PC (no hay entrada en CHANNEL_ACTION_EXCEPTIONS para esta acción).
+    sm.register_action("SAVE_EMAIL_ATTACHMENT", RiskLevel.YELLOW)
+    # Marcar como leído modifica la bandeja del usuario: amarillo, confirma cada vez.
+    sm.register_action("MARK_EMAIL_READ", RiskLevel.YELLOW)
+    # Enviar correo en nombre del usuario es 🔴 ROJO por `.claude/rules/security-levels.md`,
+    # y ya está registrado así arriba como `send_email_as_user`. El intent de la skill se
+    # registra con el MISMO nivel a propósito: si algún día alguien intentara bajarlo,
+    # `register_action()` lo bloquea igual que a cualquier otro rojo. Además hace falta
+    # encender la capacidad a mano en la pantalla "Configuración"
+    # (`core/email_capabilities.py`) — el nivel de riesgo y el interruptor son cosas
+    # distintas y las dos tienen que dar permiso.
+    sm.register_action("SEND_EMAIL", RiskLevel.RED)
+
+    # Flujos durables (`core/flows.py`). Ejecutar, listar, retomar y cancelar son VERDES
+    # por el mismo motivo que la acción `dispatcher`: el gate real ocurre paso a paso
+    # dentro del flujo, en `action_registry.execute_action()`. Un flujo no puede hacer
+    # nada que el usuario no pudiera pedir de a un paso.
+    # Crear sí es amarillo: deja escrito algo que va a ejecutarse después, quizá sin nadie
+    # mirando, así que se confirma en el momento de guardarlo.
+    sm.register_action("RUN_FLOW", RiskLevel.GREEN)
+    sm.register_action("LIST_FLOWS", RiskLevel.GREEN)
+    sm.register_action("RESUME_FLOW", RiskLevel.GREEN)
+    sm.register_action("CANCEL_FLOW", RiskLevel.GREEN)
+    sm.register_action("CREATE_FLOW", RiskLevel.YELLOW)
     # 🔴 Rojo — 4 ya implementadas
     sm.register_action("format_disk", RiskLevel.RED)
     sm.register_action("delete_database", RiskLevel.RED)

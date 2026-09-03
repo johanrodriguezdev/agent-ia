@@ -72,6 +72,23 @@ def _clear_dialog_store():
     dialog_store.clear_all()
 
 
+@pytest.fixture(autouse=True)
+def _aislar_cooldowns_de_proveedor(tmp_path):
+    """El estado de cooldown (`ai/provider_health.py`) es un singleton de proceso con
+    respaldo en disco. Sin esto, un test que aparta un proveedor cambiaría el orden de
+    intentos de los demás, y la suite escribiría `provider_cooldowns.json` en la raíz del
+    repositorio en vez de en un temporal.
+    """
+    from ai import provider_health
+
+    original = provider_health.COOLDOWN_FILE
+    provider_health.COOLDOWN_FILE = str(tmp_path / "provider_cooldowns.json")
+    provider_health.limpiar()
+    yield
+    provider_health.limpiar()
+    provider_health.COOLDOWN_FILE = original
+
+
 def pytest_configure(config):
     # REQ-015/§7, §8 — `tests/test_webview_smoke.py` instancia `QWebEngineView` real en
     # modo offscreen; puede ser lento o inestable según el entorno de CI/GPU. Se marca
