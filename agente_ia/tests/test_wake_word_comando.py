@@ -20,6 +20,8 @@ Sin micrófono real ni red (.claude/rules/testing.md).
 """
 
 import threading
+import time
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -226,6 +228,87 @@ class _WorkerFalso:
 
         self.stop_event = threading.Event()
         self.conversation_window = ConversationWindow()
+        # El worker real expone `signals.command_detected` para que el bridge se conecte.
+        self.signals = SimpleNamespace(
+            command_detected=SimpleNamespace(connect=lambda _cb: None),
+        )
+
+
+class _PoolFalso:
+    """Doble de `QThreadPool`: en un test nadie tiene que abrir el microfono de verdad."""
+
+    lanzados = []
+
+    @classmethod
+    def globalInstance(cls):
+        return SimpleNamespace(start=cls.lanzados.append)
+
+
+def test_encender_el_manos_libres_acepta_la_primera_frase_sin_el_nombre(monkeypatch):
+    """Hallazgo en vivo (2026-09-03 21:50): el usuario apreto el microfono, dijo "busca en
+    YouTube de Bon Jovi" y el agente descarto la frase en silencio por no traer wake word.
+    Indistinguible de estar colgado.
+
+    Apretar el microfono YA ES pedir atencion, asi que se abre la misma ventana de ~15s que
+    se arma despues de cada respuesta. Ademas cubre el caso frecuente de que el reconocedor
+    se coma la primera palabra, que es justo donde va el nombre."""
+    import ui.webview.bridge as bridge_module
+    from ui.webview.bridge import Bridge
+
+    worker = _WorkerFalso()
+    _PoolFalso.lanzados = []
+    monkeypatch.setattr(bridge_module, "WakeWordWorker", lambda: worker)
+    monkeypatch.setattr(bridge_module, "QThreadPool", _PoolFalso)
+
+    bridge = _bridge_con_worker(None)
+    bridge.notice_shown = MagicMock()
+
+    Bridge.toggle_wake_word(bridge, True)
+
+    assert bridge._wake_worker is worker
+    assert _PoolFalso.lanzados == [worker], "el worker tiene que quedar lanzado igual"
+    assert worker.conversation_window.is_open() is True
+    # Una frase capturada DESPUES de encenderlo se acepta sin wake word.
+    assert worker.conversation_window.accepts(time.monotonic()) is True
+    # Y se le avisa al usuario: sin aviso, el arreglo es invisible.
+    bridge.notice_shown.emit.assert_called_once()
+
+
+def test_una_frase_anterior_al_encendido_no_se_cuela(monkeypatch):
+    """Segundo candado de la ventana (CA-14): el chunk tiene que haber EMPEZADO despues de
+    abrirse. Lo que se estaba capturando antes de apretar el microfono no cuenta."""
+    import ui.webview.bridge as bridge_module
+    from ui.webview.bridge import Bridge
+
+    # Cinco segundos antes, no "justo antes": en Windows dos lecturas seguidas de
+    # `time.monotonic()` pueden devolver el mismo valor y el test medirla la granularidad
+    # del reloj en vez del comportamiento.
+    antes = time.monotonic() - 5
+    worker = _WorkerFalso()
+    _PoolFalso.lanzados = []
+    monkeypatch.setattr(bridge_module, "WakeWordWorker", lambda: worker)
+    monkeypatch.setattr(bridge_module, "QThreadPool", _PoolFalso)
+
+    bridge = _bridge_con_worker(None)
+    bridge.notice_shown = MagicMock()
+    Bridge.toggle_wake_word(bridge, True)
+
+    assert worker.conversation_window.accepts(antes) is False
+
+
+def test_apagar_el_manos_libres_cierra_la_ventana():
+    """Manos libres OFF no puede dejar una ventana armada: seria aceptar frases sin nombre
+    con el microfono ya apagado."""
+    from ui.webview.bridge import Bridge
+
+    worker = _WorkerFalso()
+    bridge = _bridge_con_worker(worker)
+    worker.conversation_window.open()
+
+    Bridge.toggle_wake_word(bridge, False)
+
+    assert worker.conversation_window.is_open() is False
+    assert worker.stop_event.is_set() is True
 
 
 def test_ca23_solo_habla_con_el_manos_libres_activo():

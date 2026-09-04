@@ -157,4 +157,5 @@ export function requestAssignableItems() { _bridge.request_assignable_items(); }
 export function onProjectItemsLoaded(cb) { _bridge.project_items_loaded.connect(cb); }
 export function onAssignableItemsLoaded(cb) { _bridge.assignable_items_loaded.connect(cb); }
 export function onDragOverChanged(cb) { _bridge.drag_over_changed.connect(cb); }
+export function clearAttachment() { _bridge.clear_attachment(); }
 

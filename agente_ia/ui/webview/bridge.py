@@ -237,6 +237,11 @@ class Bridge(QObject):
         self._turno_id: Optional[int] = None
         self._turno_cancelado_id: Optional[int] = None
 
+        # Archivo adjunto esperando al proximo mensaje. Antes la ruta se emitia hacia JS y
+        # ahi moria: se veia el nombre en un chip y el agente nunca se enteraba de que
+        # habia un archivo. Se guarda de este lado porque es quien arma el turno.
+        self._pending_attachment: Optional[str] = None
+
         # La terminal tiene DOS entradas posibles —el panel y la herramienta del agente— y
         # una sola salida: esta. Se engancha al construir el bridge, no al abrir el panel,
         # para que un comando lanzado por el agente con el panel cerrado igual termine
@@ -290,6 +295,7 @@ class Bridge(QObject):
         if not text:
             return
 
+        text = self._con_adjunto(text)
         self._pending_user_text = text
         self._resolution_in_flight = True
         self._turno_id = nuevo_turno()
@@ -325,6 +331,30 @@ class Bridge(QObject):
         if self._turno_id is not None and self._turno_id == self._turno_cancelado_id:
             return
         self.message_chunk.emit(pedazo)
+
+    def _con_adjunto(self, text: str) -> str:
+        """Suma al mensaje la ruta del archivo adjunto, si hay uno esperando.
+
+        La ruta va COMPLETA y en una linea propia: es lo que necesita cualquiera de los dos
+        caminos que pueden leer el archivo — el intent `FILE_ANALYSIS`
+        (`skills/file_analysis_skill.py`, que resuelve rutas absolutas) y el modelo, que
+        puede pedir la herramienta correspondiente. Antes no llegaba por ninguno: adjuntar
+        era decorativo.
+
+        El adjunto se consume en el turno: si el usuario manda otro mensaje despues, ya no
+        viaja. Adjuntar una vez y que se pegue a los diez mensajes siguientes seria peor
+        que no adjuntar.
+        """
+        ruta, self._pending_attachment = self._pending_attachment, None
+        if not ruta:
+            return text
+        if not os.path.exists(ruta):
+            logger.warning(f"el adjunto ya no existe al enviar: {ruta}")
+            self.notice_shown.emit("error", "El archivo adjunto ya no está donde estaba.")
+            return text
+
+        logger.info(f"mensaje enviado con adjunto: {ruta}")
+        return f"{text}\n\n[Archivo adjunto: {ruta}]"
 
     def _on_progress(self, mensaje: str) -> None:
         """Recibe el aviso desde el hilo que trabaja y lo entrega a la interfaz.
@@ -926,8 +956,26 @@ class Bridge(QObject):
         )
         if not ruta:
             return
-        aceptado, motivo = validate_dropped_file(ruta)
-        self.file_attached.emit(ruta, os.path.basename(ruta), aceptado, motivo)
+        self.attach_file(ruta)
+
+    def attach_file(self, path: str) -> bool:
+        """Deja un archivo listo para el proximo mensaje. Return True si se acepto.
+
+        UNICO punto de adjuntado: lo usan el boton del clip y el drag&drop nativo
+        (`MainWindow._handle_drop`). Antes cada uno emitia la senal por su cuenta y la ruta
+        se perdia en los dos casos — el chip mostraba el nombre y nada mas.
+        """
+        aceptado, motivo = validate_dropped_file(path)
+        self._pending_attachment = path if aceptado else None
+        self.file_attached.emit(path, os.path.basename(path), aceptado, motivo)
+        if aceptado:
+            logger.info(f"adjunto listo para el proximo mensaje: {path}")
+        return aceptado
+
+    @pyqtSlot()
+    def clear_attachment(self) -> None:
+        """El usuario saco el chip: el archivo ya no viaja con el proximo mensaje."""
+        self._pending_attachment = None
 
     # ------------------------------------------------------------ conversaciones
     @pyqtSlot(str, str)
@@ -1318,7 +1366,24 @@ class Bridge(QObject):
                 return
             self._wake_worker = WakeWordWorker()
             self._wake_worker.signals.command_detected.connect(self._on_voice_command)
+            # Encender el micrófono YA ES pedir atención: se abre la misma ventana de ~15s
+            # que se arma después de cada respuesta, así la PRIMERA frase se acepta sin
+            # exigir el nombre del agente.
+            #
+            # Sin esto, el usuario apretaba el micrófono, hablaba, y el agente descartaba
+            # la frase en silencio por no traer wake word — indistinguible de estar
+            # colgado (visto en vivo: 'Busca en YouTube de Bon Jovi', 2026-09-03 21:50).
+            # Y el problema no era solo de expectativa: el reconocedor suele comerse la
+            # primera palabra, que es justo donde va el nombre.
+            #
+            # No se debilita el modo: pasados los 15s vuelve a exigirse la wake word, y la
+            # ventana se cierra al aceptar UNA frase (`consume()`). Sigue sirviendo para
+            # dejarlo encendido sin que cualquier conversación lo despierte.
+            self._open_conversation_window()
             QThreadPool.globalInstance().start(self._wake_worker)
+            self.notice_shown.emit(
+                "info", "Te escucho. Podés hablar sin decir mi nombre por unos segundos.",
+            )
         else:
             self._stop_wake_word_worker()
 

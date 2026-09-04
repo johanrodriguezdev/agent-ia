@@ -354,7 +354,9 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
         path = urls[0].toLocalFile()
-        name = os.path.basename(path) if path else ""
-        accepted, reason = validate_dropped_file(path)
-        self.bridge.file_attached.emit(path, name, accepted, reason)
+        # Mismo punto que el boton del clip: `Bridge.attach_file()` valida, guarda la ruta
+        # para el proximo mensaje y emite la senal. Antes esto emitia la senal por su
+        # cuenta y la ruta se perdia — el chip mostraba el nombre y el agente nunca se
+        # enteraba de que habia un archivo.
+        self.bridge.attach_file(path)
         event.acceptProposedAction()

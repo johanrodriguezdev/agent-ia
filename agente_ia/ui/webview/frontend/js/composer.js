@@ -10,7 +10,7 @@
 
 import {
   sendMessage, runChipAction, toggleWakeWord,
-  openAttachDialog, stopResolution, requestModels, setModel,
+  openAttachDialog, clearAttachment, stopResolution, requestModels, setModel,
 } from "./bridge_client.js";
 import { icon } from "./icons.js";
 
@@ -63,6 +63,9 @@ export function initComposer() {
 
   $("attachment-chip-remove").addEventListener("click", () => {
     $("attachment-chip").hidden = true;
+    // Y del lado de Python tambien: si no, el archivo seguiria viajando con el proximo
+    // mensaje aunque el chip ya no este en pantalla.
+    clearAttachment();
   });
 
   // El clip abre el diálogo nativo de archivos. Antes era solo un cartel que decía

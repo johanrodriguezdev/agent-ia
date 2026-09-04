@@ -22,11 +22,14 @@ y que cerrarla mata el proceso.
 """
 
 import json
+import threading
 import time
 import types
 
 import pytest
 from PyQt6.QtCore import QEventLoop, QRunnable, QTimer
+
+from voice.mic_window import ConversationWindow
 
 pytestmark = pytest.mark.webview_smoke
 
@@ -65,9 +68,13 @@ class _WakeWorkerFalso(QRunnable):
         super().__init__()
         _WakeWorkerFalso.creados += 1
         self.signals = types.SimpleNamespace(command_detected=_SenalFalsa())
-        self.stop_event = types.SimpleNamespace(set=lambda: setattr(self, "parado", True))
-        self.conversation_window = types.SimpleNamespace(cancel=lambda: None)
-        self.parado = False
+        # `threading.Event` de verdad, como el worker real: el bridge no solo lo setea,
+        # tambien consulta `is_set()` para saber si el manos libres sigue encendido.
+        self.stop_event = threading.Event()
+        # Ventana de conversacion REAL: el bridge la abre al encender el manos libres para
+        # que la primera frase no exija el nombre del agente. Un doble sin `open()` haria
+        # fallar el slot con un AttributeError que en produccion no existe.
+        self.conversation_window = ConversationWindow()
 
     def run(self):
         return None
@@ -351,6 +358,8 @@ def test_el_boton_de_manos_libres_enciende_y_apaga_el_worker(ventana, qtbot):
     _click(page, "document.getElementById('wake-toggle-btn')")
     qtbot.waitUntil(lambda: _WakeWorkerFalso.creados == 1, timeout=5000)
     assert window.bridge._wake_worker is not None
+    # Encender el microfono ya es pedir atencion: la primera frase se acepta sin el nombre.
+    assert window.bridge._wake_worker.conversation_window.is_open() is True
 
     window.bridge.wake_state_changed.emit("LISTENING_WAKE")
     _esperar(qtbot, 200)
@@ -358,7 +367,9 @@ def test_el_boton_de_manos_libres_enciende_y_apaga_el_worker(ventana, qtbot):
 
     _click(page, "document.getElementById('wake-toggle-btn')")
     _esperar(qtbot, 400)
-    assert window.bridge._wake_worker.parado is True
+    assert window.bridge._wake_worker.stop_event.is_set() is True
+    # Y al apagarlo no puede quedar una ventana armada con el microfono ya cerrado.
+    assert window.bridge._wake_worker.conversation_window.is_open() is False
     _sin_errores(page)
 
 

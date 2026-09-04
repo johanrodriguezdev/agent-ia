@@ -39,6 +39,18 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 # ANTES de cualquier import de PyQt6, igual que `QT_QPA_PLATFORM` arriba.
 os.environ.setdefault("PYTEST_QT_API", "pyqt6")
 
+# La suite importa `main.py` (tests/test_main.py), y `main.py` llama a `setup_logging()` al
+# importarse: desde ese momento TODO lo que registra la suite va al log de la aplicación.
+# Investigando por qué el micrófono ignoró un comando real (2026-09-03) aparecían mezclados
+# errores de terminal y de wake word que eran de los propios tests — ruido indistinguible
+# del problema que se estaba buscando. Se manda a un archivo aparte, en la misma carpeta
+# para poder mirarlo cuando un test falle.
+os.environ.setdefault(
+    "ORION_LOG_FILE",
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                 "logs", "orion-tests.log"),
+)
+
 # REQ-015 — `QtWebEngineWidgets`/`QtWebEngineCore` exigen ser importados ANTES de que
 # exista cualquier instancia de `QApplication` en todo el proceso (si no, PyQt6 lanza
 # `ImportError: QtWebEngineWidgets must be imported... before a QCoreApplication instance
