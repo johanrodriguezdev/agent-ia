@@ -23,6 +23,7 @@ from dataclasses import dataclass, replace
 from typing import Callable, Optional
 
 from core.address import vocative
+from core.cancelacion import abortar_si_cancelado
 from core.dialog_state import PendingDialog, dialog_store
 from core.progress import report as progress_report
 from core.security_manager import ActionDenied, ChannelType, security_manager
@@ -694,6 +695,10 @@ def resolve(
     progress_report("Entendiendo lo que me pides")
 
     for name, fn in RESOLVERS:
+        # Punto de corte del boton de detener: entre un resolver y el siguiente. Cada
+        # resolver es indivisible (puede haber ejecutado una accion ya confirmada), asi
+        # que cortar aca es lo mas fino que se puede sin dejar nada a medio hacer.
+        abortar_si_cancelado(f"resolve, antes de '{name}'")
         try:
             if name == "claude":
                 result = fn(text, resolved_channel, user_id, claude_fn=claude_fn)

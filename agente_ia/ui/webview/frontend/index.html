@@ -18,6 +18,7 @@
 <link rel="stylesheet" href="css/settings_panel.css">
 <link rel="stylesheet" href="vendor/xterm.css">
 <link rel="stylesheet" href="css/terminal.css">
+<link rel="stylesheet" href="css/toasts.css">
 <link rel="stylesheet" href="css/animations.css">
 <link rel="stylesheet" href="css/pygments-dark.css" id="pygments-dark-link">
 <link rel="stylesheet" href="css/pygments-light.css" id="pygments-light-link">
@@ -88,6 +89,33 @@
   </symbol>
   <symbol id="ic-play" viewBox="0 0 24 24">
     <path d="M8 5.5l10 6.5-10 6.5z"/>
+  </symbol>
+  <symbol id="ic-alerta" viewBox="0 0 24 24">
+    <path d="M12 4.5l8.5 14.5H3.5z"/><path d="M12 10v4"/><path d="M12 16.6v.1"/>
+  </symbol>
+  <symbol id="ic-check" viewBox="0 0 24 24">
+    <path d="M5 12.5l4.5 4.5L19 7.5"/>
+  </symbol>
+  <symbol id="ic-info" viewBox="0 0 24 24">
+    <circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5"/><path d="M12 7.6v.1"/>
+  </symbol>
+  <symbol id="ic-copiar" viewBox="0 0 24 24">
+    <rect x="9" y="9" width="11" height="11" rx="2"/>
+    <path d="M15 5.5H6a1.5 1.5 0 0 0-1.5 1.5v9"/>
+  </symbol>
+  <symbol id="ic-stop" viewBox="0 0 24 24">
+    <rect x="7" y="7" width="10" height="10" rx="2"/>
+  </symbol>
+  <symbol id="ic-lapiz" viewBox="0 0 24 24">
+    <path d="M4.5 19.5h4L19 9a2.1 2.1 0 0 0-3-3L5.5 16.5z"/><path d="M14.5 7.5l2.5 2.5"/>
+  </symbol>
+  <symbol id="ic-chevron" viewBox="0 0 24 24">
+    <path d="M7 10l5 5 5-5"/>
+  </symbol>
+  <symbol id="ic-cpu" viewBox="0 0 24 24">
+    <rect x="7" y="7" width="10" height="10" rx="2"/>
+    <path d="M10 4.5v2.5"/><path d="M14 4.5v2.5"/><path d="M10 17v2.5"/><path d="M14 17v2.5"/>
+    <path d="M4.5 10H7"/><path d="M4.5 14H7"/><path d="M17 10h2.5"/><path d="M17 14h2.5"/>
   </symbol>
   <symbol id="ic-trash" viewBox="0 0 24 24">
     <path d="M4.5 7h15"/><path d="M9.5 7V5.5h5V7"/>
@@ -205,11 +233,21 @@
                       aria-label="Adjuntar archivo" title="Adjuntar archivo">
                 <svg class="ic" aria-hidden="true"><use href="#ic-paperclip"/></svg>
               </button>
+              <button type="button" id="model-btn" class="model-btn"
+                      aria-label="Elegir el modelo" title="Con qué modelo responde">
+                <svg class="ic ic-sm" aria-hidden="true"><use href="#ic-cpu"/></svg>
+                <span id="model-btn-label">…</span>
+                <svg class="ic ic-sm" aria-hidden="true"><use href="#ic-chevron"/></svg>
+              </button>
               <div id="composer-actions-right">
                 <button type="button" id="wake-toggle-btn" class="icon-btn"
                         aria-label="Modo manos libres" title="Modo manos libres"
                         data-wake-state="INACTIVE">
                   <svg class="ic" aria-hidden="true"><use href="#ic-mic"/></svg>
+                </button>
+                <button type="button" id="stop-btn" class="icon-btn composer-stop-btn"
+                        aria-label="Detener la respuesta" title="Detener la respuesta" hidden>
+                  <svg class="ic" aria-hidden="true"><use href="#ic-stop"/></svg>
                 </button>
                 <button type="button" id="send-btn" class="icon-btn composer-send-btn"
                         aria-label="Enviar mensaje" title="Enviar mensaje">
@@ -234,12 +272,22 @@
 
 </div>
 
+<!-- Capa que aparece al arrastrar un archivo sobre la ventana: sin esto, el drag&drop
+     funcionaba pero no se veía por ninguna parte que se pudiera soltar. -->
+<div id="drop-overlay" hidden>
+  <div id="drop-overlay-card">
+    <svg class="ic ic-lg" aria-hidden="true"><use href="#ic-paperclip"/></svg>
+    <span>Soltá el archivo para adjuntarlo</span>
+  </div>
+</div>
+
 <div id="confirm-modal-root"></div>
 <div id="panel-modal-root"></div>
 
 <script src="vendor/qwebchannel.js"></script>
 <script src="vendor/xterm.js"></script>
 <script src="vendor/xterm-addon-fit.js"></script>
+<script src="vendor/xterm-addon-search.js"></script>
 <script type="module" src="js/app.js"></script>
 </body>
 </html>

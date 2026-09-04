@@ -8,7 +8,11 @@
 // vía `textContent`. Este archivo NUNCA usa `innerHTML`/`insertAdjacentHTML` — verificado
 // además por un grep estructural en `tests/test_webview_safe_dom_insertion.py`.
 
-import { sendMessage, runChipAction, toggleWakeWord } from "./bridge_client.js";
+import {
+  sendMessage, runChipAction, toggleWakeWord,
+  openAttachDialog, stopResolution, requestModels, setModel,
+} from "./bridge_client.js";
+import { icon } from "./icons.js";
 
 const MAX_VISIBLE_ROWS = 5;
 const LINE_HEIGHT_PX = 20;
@@ -61,10 +65,19 @@ export function initComposer() {
     $("attachment-chip").hidden = true;
   });
 
-  // CA-22: el flujo real de adjuntar es el drag&drop nativo sobre toda la ventana
-  // (§5.3) — no hay slot de bridge para abrir un diálogo de selección en el contrato
-  // aprobado (§4.1), así que el botón es un affordance visual, no dispara nada.
-  $("attach-btn").title = "Arrastrá un archivo a la ventana para adjuntarlo";
+  // El clip abre el diálogo nativo de archivos. Antes era solo un cartel que decía
+  // "arrastrá el archivo": un clip que no abre nada es un botón roto a los ojos de
+  // cualquiera. El drag&drop sobre la ventana sigue funcionando igual.
+  $("attach-btn").title = "Adjuntar un archivo (o arrastralo a la ventana)";
+  $("attach-btn").addEventListener("click", openAttachDialog);
+
+  // Detener: aparece en lugar de enviar mientras el agente responde.
+  $("stop-btn").addEventListener("click", () => stopResolution());
+
+  $("model-btn").addEventListener("click", (evt) => {
+    evt.stopPropagation();
+    alternarMenuDeModelos();
+  });
 }
 
 export function setComposerEnabled(enabled) {
@@ -73,7 +86,10 @@ export function setComposerEnabled(enabled) {
   // invocable desde JS sin pasar por el estado `disabled` del DOM.
   _sendEnabled = enabled;
   $("composer-input").disabled = !enabled;
-  $("send-btn").disabled = !enabled;
+  // Mientras el agente responde, el botón de enviar se convierte en uno de detener: es el
+  // mismo lugar de la pantalla, y es el único momento en que hace falta cada uno.
+  $("send-btn").hidden = !enabled;
+  $("stop-btn").hidden = enabled;
 }
 
 export function setWakeState(state) {
@@ -128,5 +144,77 @@ export function renderChips(chips) {
     });
 
     row.appendChild(btn);
+  }
+}
+
+// --------------------------------------------------------------------------- modelo
+
+let _modelos = null;
+
+function cerrarMenuDeModelos() {
+  const menu = document.getElementById("model-menu");
+  if (menu !== null) menu.remove();
+  document.removeEventListener("click", cerrarMenuDeModelos);
+}
+
+function alternarMenuDeModelos() {
+  if (document.getElementById("model-menu") !== null) {
+    cerrarMenuDeModelos();
+    return;
+  }
+  if (_modelos === null) {
+    requestModels();      // llega por `models_loaded` y se vuelve a abrir solo
+    return;
+  }
+
+  const menu = document.createElement("div");
+  menu.id = "model-menu";
+  menu.setAttribute("role", "menu");
+
+  for (const proveedor of _modelos.proveedores) {
+    const grupo = document.createElement("div");
+    grupo.className = "model-group";
+    const titulo = document.createElement("div");
+    titulo.className = "model-group-title";
+    titulo.textContent = proveedor.label;
+    grupo.appendChild(titulo);
+
+    for (const modelo of proveedor.modelos) {
+      const activo = proveedor.activo && modelo === _modelos.activo.modelo;
+      const opcion = document.createElement("button");
+      opcion.type = "button";
+      opcion.className = "model-option" + (activo ? " active" : "");
+      opcion.setAttribute("role", "menuitem");
+      const nombre = document.createElement("span");
+      nombre.textContent = modelo;      // viene de Python: textContent, nunca innerHTML
+      opcion.appendChild(nombre);
+      if (activo) opcion.appendChild(icon("check", "ic-sm"));
+      opcion.addEventListener("click", () => {
+        setModel(proveedor.id, modelo);
+        cerrarMenuDeModelos();
+      });
+      grupo.appendChild(opcion);
+    }
+    menu.appendChild(grupo);
+  }
+
+  $("composer-input-row").appendChild(menu);
+  // Un click en cualquier otro lado lo cierra; el del propio botón no llega acá porque
+  // `alternarMenuDeModelos` corta la propagación.
+  setTimeout(() => document.addEventListener("click", cerrarMenuDeModelos), 0);
+}
+
+export function renderModels(payload) {
+  _modelos = payload;
+  const etiqueta = document.getElementById("model-btn-label");
+  if (etiqueta) etiqueta.textContent = payload.activo.resumen || payload.activo.label || "modelo";
+  const boton = document.getElementById("model-btn");
+  if (boton) {
+    boton.title = `Responde ${payload.activo.label}${payload.activo.modelo ? " · " + payload.activo.modelo : ""}`;
+  }
+  // Si el menú estaba abierto (o se pidió abrir y faltaban los datos), se repinta.
+  if (document.getElementById("model-menu") !== null) {
+    cerrarMenuDeModelos();
+    alternarMenuDeModelos();
   }
 }

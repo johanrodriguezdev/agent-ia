@@ -16,7 +16,7 @@
 // 🟡 del lado Python (`terminal_open`), y hasta que no llega el estado "abierta" acá no se
 // monta nada.
 
-/* global Terminal, FitAddon */
+/* global Terminal, FitAddon, SearchAddon */
 
 import {
   terminalOpen, terminalNew, terminalInput, terminalResize,
@@ -122,6 +122,30 @@ function construirCajon() {
   estado.id = "terminal-status";
   header.appendChild(estado);
 
+  // Buscar dentro de lo que ya salió por pantalla: con 5000 líneas de scrollback,
+  // encontrar el error de hace tres comandos a fuerza de rueda del mouse no es viable.
+  const buscador = document.createElement("input");
+  buscador.type = "search";
+  buscador.id = "terminal-search";
+  buscador.placeholder = "Buscar…";
+  buscador.setAttribute("aria-label", "Buscar en la terminal");
+  buscador.addEventListener("keydown", (evt) => {
+    evt.stopPropagation();     // la terminal no tiene que recibir lo que se teclea acá
+    const sesion = _sesiones.get(_activa);
+    if (!sesion || !sesion.search) return;
+    if (evt.key === "Enter") {
+      // Shift+Enter va hacia atrás, como en cualquier buscador.
+      if (evt.shiftKey) sesion.search.findPrevious(buscador.value);
+      else sesion.search.findNext(buscador.value);
+    }
+    if (evt.key === "Escape") {
+      buscador.value = "";
+      sesion.search.clearDecorations();
+      sesion.term.focus();
+    }
+  });
+  header.appendChild(buscador);
+
   const cerrar = document.createElement("button");
   cerrar.type = "button";
   cerrar.id = "terminal-close-panel";
@@ -202,13 +226,46 @@ function montarSesion(sessionId) {
   });
   const fit = new FitCtor();
   term.loadAddon(fit);
+
+  const SearchCtor = (typeof SearchAddon !== "undefined")
+    ? (SearchAddon.SearchAddon || SearchAddon) : null;
+  const search = SearchCtor ? new SearchCtor() : null;
+  if (search) term.loadAddon(search);
+
   term.open(host);
+
+  // Ctrl+C en una terminal manda la señal de interrupción, así que copiar es Ctrl+Shift+C
+  // (lo mismo que hace cualquier terminal de Linux y la de Windows). Devolver `false`
+  // impide que la tecla siga viaje hacia la PTY.
+  term.attachCustomKeyEventHandler((evt) => {
+    if (evt.type !== "keydown" || !evt.ctrlKey || !evt.shiftKey) return true;
+    const tecla = evt.key.toLowerCase();
+    if (tecla === "c") {
+      const seleccion = term.getSelection();
+      if (seleccion) {
+        navigator.clipboard.writeText(seleccion).catch((e) => console.debug("[terminal] copiar:", e));
+      }
+      return false;
+    }
+    if (tecla === "v") {
+      navigator.clipboard.readText()
+        .then((texto) => { if (texto) terminalInput(sessionId, texto); })
+        .catch((e) => console.debug("[terminal] pegar:", e));
+      return false;
+    }
+    if (tecla === "f") {
+      const buscador = $("terminal-search");
+      if (buscador) { buscador.focus(); buscador.select(); }
+      return false;
+    }
+    return true;
+  });
 
   // Todo lo que se teclea va crudo a la PTY. No se interpreta ni se valida acá: el
   // registro de lo que se ejecutó lo lleva Python, comando por comando, en la auditoría.
   term.onData((data) => terminalInput(sessionId, data));
 
-  _sesiones.set(sessionId, { term, fit, host });
+  _sesiones.set(sessionId, { term, fit, host, search });
 
   const pendiente = _pendientes.get(sessionId);
   if (pendiente) {

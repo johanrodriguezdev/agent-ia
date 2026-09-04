@@ -7,7 +7,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 from core.address import vocative, vocative_start
@@ -157,6 +157,38 @@ class UnifiedMemory:
                 conn.execute("""
                     CREATE INDEX IF NOT EXISTS idx_project_conversations_project
                     ON project_conversations(project_id, user_id)
+                """)
+                # Titulo propio de una conversacion. Sin esta tabla el titulo se deriva
+                # siempre del primer mensaje del usuario, que muchas veces no describe de
+                # que termino tratando la charla. Se guarda aparte y NO en `memories`:
+                # renombrar no puede tocar el historial ni la memoria semantica.
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS conversation_titles (
+                        conversation_id TEXT PRIMARY KEY,
+                        user_id TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        renamed_at TEXT NOT NULL
+                    )
+                """)
+                # Elementos de un proyecto que no son conversaciones (flujos, modulos,
+                # cualquier cosa futura). `project_conversations` se deja intacta: ya tiene
+                # datos y su propia semantica de "una conversacion vive en un solo
+                # proyecto". Aca la clave es (kind, item_id) por el mismo motivo.
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS project_items (
+                        kind TEXT NOT NULL,
+                        item_id TEXT NOT NULL,
+                        project_id INTEGER NOT NULL,
+                        user_id TEXT NOT NULL,
+                        label TEXT DEFAULT '',
+                        assigned_at TEXT NOT NULL,
+                        PRIMARY KEY (kind, item_id),
+                        FOREIGN KEY (project_id) REFERENCES projects(id)
+                    )
+                """)
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_project_items_project
+                    ON project_items(project_id, user_id)
                 """)
                 self._migrate_schema(conn)
             logger.info(f"Base de datos unificada inicializada: {DB_PATH}")
@@ -309,7 +341,10 @@ class UnifiedMemory:
                                (SELECT u.text FROM memories u
                                  WHERE u.conversation_id = m.conversation_id
                                    AND u.role = 'user'
-                                 ORDER BY u.id ASC LIMIT 1) AS title_src
+                                 ORDER BY u.id ASC LIMIT 1) AS title_src,
+                               (SELECT t.title FROM conversation_titles t
+                                 WHERE t.conversation_id = m.conversation_id
+                                   AND t.user_id = m.user_id) AS title_propio
                        FROM memories m
                        WHERE m.user_id = ? AND m.archived = 0
                              AND m.conversation_id IS NOT NULL
@@ -323,7 +358,8 @@ class UnifiedMemory:
                     conversation_id=r[0],
                     last_activity=r[1] or "",
                     turn_count=r[2],
-                    title=_derive_title(r[3]),
+                    # El titulo puesto a mano gana sobre el derivado del primer mensaje.
+                    title=(r[4] or "").strip() or _derive_title(r[3]),
                 )
                 for r in rows
             ]
@@ -716,10 +752,188 @@ class UnifiedMemory:
                     conn.execute(
                         "DELETE FROM project_conversations WHERE project_id = ?", (project_id,)
                     )
+                    conn.execute(
+                        "DELETE FROM project_items WHERE project_id = ?", (project_id,)
+                    )
             return bool(deleted)
         except Exception as e:
             logger.error(f"Error eliminando proyecto: {e}")
             return False
+
+    # ------------------------------------------------------- elementos que no son chats
+    def assign_item_to_project(self, kind: str, item_id: str, project_id: int,
+                               label: str = "", user_id: str = "default") -> bool:
+        """Mete en un proyecto algo que no es una conversación: un flujo, un módulo.
+
+        Mismo contrato que `assign_conversation_to_project()` — verifica que el proyecto
+        exista y sea del usuario antes de escribir, y reasignar es reemplazar (un elemento
+        vive en un solo proyecto). `label` es el nombre a mostrar, copiado en el momento de
+        asignar: si después se renombra el flujo, el proyecto sigue siendo legible aunque
+        la etiqueta quede vieja, que es preferible a una fila que no dice nada.
+        """
+        kind = (kind or "").strip().lower()
+        item_id = str(item_id or "").strip()
+        if not kind or not item_id:
+            return False
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                owns_project = conn.execute(
+                    "SELECT 1 FROM projects WHERE id = ? AND user_id = ?", (project_id, user_id)
+                ).fetchone()
+                if not owns_project:
+                    return False
+                conn.execute(
+                    """INSERT OR REPLACE INTO project_items
+                           (kind, item_id, project_id, user_id, label, assigned_at)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (kind, item_id, project_id, user_id, (label or "").strip(),
+                     datetime.now().isoformat()),
+                )
+            return True
+        except Exception as e:
+            logger.error(f"Error asignando {kind} a proyecto: {e}")
+            return False
+
+    def unassign_item_from_project(self, kind: str, item_id: str,
+                                   user_id: str = "default") -> bool:
+        """DELETE idempotente, igual que `unassign_conversation_from_project()`."""
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                cur = conn.execute(
+                    "DELETE FROM project_items WHERE kind = ? AND item_id = ? AND user_id = ?",
+                    ((kind or "").strip().lower(), str(item_id or "").strip(), user_id),
+                )
+            return bool(cur.rowcount)
+        except Exception as e:
+            logger.error(f"Error desasignando elemento de proyecto: {e}")
+            return False
+
+    def list_items_by_project(self, project_id: int,
+                              user_id: str = "default") -> List[Dict[str, Any]]:
+        """Elementos no-conversación de un proyecto, agrupables por `kind` en la pantalla."""
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                rows = conn.execute(
+                    """SELECT kind, item_id, label, assigned_at
+                       FROM project_items
+                       WHERE project_id = ? AND user_id = ?
+                       ORDER BY kind ASC, assigned_at DESC""",
+                    (project_id, user_id),
+                ).fetchall()
+            return [{"kind": r[0], "item_id": r[1], "label": r[2] or "", "assigned_at": r[3]}
+                    for r in rows]
+        except Exception as e:
+            logger.error(f"Error listando elementos del proyecto: {e}")
+            return []
+
+    def project_of_item(self, kind: str, item_id: str,
+                        user_id: str = "default") -> Optional[int]:
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                row = conn.execute(
+                    """SELECT project_id FROM project_items
+                       WHERE kind = ? AND item_id = ? AND user_id = ?""",
+                    ((kind or "").strip().lower(), str(item_id or "").strip(), user_id),
+                ).fetchone()
+            return row[0] if row else None
+        except Exception as e:
+            logger.error(f"Error consultando el proyecto de un elemento: {e}")
+            return None
+
+    # ------------------------------------------------------- titulo propio y busqueda
+    def rename_conversation(self, conversation_id: str, title: str,
+                            user_id: str = "default") -> bool:
+        """Le pone (o le saca) un título propio a una conversación.
+
+        Un título vacío borra el propio y vuelve al derivado del primer mensaje — así el
+        mismo camino sirve para renombrar y para deshacer. NUNCA escribe en `memories`:
+        renombrar es una etiqueta, no puede tocar el historial ni la memoria semántica.
+        """
+        if not conversation_id:
+            return False
+        title = " ".join((title or "").split())[:_TITLE_MAX_LEN]
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                existe = conn.execute(
+                    "SELECT 1 FROM memories WHERE conversation_id = ? AND user_id = ? LIMIT 1",
+                    (conversation_id, user_id),
+                ).fetchone()
+                if not existe:
+                    return False
+                if not title:
+                    conn.execute(
+                        """DELETE FROM conversation_titles
+                           WHERE conversation_id = ? AND user_id = ?""",
+                        (conversation_id, user_id),
+                    )
+                else:
+                    conn.execute(
+                        """INSERT OR REPLACE INTO conversation_titles
+                               (conversation_id, user_id, title, renamed_at)
+                           VALUES (?, ?, ?, ?)""",
+                        (conversation_id, user_id, title, datetime.now().isoformat()),
+                    )
+            return True
+        except Exception as e:
+            logger.error(f"Error renombrando conversación: {e}")
+            return False
+
+    def search_conversations(self, query: str, user_id: str = "default",
+                             limit: int = 30) -> List[Dict[str, Any]]:
+        """Busca DENTRO de lo que se dijo, no solo en los títulos.
+
+        El buscador de la barra filtra los títulos ya cargados en pantalla; esto va a la
+        base y encuentra "esa vez que hablamos del certificado" aunque la charla se llame
+        otra cosa y esté cien conversaciones atrás. Devuelve una fila por conversación con
+        el fragmento donde apareció, para poder mostrar por qué coincidió.
+        """
+        query = (query or "").strip()
+        if len(query) < 2:
+            return []
+        patron = f"%{query}%"
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                # `COLLATE NOCASE` en vez de tres LIKE con variantes de caja: cubre
+                # también las mayúsculas intermedias ("Certificado"), que la versión de
+                # `search_keyword()` con lower/upper se perdía.
+                rows = conn.execute(
+                    """SELECT  m.conversation_id,
+                               MAX(m.timestamp) AS ultima,
+                               COUNT(*)         AS coincidencias,
+                               (SELECT x.text FROM memories x
+                                 WHERE x.conversation_id = m.conversation_id
+                                   AND x.user_id = m.user_id
+                                   AND x.text LIKE ? COLLATE NOCASE
+                                 ORDER BY x.id DESC LIMIT 1) AS fragmento,
+                               (SELECT u.text FROM memories u
+                                 WHERE u.conversation_id = m.conversation_id
+                                   AND u.role = 'user'
+                                 ORDER BY u.id ASC LIMIT 1) AS title_src,
+                               (SELECT t.title FROM conversation_titles t
+                                 WHERE t.conversation_id = m.conversation_id
+                                   AND t.user_id = m.user_id) AS title_propio
+                       FROM memories m
+                       WHERE m.user_id = ? AND m.archived = 0
+                             AND m.conversation_id IS NOT NULL
+                             AND m.text LIKE ? COLLATE NOCASE
+                       GROUP BY m.conversation_id
+                       ORDER BY ultima DESC
+                       LIMIT ?""",
+                    (patron, user_id, patron, limit),
+                ).fetchall()
+            return [
+                {
+                    "conversation_id": r[0],
+                    "last_activity": r[1] or "",
+                    "matches": r[2],
+                    "snippet": _fragmento(r[3], query),
+                    "title": (r[5] or "").strip() or _derive_title(r[4]),
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            logger.error(f"Error buscando en conversaciones: {e}")
+            return []
 
     def clear_user_memory(self, user_id: str):
         try:
@@ -747,6 +961,32 @@ def _derive_title(first_user_text: Optional[str]) -> str:
     if len(text) > _TITLE_MAX_LEN:
         return text[:_TITLE_MAX_LEN].rstrip() + "\u2026"
     return text
+
+
+_FRAGMENTO_CONTEXTO = 60
+
+
+def _fragmento(texto: Optional[str], query: str) -> str:
+    """Recorta el texto alrededor de la coincidencia, para mostrar POR QUE coincidio.
+
+    Un resultado de busqueda que solo muestra el titulo obliga a abrir la conversacion
+    para saber si era esa. Con el fragmento se decide de un vistazo.
+    """
+    texto = " ".join((texto or "").split())
+    if not texto:
+        return ""
+    posicion = texto.lower().find(query.lower())
+    if posicion < 0:
+        return texto[: _FRAGMENTO_CONTEXTO * 2] + ("\u2026" if len(texto) > _FRAGMENTO_CONTEXTO * 2 else "")
+
+    desde = max(0, posicion - _FRAGMENTO_CONTEXTO)
+    hasta = min(len(texto), posicion + len(query) + _FRAGMENTO_CONTEXTO)
+    recorte = texto[desde:hasta]
+    if desde > 0:
+        recorte = "\u2026" + recorte
+    if hasta < len(texto):
+        recorte = recorte + "\u2026"
+    return recorte
 
 
 memory = UnifiedMemory()

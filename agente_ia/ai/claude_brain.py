@@ -3,6 +3,7 @@ import os
 import json
 import re
 from datetime import datetime
+from core import streaming
 from core.address import vocative, vocative_start
 from core.identity import build_identity_block
 from core.progress import report as progress_report
@@ -146,12 +147,16 @@ def _resolver_con_tools(history, system_prompt, image_path, channel, user_id):
     mensajes = list(history)
     for ronda in range(1, MAX_TOOL_ROUNDS + 1):
         progress_report("Pensando" if ronda == 1 else f"Pensando ({ronda})")
-        respuesta = generate_response(
-            messages=mensajes,
-            system_prompt=system_prompt,
-            image_path=image_path or None,
-            tools=herramientas or None,
-        )
+        # Igual que en `core/reasoning_loop.py`: lo que salga de ESTA llamada es la
+        # respuesta al usuario y se muestra mientras se escribe. Lo que consulten despues
+        # las herramientas queda afuera del bloque y no llega a la burbuja del chat.
+        with streaming.permitido():
+            respuesta = generate_response(
+                messages=mensajes,
+                system_prompt=system_prompt,
+                image_path=image_path or None,
+                tools=herramientas or None,
+            )
 
         if not isinstance(respuesta, LLMToolResponse):
             return respuesta                      # proveedor sin tool-calling: texto plano

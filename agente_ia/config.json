@@ -5,8 +5,15 @@
     "ai_model": "deepseek-chat",
     "vision_provider": "gemini",
     "fallback_provider": "",
-    "display_name": "Johan Rodriguez Pe\u00f1a",
+    "display_name": "Johan Rodriguez Peña",
     "weather_city": "",
     "ui_theme": "dark",
-    "user_title": "Se\u00f1or Johan"
+    "user_title": "Señor Johan",
+    "window_geometry": {
+        "width": 1024,
+        "height": 680,
+        "x": 0,
+        "y": 60,
+        "maximized": false
+    }
 }
