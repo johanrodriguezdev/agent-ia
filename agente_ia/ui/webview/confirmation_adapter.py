@@ -27,6 +27,19 @@ logger = logging.getLogger(__name__)
 CONFIRM_TIMEOUT_SECONDS = 120
 
 
+# `security_manager.require_confirmation()` arma UN solo texto para todos los canales, y
+# lo termina con la instrucción de la consola ("Escribe 'sí' para confirmar..."). En un
+# modal con botones Confirmar/Cancelar esa línea es falsa: no hay dónde escribir nada. Se
+# recorta acá, en el adaptador del WebView, y no en el `security_manager`, para no tocar el
+# texto que sí necesitan la consola y los otros canales.
+_COLETILLA_CONSOLA = "Escribe"
+
+
+def _sin_coletilla_de_consola(message: str) -> str:
+    lineas = [l for l in message.splitlines() if not l.strip().startswith(_COLETILLA_CONSOLA)]
+    return "\n".join(lineas).strip()
+
+
 class WebViewConfirmationAdapter:
     """Adaptador `(action_name, message) -> bool` registrado para `ChannelType.DESKTOP`.
 
@@ -88,6 +101,7 @@ class WebViewConfirmationAdapter:
             return self._confirmar_hablando(action_name, message)
 
         request_id = uuid.uuid4().hex
+        message = _sin_coletilla_de_consola(message)
         event = threading.Event()
         with self._lock:
             self._pending[request_id] = event

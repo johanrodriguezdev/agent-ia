@@ -186,6 +186,7 @@ _PARAM_DE_DETALLE = {
     "web_read": "url",
     "wikipedia_search": "query",
     "task_create": "text",
+    "terminal_run_command": "command",
 }
 
 
@@ -922,4 +923,116 @@ register_tool(ToolSpec(
     # guarda copia, pero cambia algo fuera de O.R.I.O.N. y eso se pregunta antes.
     risk_level=RiskLevel.YELLOW,
     invoke=_pc_enable_tree_invoke,
+))
+
+
+# --------------------------------------------------------------------- terminal embebida
+
+def _terminal_run_command_invoke(params: dict) -> str:
+    """Corre un comando en LA terminal del escritorio y devuelve su salida.
+
+    Usa la misma sesión que muestra el panel (`core.terminal_session.terminal_manager`),
+    nunca una shell aparte: si el agente ejecutara en una terminal invisible, el usuario
+    perdería la única forma de ver qué se corrió en su máquina.
+
+    Llama a `terminal_manager.ensure()` sin pasar por el gate de `terminal_open` a
+    propósito: no es un salto, es el mismo permiso pedido una sola vez. Para llegar acá,
+    `execute_tool()` ya ejecutó `require_confirmation("terminal_run_command", ...)`, y el
+    modal mostró el comando exacto (`command` está en `_DETAILS_ALLOWED_KEYS`). Pedir dos
+    confirmaciones seguidas por el mismo "sí" solo entrena a decir que sí sin leer.
+    """
+    from core.terminal_session import TerminalUnavailable, terminal_manager
+
+    command = str(params.get("command") or "").strip()
+    if not command:
+        return f"Necesito el comando que quiere que ejecute en la terminal{vocative()}."
+
+    try:
+        sesion = terminal_manager.ensure()
+        salida = sesion.run_command_capture(command)
+    except TerminalUnavailable as e:
+        logger.error(f"terminal no disponible para '{command}': {e}")
+        return f"No pude usar la terminal: {e}"
+
+    if not salida:
+        return f"Ejecuté `{command}` en la terminal. No devolvió salida."
+    return f"Ejecuté `{command}` en la terminal:\n\n{salida}"
+
+
+register_tool(ToolSpec(
+    name="terminal_run_command",
+    description=(
+        "Ejecuta un comando en la terminal del escritorio (PowerShell) y devuelve su "
+        "salida. Úsala cuando el usuario pida correr algo concreto: 'git status', "
+        "'pip list', 'ipconfig'. El comando se ejecuta en la misma terminal que el usuario "
+        "ve en pantalla, así que puede seguir lo que pasa. No la uses para tareas que ya "
+        "tienen herramienta propia (abrir apps, buscar archivos, leer el correo): esas "
+        "hacen el trabajo mejor y sin abrir una shell."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "command": {
+                "type": "string",
+                "description": "El comando exacto a ejecutar, tal cual se escribiría.",
+            },
+        },
+        "required": ["command"],
+    },
+    # YELLOW, y por eso mismo queda fuera de voz, Telegram y Discord: `CHANNEL_ALLOWED_LEVELS`
+    # solo deja pasar verde en los canales remotos y no hay excepción para esta acción.
+    # Ejecutar comandos arbitrarios es lo que `.claude/rules/security-levels.md` clasifica
+    # como amarillo ("comandos del sistema con argumentos dinámicos"), y se confirma con el
+    # comando a la vista, delante del PC.
+    risk_level=RiskLevel.YELLOW,
+    invoke=_terminal_run_command_invoke,
+))
+
+
+def _terminal_read_output_invoke(params: dict) -> str:
+    """Devuelve lo último que se vio en la terminal, incluido lo que corrió el usuario.
+
+    Sin esto el agente solo conoce la salida de SUS comandos, y no puede contestar "¿por
+    qué falló lo que acabo de correr?" — que es media razón de tener una terminal a la
+    vista del asistente.
+    """
+    from core.terminal_session import terminal_manager
+
+    try:
+        lineas = int(params.get("lines") or 60)
+    except (TypeError, ValueError):
+        lineas = 60
+
+    sesion = terminal_manager.active()
+    if sesion is None:
+        return "No hay ninguna terminal abierta ahora mismo."
+
+    salida = sesion.salida_reciente(lineas)
+    if not salida:
+        return "La terminal está abierta pero todavía no mostró nada."
+    return f"Últimas líneas de la terminal:" + chr(10) + chr(10) + salida
+
+
+register_tool(ToolSpec(
+    name="terminal_read_output",
+    description=(
+        "Lee lo último que se vio en la terminal del escritorio, incluidos los comandos "
+        "que ejecutó el usuario a mano. Úsala cuando te pregunten por algo que pasó ahí: "
+        "por qué falló un comando, qué devolvió, qué está corriendo."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "lines": {
+                "type": "integer",
+                "description": "Cuántas líneas leer hacia atrás (por defecto 60).",
+            },
+        },
+    },
+    # YELLOW y no GREEN: en una terminal puede haber quedado impresa una clave, un token o
+    # la salida de algo privado, y leerla significa mandarla al proveedor del modelo. Que
+    # el usuario lo autorice cada vez es el precio correcto; además, al ser amarilla queda
+    # fuera de los canales remotos igual que el resto de la terminal.
+    risk_level=RiskLevel.YELLOW,
+    invoke=_terminal_read_output_invoke,
 ))

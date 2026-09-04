@@ -5,8 +5,8 @@
     "ai_model": "deepseek-chat",
     "vision_provider": "gemini",
     "fallback_provider": "",
-    "display_name": "Johan Rodriguez Peña",
+    "display_name": "Johan Rodriguez Pe\u00f1a",
     "weather_city": "",
-    "ui_theme": "light",
-    "user_title": "Señor Johan"
+    "ui_theme": "dark",
+    "user_title": "Se\u00f1or Johan"
 }

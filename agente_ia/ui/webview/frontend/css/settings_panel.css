@@ -184,7 +184,7 @@
 
 .settings-primary-btn {
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background-color: var(--text-accent);
   color: #ffffff;
   font-family: inherit;
@@ -193,6 +193,12 @@
   padding: 8px 20px;
   cursor: pointer;
   transition: opacity 150ms;
+}
+
+/* Ver la nota de `.composer-send-btn` en composer.css: en tema oscuro el texto del relleno
+   de acento va con el fondo oscuro, no blanco. */
+:root[data-theme="dark"] .settings-primary-btn {
+  color: var(--bg-primary);
 }
 
 .settings-primary-btn:hover {

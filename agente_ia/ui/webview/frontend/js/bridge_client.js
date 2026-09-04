@@ -104,3 +104,20 @@ export function onFlowsLoaded(cb) { _bridge.flows_loaded.connect(cb); }
 export function onEmailCapabilitiesLoaded(cb) { _bridge.email_capabilities_loaded.connect(cb); }
 export function onEmailCapabilitySaved(cb) { _bridge.email_capability_saved.connect(cb); }
 export function onEmailCapabilitySaveRejected(cb) { _bridge.email_capability_save_rejected.connect(cb); }
+
+// ------------------------------------------------------------ terminal embebida
+// Cada llamada lleva el id de la sesión: hay varias pestañas y el agente trabaja contra la
+// que está a la vista. `terminalInput` manda las teclas crudas (Tab, Ctrl+C, flechas):
+// xterm.js entrega lo que el usuario tecleó sin interpretarlo y del otro lado lo recibe la
+// PTY igual de crudo.
+export function terminalOpen() { _bridge.terminal_open(); }
+export function terminalNew() { _bridge.terminal_new(); }
+export function terminalInput(sessionId, data) { _bridge.terminal_input(sessionId, data); }
+export function terminalResize(sessionId, cols, rows) { _bridge.terminal_resize(sessionId, cols, rows); }
+export function terminalFocus(sessionId) { _bridge.terminal_focus(sessionId); }
+export function terminalClose(sessionId) { _bridge.terminal_close(sessionId); }
+export function terminalCloseAll() { _bridge.terminal_close_all(); }
+export function requestTerminalTabs() { _bridge.request_terminal_tabs(); }
+export function onTerminalOutput(cb) { _bridge.terminal_output.connect(cb); }
+export function onTerminalState(cb) { _bridge.terminal_state.connect(cb); }
+export function onTerminalTabs(cb) { _bridge.terminal_tabs.connect(cb); }

@@ -97,3 +97,13 @@ pillow
 # EXACTAS en milisegundos, sin gastar una llamada al modelo ni adivinar sobre una imagen.
 # No todas las apps lo exponen (Electron suele no hacerlo); ahi se cae a la vision.
 uiautomation
+
+# --- Terminal embebida ---
+# La pseudo-consola real del sistema: ConPTY en Windows, PTY en Linux/macOS. Con tuberias
+# normales el shell detecta que no hay consola y apaga colores, autocompletado y edicion de
+# linea; con una PTY la consola del panel es una terminal de verdad. Cada paquete se instala
+# solo donde corresponde. Si falta, la app arranca igual y el panel avisa cual falta
+# (core/terminal_session.py). El lado del navegador (xterm.js) va vendorizado en
+# ui/webview/frontend/vendor/.
+pywinpty; sys_platform == "win32"
+ptyprocess; sys_platform != "win32"

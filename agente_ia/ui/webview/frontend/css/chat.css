@@ -1,6 +1,12 @@
 /* ui/webview/frontend/css/chat.css
    REQ-015/CA-12..CA-19, CA-46 — área de conversación: estado vacío (saludo grande),
-   burbujas usuario/asistente/sistema, Markdown/código, indicador de escritura.
+   mensajes usuario/asistente/sistema, Markdown/código, indicador de escritura.
+
+   Rediseño: la respuesta del agente ya no va en burbuja. Es el texto principal de la
+   pantalla —lo que el usuario viene a leer— y una burbuja gris alrededor de párrafos
+   largos los vuelve un bloque compacto y difícil de seguir. La burbuja queda solo para lo
+   que dijo el usuario (mensajes cortos, alineados a la derecha) y el color queda para el
+   código y los estados. Todo sobre la misma columna de lectura (`--content-max`).
 */
 
 #chat-area {
@@ -20,34 +26,38 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: 10px;
   text-align: center;
-  padding: 32px;
+  padding: 24px 16px 28px;
 }
 
+/* Cuadrado redondeado con la inicial del agente, no un círculo de acento: el bloque
+   neutro con borde pesa menos en una pantalla vacía y no compite con el composer. */
 #empty-state-avatar {
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-  background-color: var(--text-accent);
-  color: #ffffff;
+  width: 46px;
+  height: 46px;
+  border-radius: var(--radius-md);
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 22px;
-  font-weight: 700;
-  margin-bottom: 8px;
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 6px;
 }
 
 #empty-state-greeting {
-  font-size: 40px;
-  font-weight: 700;
+  font-size: 27px;
+  font-weight: 600;
+  letter-spacing: -0.4px;
   color: var(--text-primary);
   margin: 0;
 }
 
 #empty-state-subtitle {
-  font-size: 14px;
+  font-size: 13.5px;
   color: var(--text-secondary);
 }
 
@@ -56,23 +66,24 @@
 #messages {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 24px 0;
+  gap: 22px;
+  padding: 16px 0 8px;
 }
 
 .message {
   display: flex;
-  max-width: 78%;
-  animation: fadeSlideIn 300ms ease;
+  max-width: 100%;
+  animation: fadeSlideIn 260ms ease;
 }
 
 .msg-user {
   align-self: flex-end;
   justify-content: flex-end;
+  max-width: 82%;
 }
 
 .msg-assistant {
-  align-self: flex-start;
+  align-self: stretch;
 }
 
 .msg-system {
@@ -81,32 +92,27 @@
 }
 
 .bubble {
-  border-radius: 16px;
-  padding: 12px 16px;
   font-size: 14px;
-  line-height: 1.55;
+  line-height: 1.6;
   overflow-wrap: break-word;
+  min-width: 0;
 }
 
 .msg-user .bubble {
   background-color: var(--bubble-user);
   color: var(--text-primary);
-  border-bottom-right-radius: 4px;
+  border-radius: var(--radius-lg);
+  border-bottom-right-radius: var(--radius-sm);
+  padding: 10px 14px;
 }
 
-/* CA-36: `--text-primary` sobre `--bubble-user` da 4.08:1 en dark (por debajo de AA
-   4.5:1 para texto normal) — `--bubble-user` en dark (#1f77b4) es un azul saturado que
-   necesita texto más claro que el resto de la superficie. Blanco puro sobre esa burbuja
-   da 4.82:1. En light, `--bubble-user` (#d1e5ff) ya contrasta bien con `--text-primary`
-   (11.42:1), así que no se toca. */
-:root[data-theme="dark"] .msg-user .bubble {
-  color: #ffffff;
-}
-
+/* Respuesta del agente: sin fondo, sin padding lateral, ancho completo de la columna. */
 .msg-assistant .bubble {
-  background-color: var(--bubble-agent);
+  background: transparent;
   color: var(--text-primary);
-  border-bottom-left-radius: 4px;
+  padding: 0;
+  font-size: 14.5px;
+  line-height: 1.65;
 }
 
 .msg-system .bubble {
@@ -114,53 +120,111 @@
   color: var(--text-secondary);
   font-size: 12px;
   text-align: center;
-  padding: 4px 12px;
+  padding: 2px 12px;
 }
+
+/* -------------------------------------------------------------- Markdown dentro del mensaje */
 
 .bubble p:not(:last-child) {
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
-.bubble pre {
-  border-radius: 8px;
-  padding: 12px;
+/* `reset.css` saca las viñetas de TODA la app (las listas del sidebar y de la nav de
+   Configuración son listas semánticas sin viñeta). Adentro de un mensaje sí son
+   contenido: una lista que el agente devuelve en Markdown tiene que verse como lista. */
+.bubble ul,
+.bubble ol {
+  padding-left: 20px;
+  margin: 6px 0 10px;
+}
+
+.bubble ul { list-style: disc; }
+.bubble ol { list-style: decimal; }
+
+.bubble li {
+  margin: 3px 0;
+}
+
+.bubble li::marker {
+  color: var(--text-secondary);
+}
+
+.bubble strong { font-weight: 600; }
+
+/* Bloques de código: la superficie del tema se pone por encima del fondo que trae
+   Pygments (`.codehilite { background: #272822 }`, Monokai) — ese verde oscuro sobre una
+   paleta neutra era la mancha más visible de la pantalla. Los colores de los tokens de
+   sintaxis siguen viniendo de Pygments; acá solo cambia el fondo y el marco. */
+.bubble pre,
+.bubble .codehilite {
+  background-color: var(--bubble-agent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  margin: 10px 0;
   overflow-x: auto;
   font-size: 12.5px;
-  margin: 8px 0;
+  line-height: 1.5;
+}
+
+/* Si `codehilite` envolvió al `<pre>`, el marco lo dibuja el contenedor y el `<pre>` va
+   liso adentro — si no, quedaría un borde dentro de otro. */
+.bubble .codehilite pre {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  margin: 0;
 }
 
 .bubble code {
-  font-family: "Cascadia Code", Consolas, "Courier New", monospace;
+  font-family: "Cascadia Code", Consolas, "JetBrains Mono", "Courier New", monospace;
 }
 
 .bubble :not(pre) > code {
   background-color: var(--bg-hover);
-  border-radius: 4px;
-  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  padding: 1.5px 5px;
+  font-size: 0.9em;
 }
 
 .bubble table {
   border-collapse: collapse;
   font-size: 13px;
-  margin: 8px 0;
+  margin: 10px 0;
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
 }
 
 .bubble th, .bubble td {
   border: 1px solid var(--border);
-  padding: 6px 10px;
+  padding: 7px 11px;
+  text-align: left;
+}
+
+.bubble th {
+  background-color: var(--bg-secondary);
+  font-weight: 600;
 }
 
 .bubble a {
   color: var(--text-accent);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+}
+
+.bubble a:hover {
+  border-bottom-color: var(--text-accent);
 }
 
 /* CA-18: bloques largos (>500 chars) se recortan con degradado + "Ver más" */
 .bubble.clamped {
-  max-height: 220px;
+  max-height: 260px;
   overflow: hidden;
   position: relative;
-  mask-image: linear-gradient(to bottom, black 75%, transparent 100%);
-  -webkit-mask-image: linear-gradient(to bottom, black 75%, transparent 100%);
+  mask-image: linear-gradient(to bottom, black 72%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, black 72%, transparent 100%);
 }
 
 .bubble-expand-btn {
@@ -169,16 +233,21 @@
   border: none;
   background: transparent;
   color: var(--text-accent);
-  font-size: 12px;
+  font-size: 12.5px;
   padding: 0;
+}
+
+.bubble-expand-btn:hover {
+  text-decoration: underline;
 }
 
 /* -------------------------------------------------------------- typing indicator (CA-15) */
 
 #typing-indicator {
   display: flex;
+  align-items: center;
   gap: 4px;
-  padding: 0 0 16px 4px;
+  padding: 0 0 16px 2px;
 }
 
 /* CA-15 — bug real encontrado en la verificación manual (envío de mensaje real vía la
@@ -231,4 +300,5 @@
 
 @media (prefers-reduced-motion: reduce) {
   #typing-indicator span { animation: none; }
+  .message { animation: none; }
 }

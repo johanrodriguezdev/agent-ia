@@ -52,6 +52,7 @@ from PyQt6.QtCore import QObject, QThreadPool, Qt, pyqtSignal, pyqtSlot
 
 import config_manager
 from core.security_manager import ChannelType, RiskLevel, _RISK_LEVEL_ORDER
+from core.terminal_session import TerminalUnavailable, terminal_manager
 from ui.gui_workers import run_async
 from ui.webview.gui_state import GLOBAL_STATE, WAKE_STATE  # noqa: F401 (ver poll_state)
 from ui.webview.markdown_render import render_markdown
@@ -177,6 +178,14 @@ class Bridge(QObject):
     email_capability_save_rejected = pyqtSignal(str)  # id
     flows_loaded = pyqtSignal(str)                    # json: [{id, nombre, estado, pasos, ...}]
 
+    # ------------------------------------------------------------ terminal embebida
+    # `terminal_output` lleva el flujo CRUDO de la PTY, con las secuencias ANSI intactas:
+    # el que las interpreta es xterm.js del otro lado. Cualquier limpieza acá rompería los
+    # colores, el borrado de línea y el posicionamiento del cursor.
+    terminal_output = pyqtSignal(str, str)            # session_id, trozo crudo
+    terminal_state = pyqtSignal(str, str, str)        # session_id, estado, detalle
+    terminal_tabs = pyqtSignal(str)                   # json: [{id, titulo, cwd, activa}]
+
     def __init__(self, main_window, parent=None):
         super().__init__(parent)
         self._main_window = main_window
@@ -197,6 +206,12 @@ class Bridge(QObject):
         # tiempo (riesgo R10). Ambos contadores se tocan solo desde el hilo de la GUI.
         self._speech_seq: int = 0
         self._speech_done_seq: int = 0
+
+        # La terminal tiene DOS entradas posibles —el panel y la herramienta del agente— y
+        # una sola salida: esta. Se engancha al construir el bridge, no al abrir el panel,
+        # para que un comando lanzado por el agente con el panel cerrado igual termine
+        # viéndose en pantalla (el frontend abre el panel al recibir `terminal_state`).
+        terminal_manager.set_sink(self._emit_terminal_output, self._emit_terminal_state)
 
     def set_confirmation_adapter(self, adapter) -> None:
         """Llamado por `MainWindow.__init__` tras construir el `WebViewConfirmationAdapter`
@@ -796,6 +811,118 @@ class Bridge(QObject):
         logger.warning(f"Operación sobre un flujo falló: {message}")
         self.error_occurred.emit(str(message))
         self.request_flows()
+
+    # ------------------------------------------------------------ terminal embebida
+    @pyqtSlot()
+    def terminal_open(self) -> None:
+        """Abre el panel de terminal: se engancha a las sesiones vivas, o crea la primera.
+
+        Solo se confirma cuando hay que ABRIR un shell nuevo. Volver a mostrar una terminal
+        que ya está corriendo no ejecuta nada, así que no vuelve a preguntar.
+
+        Va por `run_async()` como todo lo que confirma: `require_confirmation()` bloquea
+        hasta 120s esperando el modal y el hilo de la GUI es justo el que tiene que seguir
+        pintando ese modal.
+        """
+        run_async(self._terminal_open_flow, None, self._on_terminal_error)
+
+    @pyqtSlot()
+    def terminal_new(self) -> None:
+        """Pestaña nueva: siempre es un shell nuevo, así que siempre se confirma."""
+        run_async(self._terminal_new_flow, None, self._on_terminal_error)
+
+    def _terminal_open_flow(self) -> None:
+        activa = terminal_manager.active()
+        if activa is not None:
+            self._emit_terminal_tabs()
+            self.terminal_state.emit(activa.id, "abierta", activa.cwd)
+            return
+        self._terminal_new_flow()
+
+    def _terminal_new_flow(self) -> None:
+        from core.security_manager import security_manager
+
+        confirmada = security_manager.require_confirmation(
+            "terminal_open",
+            ChannelType.DESKTOP,
+            # Texto fijo escrito a mano, no `format_details()` con parámetros: acá no hay
+            # ningún dato del usuario que sanear, y lo que el modal necesita decir es qué
+            # implica el "sí" — no el nombre interno de la acción.
+            details="webview:terminal_open | abre una consola con tus permisos, "
+                    "en la carpeta del proyecto",
+            user_id=OWNER_USER_ID,
+        )
+        if not confirmada:
+            self.terminal_state.emit("", "denegada", "No se abrió la terminal.")
+            return
+
+        try:
+            terminal_manager.crear()
+        except TerminalUnavailable as e:
+            logger.error(f"no se pudo abrir la terminal: {e}")
+            self.terminal_state.emit("", "error", str(e))
+
+    @pyqtSlot(str, str)
+    def terminal_input(self, session_id: str, data: str) -> None:
+        """Teclas del usuario hacia la shell, tal cual (Tab, Ctrl+C, flechas incluidos).
+
+        Sin gate por diseño: la sesión ya se autorizó al abrirse y confirmar tecla por
+        tecla no sería una terminal. Lo que sí queda de cada comando es el registro de
+        auditoría que escribe `TerminalSession._audit_lines()`.
+        """
+        sesion = terminal_manager.get(session_id)
+        if sesion is None:
+            return
+        sesion.write(data)
+
+    @pyqtSlot(str, int, int)
+    def terminal_resize(self, session_id: str, cols: int, rows: int) -> None:
+        """Le dice a la consola cuántas columnas tiene ahora, para que el shell corte
+        bien las líneas y `git`/`pip` dibujen a lo ancho real del panel."""
+        sesion = terminal_manager.get(session_id)
+        if sesion is None:
+            return
+        sesion.resize(int(cols), int(rows))
+
+    @pyqtSlot(str)
+    def terminal_focus(self, session_id: str) -> None:
+        """Marca qué pestaña está a la vista: es contra esa que trabaja el agente."""
+        if terminal_manager.set_active(session_id):
+            self._emit_terminal_tabs()
+
+    @pyqtSlot(str)
+    def terminal_close(self, session_id: str) -> None:
+        """Cierra una pestaña Y mata su proceso: no queda una shell viva sin ventana."""
+        terminal_manager.close(session_id or None)
+        self._emit_terminal_tabs()
+
+    @pyqtSlot()
+    def terminal_close_all(self) -> None:
+        terminal_manager.close_all()
+        self._emit_terminal_tabs()
+
+    @pyqtSlot()
+    def request_terminal_tabs(self) -> None:
+        self._emit_terminal_tabs()
+
+    def _emit_terminal_tabs(self) -> None:
+        self.terminal_tabs.emit(json.dumps(terminal_manager.listado()))
+
+    def _emit_terminal_output(self, session_id: str, chunk: str) -> None:
+        """Sink de salida — se invoca DESDE EL HILO LECTOR de la PTY.
+
+        Solo emite: `pyqtSignal.emit()` desde otro hilo lo encola Qt en el hilo de la GUI
+        (conexión automática → Queued), que es exactamente la garantía que se necesita acá.
+        """
+        self.terminal_output.emit(session_id, chunk)
+
+    def _emit_terminal_state(self, session_id: str, estado: str, detalle: str) -> None:
+        self.terminal_state.emit(session_id, estado, detalle)
+        self._emit_terminal_tabs()
+
+    def _on_terminal_error(self, message: str) -> None:
+        logger.error(f"Error en la terminal: {message}")
+        self.terminal_state.emit("", "error", str(message))
 
     # ------------------------------------------------- capacidades de correo
     @pyqtSlot()

@@ -1,0 +1,180 @@
+/* ui/webview/frontend/css/terminal.css
+   Cajón de la terminal embebida. Va DENTRO de `#main-column`, entre el chat y el
+   composer: la terminal empuja la conversación hacia arriba en vez de taparla, y el
+   composer sigue abajo, en el mismo lugar de siempre, para poder seguir hablándole al
+   agente mientras algo corre.
+
+   El aspecto del contenido (colores, cursor, selección) NO se controla desde acá: xterm.js
+   pinta sobre un canvas y solo entiende su propio objeto `theme`, que arma
+   `js/terminal_panel.js::temaXterm()` leyendo estos mismos tokens de CSS.
+*/
+
+#terminal-drawer {
+  position: relative;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 140px;
+  background-color: var(--bg-primary);
+  border-top: 1px solid var(--border);
+}
+
+/* Manija de arrastre: se monta por encima del borde superior, con un poco más de alto
+   que la línea para que se pueda agarrar sin puntería fina. */
+#terminal-resize-handle {
+  position: absolute;
+  top: -3px;
+  left: 0;
+  right: 0;
+  height: 7px;
+  cursor: ns-resize;
+  z-index: 2;
+}
+
+#terminal-resize-handle:hover {
+  background: linear-gradient(to bottom, transparent 2px, var(--text-accent) 3px,
+                              var(--text-accent) 4px, transparent 5px);
+}
+
+/* Mientras se arrastra, el cursor no cambia al pasar sobre el texto ni se selecciona
+   media pantalla sin querer. */
+body.resizing-terminal {
+  cursor: ns-resize;
+  user-select: none;
+}
+
+#terminal-header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px 6px 16px;
+}
+
+.terminal-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+/* Línea de estado: "esperando confirmación…", el motivo de un error, o nada. */
+#terminal-status {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* -------------------------------------------------------------- pestañas */
+
+#terminal-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+#terminal-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.terminal-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  max-width: 180px;
+  padding: 3px 6px 3px 9px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  transition: background-color 140ms, color 140ms;
+}
+
+.terminal-tab:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.terminal-tab.active {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.terminal-tab:focus-visible {
+  outline: 2px solid var(--text-accent);
+  outline-offset: 1px;
+}
+
+.terminal-tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-tab-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.terminal-tab-close:hover {
+  background-color: var(--danger);
+  color: #ffffff;
+}
+
+/* -------------------------------------------------------------- contenido */
+
+/* Las pestañas ocultas se sacan del flujo en vez de encogerse: xterm mide su contenedor
+   para calcular filas y columnas, y un contenedor de 0px la dejaría con un tamaño
+   absurdo al volver a mostrarla. */
+#terminal-hosts {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.terminal-host {
+  position: absolute;
+  top: 0;
+  right: 6px;
+  bottom: 8px;
+  left: 14px;
+  display: none;
+}
+
+.terminal-host.visible {
+  display: block;
+}
+
+/* xterm necesita ocupar todo el alto disponible: si no, `FitAddon.fit()` calcula de menos
+   y la shell parte mal las líneas. */
+.terminal-host .xterm {
+  height: 100%;
+}
+
+.terminal-aviso {
+  padding: 10px 4px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}

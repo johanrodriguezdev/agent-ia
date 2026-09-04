@@ -147,6 +147,11 @@ _DETAILS_ALLOWED_KEYS = (
     # o autorizarlo sería a ciegas. Van también al log de auditoría, que es justo donde
     # se quiere poder reconstruir después qué se mandó y a dónde.
     "destinatario", "asunto",
+    # Un comando que el AGENTE quiere correr en la terminal embebida. Mismo motivo que
+    # `destinatario`/`asunto`: el "sí" del modal se da sobre el comando exacto o se está
+    # autorizando a ciegas. Va también al log de auditoría, que es donde después se
+    # reconstruye qué se ejecutó en la máquina.
+    "command",
 )
 
 # Un `task`/`raw_text` puede traer código largo: se trunca para que el prompt siga siendo
@@ -245,6 +250,20 @@ class SecurityManager:
                 )
         except Exception as e:
             logger.warning(f"Error registrando auditoría: {e}")
+
+    def log_action(self, action: str, channel, result: str, user_id: str = "default",
+                   details: str = "") -> None:
+        """Registra en la auditoría un hecho consumado, sin evaluar nada.
+
+        `require_confirmation()` audita lo que ella misma decide. Esto es para las
+        superficies que ejecutan DENTRO de una sesión ya autorizada, donde el gate corrió
+        una vez y los actos siguientes igual tienen que quedar escritos: hoy, cada comando
+        que entra a la terminal embebida (`core/terminal_session.py`), venga del teclado
+        del usuario o de la herramienta del agente.
+
+        No decide, no bloquea y no reemplaza al gate: quien la llama ya pasó por él.
+        """
+        self._log_audit(action, self.resolve_channel(channel), result, user_id, details)
 
     def get_audit_log(self, limit: int = 50) -> list[dict]:
         try:
@@ -528,6 +547,15 @@ def _register_default_actions():
     # (CHANNEL_ALLOWED_LEVELS), que es lo deseable: es mantenimiento, no conversación.
     sm.register_action("UPDATE_MEMORY_FILE", RiskLevel.YELLOW)
     sm.register_action("execute_code", RiskLevel.YELLOW)
+    # Terminal embebida (`core/terminal_session.py`). Lo que se gatea es ABRIR la sesión,
+    # no cada tecla: una terminal que pide confirmación por comando no es una terminal.
+    # Amarillo, así que queda fuera de voz y de los canales remotos por
+    # CHANNEL_ALLOWED_LEVELS — se abre frente al PC o no se abre. `Bridge.terminal_open()`
+    # es un @pyqtSlot alcanzable desde cualquier script de la página (mismo criterio que
+    # `delete_conversation`, REQ-015/§10.2), y este es justamente el punto donde eso se
+    # detiene: sin confirmación humana no hay shell. Cada línea que después entre a la
+    # sesión queda auditada aparte, vía `log_action("terminal_command", ...)`.
+    sm.register_action("terminal_open", RiskLevel.YELLOW)
     sm.register_action("create_skill", RiskLevel.YELLOW)
     sm.register_action("modify_skill", RiskLevel.YELLOW)
     sm.register_action("delete_skill", RiskLevel.YELLOW)

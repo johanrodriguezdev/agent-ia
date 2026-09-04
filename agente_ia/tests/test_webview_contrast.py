@@ -30,7 +30,8 @@ _NORMAL_TEXT_PAIRS = [
     ("text_secondary", "bg_input"),     # composer.css: ::placeholder
     ("text_accent", "bg_primary"),      # chat.css: enlaces / botón "Ver más"
     ("text_accent", "bg_secondary"),    # sidebar.css: botón "Ver más"
-    ("text_primary", "bubble_agent"),   # chat.css: .msg-assistant .bubble
+    ("text_primary", "bubble_agent"),   # chat.css: fondo de los bloques de codigo
+    ("text_primary", "bubble_user"),    # chat.css: .msg-user .bubble
 ]
 
 
@@ -62,29 +63,29 @@ def test_normal_text_pairs_cumplen_aa(theme_name, tokens):
     assert not failures, "Pares de texto normal con contraste insuficiente:\n" + "\n".join(failures)
 
 
-def test_burbuja_usuario_dark_usa_texto_blanco_no_text_primary():
-    """CA-36 — `chat.css` fuerza `color: #ffffff` en `.msg-user .bubble` para el tema
-    oscuro: `text_primary` (#e6edf3) sobre `bubble_user` (#1f77b4) da solo 4.08:1 (por
-    debajo de AA normal); blanco puro da 4.82:1. Este test documenta y fija esa decisión
-    contra un futuro cambio de paleta que la rompa en silencio."""
-    ratio_text_primary = _contrast_ratio(DARK_TOKENS["text_primary"], DARK_TOKENS["bubble_user"])
-    ratio_white = _contrast_ratio("#ffffff", DARK_TOKENS["bubble_user"])
-    assert ratio_text_primary < _AA_NORMAL, (
-        "si este par ahora cumple AA, revisar si sigue haciendo falta el override "
-        "de #ffffff en chat.css (ver comentario ':root[data-theme=\"dark\"] .msg-user .bubble')"
-    )
-    assert ratio_white >= _AA_NORMAL
+def test_burbuja_usuario_usa_text_primary_en_ambos_temas():
+    """Rediseño — la burbuja del usuario dejó de ser un azul saturado (`#1f77b4` en
+    oscuro) y pasó a ser una superficie neutra de la paleta. Con eso, `text_primary`
+    encima cumple AA en los dos temas y ya no hace falta el override de `#ffffff` que
+    `chat.css` tenía para el tema oscuro (había que forzarlo porque el par daba 4.08:1).
 
-
-def test_burbuja_usuario_light_usa_text_primary():
-    ratio = _contrast_ratio(LIGHT_TOKENS["text_primary"], LIGHT_TOKENS["bubble_user"])
-    assert ratio >= _AA_NORMAL
+    Este test fija la decisión: si alguien vuelve a poner un color saturado en
+    `bubble_user` y el par baja de AA, falla acá antes de llegar a la pantalla."""
+    for theme_name, tokens in (("dark", DARK_TOKENS), ("light", LIGHT_TOKENS)):
+        ratio = _contrast_ratio(tokens["text_primary"], tokens["bubble_user"])
+        assert ratio >= _AA_NORMAL, (
+            f"{theme_name}: text_primary/bubble_user = {ratio:.2f} < {_AA_NORMAL} — si el "
+            "color de la burbuja tiene que ser ese, hay que volver a forzar el color del "
+            "texto en chat.css (:root[data-theme=...] .msg-user .bubble)"
+        )
 
 
 def test_boton_enviar_dark_usa_bg_primary_no_blanco():
     """CA-36 — `composer.css` fuerza `color: var(--bg-primary)` en `.composer-send-btn`
-    para el tema oscuro: blanco sobre `text_accent` (#58a6ff, azul claro) da solo 2.53:1,
-    por debajo incluso del umbral de 3:1 para iconos/componentes de UI."""
+    para el tema oscuro: blanco sobre `text_accent` (un azul claro) queda por debajo
+    incluso del umbral de 3:1 para iconos/componentes de UI. El mismo override aplican
+    `.panel-submit-btn` (panels.css) y `.settings-primary-btn` (settings_panel.css), que
+    son los otros dos rellenos de acento de la interfaz."""
     ratio_white = _contrast_ratio("#ffffff", DARK_TOKENS["text_accent"])
     ratio_bg_primary = _contrast_ratio(DARK_TOKENS["bg_primary"], DARK_TOKENS["text_accent"])
     assert ratio_white < _AA_LARGE_OR_UI
@@ -117,3 +118,14 @@ def test_ambos_temas_definen_todos_los_tokens_usados():
     for token in used_tokens:
         assert token in DARK_TOKENS, f"falta {token} en DARK_TOKENS"
         assert token in LIGHT_TOKENS, f"falta {token} en LIGHT_TOKENS"
+
+
+def test_boton_confirmar_amarillo_cumple_aa_en_ambos_temas():
+    """`.modal-btn-confirm` (modal.css) es el único relleno de `--warning` con texto
+    encima: la confirmación de una acción 🟡. El amarillo del tema claro es más oscuro
+    (tiene que contrastar contra fondo blanco), así que ahí el texto casi negro no llega
+    a AA y el CSS lo pasa a blanco — este test fija los dos casos."""
+    ratio_dark = _contrast_ratio("#1a1300", DARK_TOKENS["warning"])
+    ratio_light = _contrast_ratio("#ffffff", LIGHT_TOKENS["warning"])
+    assert ratio_dark >= _AA_NORMAL, f"dark: #1a1300/warning = {ratio_dark:.2f}"
+    assert ratio_light >= _AA_NORMAL, f"light: #ffffff/warning = {ratio_light:.2f}"

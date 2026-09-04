@@ -2,6 +2,12 @@
    REQ-015/CA-01, CA-03, CA-04 — estructura general: gutter transparente (deja ver el
    escritorio, ver MainWindow.WA_TranslucentBackground) + tarjeta con esquinas redondeadas
    y sombra dibujadas enteramente en CSS (nunca Qt/QSS — ver arquitectura-015.md §5.1).
+
+   Rediseño de la barra superior: tres zonas fijas — identidad a la izquierda, buscador al
+   centro, herramientas + controles de ventana a la derecha. Las herramientas (Tareas,
+   Flujos, Proyectos, Configuración) vivían como botones con borde y emoji dentro del
+   sidebar; ahora son iconos de trazo en la barra, que es donde el usuario los pidió y
+   donde no compiten con la lista de conversaciones.
 */
 
 html, body {
@@ -15,8 +21,8 @@ html, body {
   flex-direction: column;
   background-color: var(--bg-primary);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-window);
   overflow: hidden;
 }
 
@@ -35,51 +41,158 @@ html, body {
 #window-chrome {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  height: 36px;
+  gap: 12px;
+  height: var(--topbar-h);
   flex: none;
-  /* Región arrastrable con `startSystemMove()` (window_chrome.js) — el 6px de borde de
-     #app-shell ya cubre el hit-test de resize (CA-02), esta franja es solo para mover. */
-  -webkit-app-region: drag;
+  padding: 0 6px 0 16px;
+  /* Sin borde inferior a propósito: la barra comparte fondo con el chat y se separa por
+     aire, no por una línea. Una línea de más acá es lo que hacía ver "pesada" la ventana. */
 }
 
-#drag-region {
+#chrome-left {
   flex: 1;
-  height: 100%;
+  min-width: 0;
   display: flex;
   align-items: center;
-  padding-left: 14px;
+  gap: 10px;
+  height: 100%;
 }
 
 #agent-name-label {
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 1.5px;
+  letter-spacing: 1.4px;
   color: var(--text-secondary);
   text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#chrome-center {
+  flex: 0 1 var(--content-max);
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+}
+
+#chrome-right {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  height: 100%;
+}
+
+/* -------------------------------------------------------------- buscador de la barra */
+
+#conv-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  max-width: 340px;
+  height: 30px;
+  padding: 0 8px 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background-color: var(--bg-secondary);
+  color: var(--text-secondary);
+  transition: background-color 140ms, border-color 140ms;
+}
+
+#conv-search:hover {
+  border-color: var(--border);
+}
+
+#conv-search:focus-within {
+  border-color: var(--text-accent);
+  background-color: var(--bg-input);
+}
+
+#conv-search-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 12.5px;
+}
+
+#conv-search-input::placeholder {
+  color: var(--text-secondary);
+  opacity: 1;
+}
+
+/* `type="search"` trae una X nativa de Chromium que no sigue el tema (y aparece/desaparece
+   segun el contenido, moviendo el resto). El filtro se limpia con Escape. */
+#conv-search-input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* Pista de atajo — se esconde en cuanto hay foco, para no competir con el cursor. */
+#conv-search kbd {
+  flex: none;
+  font-family: inherit;
+  font-size: 10.5px;
+  line-height: 1;
+  padding: 3px 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+}
+
+#conv-search:focus-within kbd {
+  display: none;
+}
+
+/* -------------------------------------------------------------- herramientas + controles */
+
+#topbar-tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.chrome-sep {
+  flex: none;
+  width: 1px;
+  height: 18px;
+  margin: 0 6px;
+  background-color: var(--border);
 }
 
 #window-controls {
   display: flex;
-  height: 100%;
-  -webkit-app-region: no-drag;
+  align-items: center;
+  gap: 2px;
 }
 
 .window-btn {
-  width: 44px;
-  height: 100%;
+  width: var(--icon-btn);
+  height: var(--icon-btn);
   border: none;
   background: transparent;
   color: var(--text-secondary);
-  font-size: 13px;
+  border-radius: var(--radius-md);
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background-color 150ms;
+  transition: background-color 140ms, color 140ms;
 }
 
 .window-btn:hover {
   background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.window-btn:focus-visible {
+  outline: 2px solid var(--text-accent);
+  outline-offset: 1px;
 }
 
 .window-btn-close:hover {
@@ -100,4 +213,12 @@ html, body {
   min-width: 0;
   display: flex;
   flex-direction: column;
+}
+
+/* Eje de lectura compartido: chat y composer se alinean sobre la misma columna centrada,
+   así el texto no se estira de borde a borde con la ventana maximizada. */
+.content-col {
+  width: 100%;
+  max-width: var(--content-max);
+  margin: 0 auto;
 }

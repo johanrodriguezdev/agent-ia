@@ -7,7 +7,7 @@
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background-color: rgba(0, 0, 0, 0.45);
+  background-color: var(--overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -18,11 +18,11 @@
 .modal-box {
   background-color: var(--bg-secondary);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   padding: 24px;
   width: 360px;
   max-width: calc(100vw - 48px);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-pop);
 }
 
 .modal-title {
@@ -51,7 +51,7 @@
   border: 1px solid var(--border);
   background: transparent;
   color: var(--text-primary);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 8px 16px;
   font-size: 13px;
   transition: background-color 150ms, border-color 150ms;
@@ -69,4 +69,11 @@
 
 .modal-btn-confirm:hover {
   filter: brightness(1.08);
+}
+
+/* El amarillo del tema claro es mas oscuro que el del oscuro (necesita contrastar contra
+   fondo blanco), asi que ahi el texto casi negro no llega a AA y va blanco. Mismo criterio
+   que el boton de enviar en composer.css. */
+:root[data-theme="light"] .modal-btn-confirm {
+  color: #ffffff;
 }

@@ -8,6 +8,7 @@
 // Verificado además por un grep estructural en tests/test_webview_safe_dom_insertion.py.
 
 import { requestTasks, createTask, completeTask, requestDeleteTask } from "./bridge_client.js";
+import { icon } from "./icons.js";
 
 let _panelOpen = false;   // guard contra doble click (caso borde de SPEC-016)
 
@@ -43,7 +44,7 @@ function renderShell() {
   closeBtn.type = "button";
   closeBtn.className = "panel-close-btn";
   closeBtn.setAttribute("aria-label", "Cerrar");
-  closeBtn.textContent = "✕";
+  closeBtn.appendChild(icon("close", "ic-sm"));
   closeBtn.addEventListener("click", closeTasksPanel);
   header.appendChild(title);
   header.appendChild(closeBtn);
@@ -153,7 +154,8 @@ function buildTaskItem(task) {
   deleteBtn.type = "button";
   deleteBtn.className = "panel-item-btn panel-item-btn-danger";
   deleteBtn.setAttribute("aria-label", "Eliminar tarea");
-  deleteBtn.textContent = "✕";
+  deleteBtn.title = "Eliminar tarea";
+  deleteBtn.appendChild(icon("trash", "ic-sm"));
   deleteBtn.addEventListener("click", () => requestDeleteTask(task.id));   // CA-08: dispara YELLOW
   actions.appendChild(deleteBtn);
 

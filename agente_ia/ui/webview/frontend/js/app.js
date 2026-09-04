@@ -18,6 +18,7 @@ import {
   onEmailCapabilitiesLoaded, onEmailCapabilitySaved, onEmailCapabilitySaveRejected,
   onFlowsLoaded,
   onProfileLoaded, onProfileSaved,
+  onTerminalOutput, onTerminalState, onTerminalTabs,
 } from "./bridge_client.js";
 import {
   initSidebar, renderConversationList, clearActiveConversation, removeConversationFromList,
@@ -32,6 +33,10 @@ import { initTheme, applyTheme } from "./theme.js";
 import { showConfirmModal } from "./confirm_modal.js";
 import { initWindowChrome, setMaximizedState } from "./window_chrome.js";
 import { openTasksPanel, renderTasks } from "./tasks_panel.js";
+import {
+  toggleTerminalPanel, escribirSalida, manejarEstadoTerminal, renderTerminalTabs,
+  refrescarTemaTerminal,
+} from "./terminal_panel.js";
 import { openFlowsPanel, renderFlows } from "./flows_panel.js";
 import {
   openProjectsPanel, renderProjects, renderProjectConversations, handleProjectRemoved,
@@ -62,7 +67,6 @@ function setAgentIdentity(name) {
   const upper = agentName.toUpperCase();
 
   document.getElementById("agent-name-label").textContent = upper;
-  document.getElementById("sidebar-logo").textContent = upper;
   document.getElementById("empty-state-avatar").textContent = agentName.charAt(0).toUpperCase();
   document.getElementById("empty-state-greeting").textContent = timeBasedGreeting();
 }
@@ -80,7 +84,10 @@ async function bootstrap() {
 
   onGuiStateChanged(updateGuiState);
   onWakeStateChanged(setWakeState);
-  onThemeChanged(applyTheme);
+  onThemeChanged((name) => {
+    applyTheme(name);
+    refrescarTemaTerminal();   // xterm pinta sobre canvas: no hereda el cambio de CSS
+  });
   onChipsLoaded((json) => renderChips(JSON.parse(json)));
 
   onConversationListUpdated((json) => renderConversationList(JSON.parse(json)));
@@ -116,7 +123,13 @@ async function bootstrap() {
   });
   onWindowMaximizedChanged(setMaximizedState);
 
-  // REQ-016: botones "Tareas"/"Proyectos" del sidebar + señales de datos de sus modales.
+  // REQ-016: herramientas de la barra superior (Tareas/Flujos/Proyectos) + señales de
+  // datos de sus modales. Antes eran botones con emoji dentro del sidebar.
+  document.getElementById("terminal-btn").addEventListener("click", toggleTerminalPanel);
+  onTerminalOutput(escribirSalida);
+  onTerminalState(manejarEstadoTerminal);
+  onTerminalTabs((json) => renderTerminalTabs(JSON.parse(json)));
+
   document.getElementById("tasks-btn").addEventListener("click", openTasksPanel);
   const flowsBtn = document.getElementById("flows-btn");
   if (flowsBtn) flowsBtn.addEventListener("click", openFlowsPanel);
@@ -126,7 +139,7 @@ async function bootstrap() {
   onProjectConversationsLoaded((json, projectId) => renderProjectConversations(JSON.parse(json), projectId));
   onProjectRemoved((projectId) => handleProjectRemoved(projectId));
 
-  // REQ-019: botón "Configuración" del sidebar + señales de la sección "Seguridad".
+  // REQ-019: "Configuración" (barra superior) + señales de la sección "Seguridad".
   document.getElementById("settings-btn").addEventListener("click", openSettingsPanel);
   // Perfil: `profile_loaded` llega tanto al abrir la sección como después de guardar, así
   // que renombrar al agente se refleja en la ventana al instante, sin reiniciar.

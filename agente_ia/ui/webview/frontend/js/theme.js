@@ -16,8 +16,13 @@ function syncPygmentsLink(themeName) {
 
 function syncToggleIcon(themeName) {
   const btn = $("theme-toggle-btn");
-  btn.textContent = themeName === "dark" ? "☾" : "☀";
-  btn.setAttribute("aria-label", themeName === "dark" ? "Cambiar a tema claro" : "Cambiar a tema oscuro");
+  const label = themeName === "dark" ? "Cambiar a tema claro" : "Cambiar a tema oscuro";
+  // El botón muestra el icono del tema al que va a cambiar, igual que su etiqueta: en
+  // oscuro se ve el sol (click = aclarar), en claro la luna. Solo se reapunta el `<use>`
+  // del sprite, no se reconstruye el nodo.
+  $("theme-toggle-icon").setAttribute("href", themeName === "dark" ? "#ic-sun" : "#ic-moon");
+  btn.setAttribute("aria-label", label);
+  btn.title = label;
 }
 
 export function applyTheme(themeName) {

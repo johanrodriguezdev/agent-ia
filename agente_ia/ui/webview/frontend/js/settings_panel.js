@@ -28,6 +28,7 @@ import {
   requestSecurityOverrides, saveSecurityOverride, requestProfile, saveProfile,
   requestEmailCapabilities, saveEmailCapability,
 } from "./bridge_client.js";
+import { icon } from "./icons.js";
 
 const LEVEL_LABELS = {
   green: "Sin confirmar",
@@ -104,7 +105,7 @@ function renderShell() {
   closeBtn.type = "button";
   closeBtn.className = "panel-close-btn";
   closeBtn.setAttribute("aria-label", "Cerrar");
-  closeBtn.textContent = "✕";
+  closeBtn.appendChild(icon("close", "ic-sm"));
   closeBtn.addEventListener("click", closeSettingsPanel);
   header.appendChild(title);
   header.appendChild(closeBtn);
