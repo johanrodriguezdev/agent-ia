@@ -44,3 +44,101 @@ def test_ca17_orchestrator_ya_no_tiene_register_tool():
     orch = AgentOrchestrator()
     assert not hasattr(orch, "register_tool")
     assert not hasattr(orch, "_tools")
+
+
+# --------------------------------------------------------------------------- cerebro
+
+def test_el_orquestador_llega_al_modelo_cuando_nadie_registro_un_cerebro(monkeypatch):
+    """Bug encontrado en vivo (2026-09-03, log de las 21:48).
+
+    El orquestador se pasaba a sí mismo como `claude_fn`, y como `register_claude_brain()`
+    no se llama en ningún lado de la aplicación, toda tarea que llegaba al resolver
+    'claude' moría con "No hay agente disponible ni Claude configurado" sin tocar el
+    modelo: los disparos proactivos devolvían ese texto en 0.07 segundos, sin red de por
+    medio. Ahora, sin cerebro registrado no se inyecta nada y `_try_claude()` usa el bucle
+    de razonamiento con el canal real — el mismo camino del chat del escritorio.
+    """
+    from types import SimpleNamespace
+
+    import core.resolution as resolution_module
+    from core.orchestrator import AgentOrchestrator
+
+    capturado = {}
+
+    def _resolve_falso(text, channel, user_id, claude_fn=None):
+        capturado["claude_fn"] = claude_fn
+        return SimpleNamespace(text="respuesta del modelo", matched_by="claude")
+
+    monkeypatch.setattr(resolution_module, "resolve", _resolve_falso)
+
+    orquestador = AgentOrchestrator()
+    resultado = orquestador.process_task("¿necesita algo?", channel="desktop")
+
+    assert capturado["claude_fn"] is None, "sin cerebro registrado no se inyecta nada"
+    assert resultado == "respuesta del modelo"
+    assert "No hay agente disponible" not in resultado
+
+
+def test_si_alguien_registra_un_cerebro_el_orquestador_lo_usa(monkeypatch):
+    """El punto de inyección sigue existiendo: lo que se arregló es que no se inyectara un
+    callable que no lleva a ninguna parte."""
+    from types import SimpleNamespace
+
+    import core.resolution as resolution_module
+    from core.orchestrator import AgentOrchestrator
+
+    capturado = {}
+
+    def _resolve_falso(text, channel, user_id, claude_fn=None):
+        capturado["claude_fn"] = claude_fn
+        return SimpleNamespace(text=claude_fn(text) if claude_fn else "sin cerebro",
+                               matched_by="claude")
+
+    monkeypatch.setattr(resolution_module, "resolve", _resolve_falso)
+
+    orquestador = AgentOrchestrator()
+    orquestador.register_claude_brain(lambda t: f"cerebro propio: {t}")
+    resultado = orquestador.process_task("hola", channel="desktop")
+
+    assert capturado["claude_fn"] is not None
+    assert resultado == "cerebro propio: hola"
+
+
+def test_el_fallback_sin_cerebro_avisa_en_el_log(caplog):
+    """Ya no es alcanzable desde `process_task()`, pero si alguien lo llama a mano tiene
+    que quedar dicho por qué no respondió, en vez de devolver un texto que parece una
+    respuesta del agente."""
+    import logging
+
+    from core.orchestrator import AgentOrchestrator
+
+    orquestador = AgentOrchestrator()
+    with caplog.at_level(logging.WARNING, logger="core.orchestrator"):
+        respuesta = orquestador.fallback_to_claude("cualquier cosa")
+
+    assert "No hay agente disponible" in respuesta
+    assert any("sin cerebro registrado" in r.message for r in caplog.records)
+
+
+def test_la_tarea_del_orquestador_llega_al_bucle_de_razonamiento(monkeypatch):
+    """Prueba de la cadena entera, que es donde estaba el corte: orquestador -> resolve()
+    -> resolver 'claude' -> bucle de razonamiento, con el canal real. Antes se detenia en
+    el segundo salto."""
+    import core.reasoning_loop as reasoning_module
+    from core.orchestrator import AgentOrchestrator
+    from core.security_manager import ChannelType
+
+    llamadas = []
+
+    def _razonar_falso(task, channel, user_id="default", agent_name="reasoning_loop"):
+        llamadas.append((task, channel, user_id))
+        return "lo resolvio el modelo"
+
+    monkeypatch.setattr(reasoning_module, "run", _razonar_falso)
+
+    resultado = AgentOrchestrator().process_task("¿todo en orden?", channel="desktop")
+
+    assert resultado == "lo resolvio el modelo"
+    assert len(llamadas) == 1
+    # El canal llega RESUELTO, no como string: es lo que decide que permisos aplican.
+    assert llamadas[0][1] == ChannelType.DESKTOP

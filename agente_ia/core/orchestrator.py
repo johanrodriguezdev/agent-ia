@@ -47,7 +47,19 @@ class AgentOrchestrator:
         logger.info(f"Orquestador procesando tarea (canal={channel}, user={user_id}): {text[:80]}")
 
         from core.resolution import resolve
-        result = resolve(text, channel, user_id, claude_fn=self.fallback_to_claude)
+        # Se inyecta un cerebro SOLO si alguien lo registró. Antes se pasaba siempre
+        # `self.fallback_to_claude`, y como `register_claude_brain()` no se llama en ningún
+        # lado de la aplicación, ese camino terminaba SIEMPRE en el cartel "No hay agente
+        # disponible ni Claude configurado": el orquestador jamás llegaba al modelo. Se vio
+        # en vivo el 2026-09-03: los tres disparos proactivos murieron en 0.07s, sin red de
+        # por medio, devolviendo ese texto como si fuera una respuesta.
+        #
+        # Sin inyección, `_try_claude()` usa el bucle de razonamiento con el canal REAL ya
+        # resuelto — que además es lo correcto en seguridad: `fallback_to_claude(text)` no
+        # recibe canal, así que un cerebro llamado desde ahí no podría saber qué permisos
+        # aplican. Es exactamente el mismo camino que usa el chat del escritorio, que por
+        # no pasar por el orquestador era lo único que seguía funcionando.
+        result = resolve(text, channel, user_id, claude_fn=self._claude_brain)
 
         elapsed = time.time() - start
         logger.info(f"Tarea resuelta via '{result.matched_by}' en {elapsed:.2f}s")
@@ -160,6 +172,10 @@ class AgentOrchestrator:
                 return self._claude_brain(text)
             except Exception as e:
                 logger.error(f"Claude Brain falló: {e}")
+        # Ya no es alcanzable desde `process_task()` (ver el comentario de `resolve()` más
+        # arriba): queda para quien llame a este método a mano, y por eso el texto dice qué
+        # falta en vez de sonar a fallo del sistema.
+        logger.warning("fallback_to_claude() sin cerebro registrado — no hay a quién preguntarle")
         return f"No pude procesar: '{text[:60]}'. No hay agente disponible ni Claude configurado."
 
 

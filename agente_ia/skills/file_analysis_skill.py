@@ -1,8 +1,18 @@
 import os
+import re
 from typing import Dict, List, Tuple, Any
 from skills.base_skill import BaseSkill
 from ai.llm_provider import generate_response
 from core.address import vocative, vocative_start
+
+#: Ruta absoluta dentro de un texto: "C:\Users\yo\informe.pdf" o "/home/yo/informe.pdf".
+#: Se corta en el corchete de cierre para que el marcador "[Archivo adjunto: ...]" no se
+#: lleve el corchete pegado al nombre.
+_RUTA_ABSOLUTA = re.compile(
+    r"([A-Za-z]:\\[^\n\]\"<>|?*]+\.\w{2,5}"     # C:\Users\yo\informe.pdf
+    r"|/[^\s\]\"<>|?*]+\.\w{2,5})"              # /home/yo/informe.pdf
+)
+
 
 class FileAnalysisSkill(BaseSkill):
     @property
@@ -34,6 +44,13 @@ class FileAnalysisSkill(BaseSkill):
         m = re.search(r'(?:analiza el archivo|resumen de(?:l)?(?: documento| archivo)?|que dice el archivo|haz un resumen de)\s+(.+)', text.lower())
         if m:
             params["filename"] = m.group(1).strip()
+        elif _RUTA_ABSOLUTA.search(text):
+            # Una ruta completa en el texto es la referencia mas fuerte que puede haber, y
+            # es lo que manda el adjunto del panel de escritorio ("[Archivo adjunto: ...]").
+            # Antes ganaba el fallback de mas abajo, que se quedaba solo con el nombre del
+            # archivo y despues lo buscaba en el Escritorio y en Documentos: si estaba en
+            # cualquier otra carpeta, no aparecia.
+            params["filename"] = _RUTA_ABSOLUTA.search(text).group(1).strip()
         else:
             # Fallback a capturar cualquier extension de archivo si la hay
             nums_out = re.findall(r'\b([\w\-.]+\.\w{2,4})\b', text)

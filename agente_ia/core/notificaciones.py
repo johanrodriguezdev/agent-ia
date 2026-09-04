@@ -48,6 +48,17 @@ def clear_notifier() -> None:
     register_notifier(None)
 
 
+def hay_notificador() -> bool:
+    """¿Hay alguien mostrando los avisos ahora mismo?
+
+    Lo consulta quien tenga un camino propio para avisar (el recordatorio de una tarea sabe
+    levantar un globo de Windows por su cuenta) y no quiera avisar dos veces si la ventana
+    ya lo va a mostrar.
+    """
+    with _lock:
+        return _notificador is not None
+
+
 def notificar(titulo: str, mensaje: str = "", nivel: str = "info") -> None:
     """Avisa de algo que pasó. Silencioso si nadie escucha."""
     titulo = (titulo or "").strip()

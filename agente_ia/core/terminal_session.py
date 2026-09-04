@@ -484,7 +484,13 @@ class TerminalSession:
 
     @staticmethod
     def _record_command(line: str) -> None:
-        logger.warning(f"terminal: comando ejecutado | {line}")
+        # INFO y no WARNING: la accion amarilla es ABRIR la sesion, y esa ya la registra
+        # `require_confirmation()` con su nivel. Cada comando dentro de una terminal que el
+        # usuario abrio a proposito no es una anomalia — y en WARNING competian con los
+        # avisos que si importan (en las sesiones reales del 2026-09-03, los unicos WARNING
+        # eran estos). El rastro fuerte no es el log igual: es la fila de auditoria de
+        # abajo, que no depende del nivel.
+        logger.info(f"terminal: comando ejecutado | {line}")
         try:
             from core.security_manager import ChannelType, security_manager
 

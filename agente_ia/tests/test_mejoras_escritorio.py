@@ -9,7 +9,8 @@ Los botones que las usan se prueban aparte, sobre la ventana real, en
 tarde, qué queda registrado, qué devuelve una búsqueda.
 
 Ninguno de estos tests toca la base de datos real ni la configuración real: la memoria se
-apunta a un archivo temporal y `config.json` se lee y escribe en `tmp_path`.
+apunta a un archivo temporal y `config.json` se lee y escribe en `tmp_path`. Lo mismo vale
+para el log — ver la última sección de este archivo.
 """
 
 import json
@@ -527,3 +528,273 @@ def test_el_catalogo_de_modelos_no_acepta_cualquier_cosa():
     for datos in bridge._MODELOS_CONOCIDOS.values():
         assert datos["modelos"], "un proveedor sin modelos no se puede elegir"
         assert datos["label"]
+
+
+# --------------------------------------------------------------------------- log de la suite
+
+def test_el_log_se_puede_mandar_a_otro_archivo(monkeypatch, tmp_path):
+    from core import logger_setup
+
+    otro = tmp_path / "otro.log"
+    monkeypatch.setenv(logger_setup.LOG_FILE_ENV, str(otro))
+    assert logger_setup.log_file_path() == str(otro)
+
+
+def test_sin_variable_el_log_va_al_de_la_aplicacion(monkeypatch):
+    from core import logger_setup
+
+    monkeypatch.delenv(logger_setup.LOG_FILE_ENV, raising=False)
+    assert logger_setup.log_file_path() == logger_setup.LOG_FILE
+
+
+def test_la_suite_no_escribe_en_el_log_de_la_aplicacion():
+    """`tests/conftest.py` fija `ORION_LOG_FILE` antes de cualquier import. Si alguien lo
+    saca, los tests vuelven a mezclarse con el log real y depurar un problema del usuario
+    se convierte en arqueología: al investigar por qué el micrófono ignoró un comando
+    (2026-09-03) aparecían errores de terminal y de wake word que eran de la propia suite.
+    """
+    import os
+
+    from core import logger_setup
+
+    destino = os.environ.get(logger_setup.LOG_FILE_ENV, "")
+    assert destino, "conftest.py tiene que fijar ORION_LOG_FILE"
+    assert destino != logger_setup.LOG_FILE
+    assert destino.endswith("orion-tests.log")
+
+
+# --------------------------------------------------------------------------- adjuntos
+
+@pytest.fixture
+def bridge_minimo(monkeypatch):
+    """`Bridge` sin `QObject.__init__`: solo el estado que tocan estos caminos."""
+    from unittest.mock import MagicMock
+
+    from ui.webview.bridge import Bridge
+
+    bridge = Bridge.__new__(Bridge)
+    bridge._pending_attachment = None
+    bridge._pending_user_text = ""
+    bridge._resolution_in_flight = False
+    bridge._turno_id = None
+    bridge._turno_cancelado_id = None
+    bridge._conversation_id = "c1"
+    bridge.file_attached = MagicMock()
+    bridge.notice_shown = MagicMock()
+    return bridge
+
+
+def test_adjuntar_un_archivo_lo_deja_listo_para_el_proximo_mensaje(bridge_minimo, tmp_path):
+    """Antes la ruta se emitía hacia JS y ahí moría: se veía el nombre en un chip y el
+    agente nunca se enteraba de que había un archivo."""
+    from ui.webview.bridge import Bridge
+
+    archivo = tmp_path / "informe.txt"
+    archivo.write_text("contenido", encoding="utf-8")
+
+    assert Bridge.attach_file(bridge_minimo, str(archivo)) is True
+    assert bridge_minimo._pending_attachment == str(archivo)
+    bridge_minimo.file_attached.emit.assert_called_once()
+
+
+def test_un_archivo_rechazado_no_queda_pendiente(bridge_minimo, tmp_path):
+    """La validación es la misma del drag&drop (`file_drop.validate_dropped_file`): lo que
+    no pasa el filtro tampoco puede viajar con el mensaje."""
+    from ui.webview.bridge import Bridge
+
+    prohibido = tmp_path / "cosa.exe"
+    prohibido.write_bytes(b"MZ")
+
+    assert Bridge.attach_file(bridge_minimo, str(prohibido)) is False
+    assert bridge_minimo._pending_attachment is None
+
+
+def test_el_mensaje_lleva_la_ruta_completa_del_adjunto(bridge_minimo, tmp_path):
+    from ui.webview.bridge import Bridge
+
+    archivo = tmp_path / "informe.txt"
+    archivo.write_text("contenido", encoding="utf-8")
+    bridge_minimo._pending_attachment = str(archivo)
+
+    texto = Bridge._con_adjunto(bridge_minimo, "resumime esto")
+
+    assert "resumime esto" in texto
+    assert str(archivo) in texto
+    assert "[Archivo adjunto:" in texto
+
+
+def test_el_adjunto_viaja_una_sola_vez(bridge_minimo, tmp_path):
+    """Adjuntar una vez y que se pegue a los diez mensajes siguientes sería peor que no
+    adjuntar."""
+    from ui.webview.bridge import Bridge
+
+    archivo = tmp_path / "informe.txt"
+    archivo.write_text("contenido", encoding="utf-8")
+    bridge_minimo._pending_attachment = str(archivo)
+
+    primero = Bridge._con_adjunto(bridge_minimo, "uno")
+    segundo = Bridge._con_adjunto(bridge_minimo, "dos")
+
+    assert str(archivo) in primero
+    assert str(archivo) not in segundo
+    assert segundo == "dos"
+
+
+def test_un_adjunto_que_ya_no_existe_avisa_y_no_ensucia_el_mensaje(bridge_minimo, tmp_path):
+    """El archivo se pudo mover o borrar entre adjuntarlo y mandar el mensaje: mejor
+    decirlo que mandarle al agente una ruta que no lleva a nada."""
+    from ui.webview.bridge import Bridge
+
+    bridge_minimo._pending_attachment = str(tmp_path / "no-esta.txt")
+
+    texto = Bridge._con_adjunto(bridge_minimo, "resumime esto")
+
+    assert texto == "resumime esto"
+    bridge_minimo.notice_shown.emit.assert_called_once()
+    assert bridge_minimo._pending_attachment is None
+
+
+def test_sacar_el_chip_descarta_el_adjunto(bridge_minimo, tmp_path):
+    from ui.webview.bridge import Bridge
+
+    bridge_minimo._pending_attachment = str(tmp_path / "algo.txt")
+    Bridge.clear_attachment(bridge_minimo)
+    assert bridge_minimo._pending_attachment is None
+
+
+def test_la_skill_de_archivos_entiende_una_ruta_absoluta():
+    """El marcador que arma el bridge tiene que ser legible por el camino que de verdad
+    abre el archivo. Antes ganaba el fallback que se quedaba solo con el nombre y después
+    lo buscaba en el Escritorio y en Documentos: en cualquier otra carpeta, no aparecía."""
+    from skills.file_analysis_skill import FileAnalysisSkill
+
+    skill = FileAnalysisSkill()
+    texto = "resumime esto\n\n[Archivo adjunto: C:\\Users\\yo\\informe.pdf]"
+    assert skill.extract_params("FILE_ANALYSIS", texto)["filename"] == "C:\\Users\\yo\\informe.pdf"
+
+    posix = "que dice el archivo /home/yo/notas.md"
+    assert skill.extract_params("FILE_ANALYSIS", posix)["filename"] == "/home/yo/notas.md"
+
+
+def test_la_skill_de_archivos_sigue_entendiendo_lo_de_siempre():
+    """Sin ruta absoluta, el comportamiento no cambia."""
+    from skills.file_analysis_skill import FileAnalysisSkill
+
+    skill = FileAnalysisSkill()
+    assert skill.extract_params(
+        "FILE_ANALYSIS", "analiza el archivo reporte.csv")["filename"] == "reporte.csv"
+
+
+# --------------------------------------------------------------------------- avisos que llegan
+
+def test_lo_proactivo_sale_por_el_canal_de_avisos(monkeypatch):
+    """El motor pensaba, gastaba una llamada al modelo, y la respuesta moría en un archivo
+    de log que nadie mira."""
+    import main
+
+    recibidos = []
+    notificaciones.register_notifier(lambda t, m, n: recibidos.append((t, m, n)))
+    try:
+        main._avisar_proactivo("Tenés tres correos sin leer")
+    finally:
+        notificaciones.clear_notifier()
+
+    assert len(recibidos) == 1
+    assert "tres correos" in recibidos[0][1]
+
+
+def test_un_aviso_proactivo_vacio_no_molesta_a_nadie():
+    import main
+
+    recibidos = []
+    notificaciones.register_notifier(lambda t, m, n: recibidos.append(t))
+    try:
+        main._avisar_proactivo("")
+    finally:
+        notificaciones.clear_notifier()
+
+    assert recibidos == []
+
+
+def test_el_recordatorio_usa_la_ventana_y_no_levanta_powershell(monkeypatch):
+    """Con la aplicación abierta, el globo de Windows era un segundo aviso para lo mismo —
+    y levantar PowerShell para dibujarlo, el camino más caro de todos."""
+    import subprocess
+
+    from tasks.task_scheduler import TaskScheduler
+
+    monkeypatch.setattr("ui.tts_engine.speak", lambda *a, **k: None, raising=False)
+
+    corridos = []
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: corridos.append(a))
+
+    avisos = []
+    notificaciones.register_notifier(lambda t, m, n: avisos.append((t, m)))
+    try:
+        TaskScheduler._notify_local(TaskScheduler(), "llamar al contador", 7)
+    finally:
+        notificaciones.clear_notifier()
+
+    assert avisos and avisos[0][1] == "llamar al contador"
+    assert corridos == [], "con la ventana escuchando, el globo del sistema sobra"
+
+
+def test_sin_ventana_el_recordatorio_cae_al_globo_de_windows(monkeypatch):
+    """Sin aplicación de escritorio (solo bots, o la ventana cerrada) el recordatorio tiene
+    que seguir llegando: para eso queda el camino viejo."""
+    import subprocess
+
+    from tasks.task_scheduler import TaskScheduler
+
+    monkeypatch.setattr("ui.tts_engine.speak", lambda *a, **k: None, raising=False)
+
+    corridos = []
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: corridos.append(a))
+    notificaciones.clear_notifier()
+
+    TaskScheduler._notify_local(TaskScheduler(), "llamar al contador", 7)
+
+    assert len(corridos) == 1
+
+
+# --------------------------------------------------------------------------- arranque
+
+def test_el_modelo_semantico_se_carga_del_cache_sin_tocar_la_red(monkeypatch):
+    """45 segundos y ~20 peticiones a huggingface.co en cada arranque, con el modelo ya
+    descargado (medido en el log del 2026-09-03). Sin conexión, además, se queda esperando
+    a que expiren los timeouts."""
+    import ai.embedding_engine as engine
+
+    llamadas = []
+
+    class _ModeloFalso:
+        def __init__(self, nombre, device=None, local_files_only=False):
+            llamadas.append(local_files_only)
+
+    monkeypatch.setattr(engine, "SentenceTransformer", _ModeloFalso)
+    monkeypatch.setattr(engine, "_model", None)
+
+    engine.get_model()
+
+    assert llamadas == [True], "el primer intento tiene que ser sin red"
+
+
+def test_si_no_esta_en_cache_se_descarga_igual(monkeypatch):
+    """La primera vez de todas no hay caché: ahí tiene que caer a la descarga normal, que
+    es exactamente lo que hacía antes."""
+    import ai.embedding_engine as engine
+
+    llamadas = []
+
+    class _ModeloFalso:
+        def __init__(self, nombre, device=None, local_files_only=False):
+            llamadas.append(local_files_only)
+            if local_files_only:
+                raise OSError("no está en el caché")
+
+    monkeypatch.setattr(engine, "SentenceTransformer", _ModeloFalso)
+    monkeypatch.setattr(engine, "_model", None)
+
+    engine.get_model()
+
+    assert llamadas == [True, False]

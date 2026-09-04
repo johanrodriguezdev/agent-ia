@@ -153,11 +153,31 @@ class TaskScheduler:
             self._notify_local(title, task_id)
 
     def _notify_local(self, title: str, task_id):
+        """Avisa de un recordatorio vencido: en voz, y por pantalla.
+
+        El aviso visual va primero por el canal de la aplicación
+        (`core/notificaciones.py`): si la ventana está abierta, el recordatorio aparece
+        ahí, con el mismo aspecto que el resto de los avisos. El globo de Windows
+        —levantar PowerShell para dibujarlo— queda SOLO para cuando no hay ventana
+        escuchando: con la app abierta era un segundo aviso, del sistema, para lo mismo.
+        """
         try:
             from ui.tts_engine import speak
             speak(f"{vocative_start()}recuerde: {title}")
-        except Exception:
-            pass
+        except Exception as e:
+            # Antes esto era un `except: pass`: si el recordatorio no sonaba, no quedaba
+            # rastro de por qué (va contra `.claude/rules/python-style.md`).
+            logger.warning(f"no se pudo pronunciar el recordatorio '{title}': {e}")
+
+        try:
+            from core.notificaciones import hay_notificador, notificar
+
+            notificar("Recordatorio", title, "info")
+            if hay_notificador():
+                return          # la ventana ya lo mostró; el globo del sistema sobra
+        except Exception as e:
+            logger.warning(f"no se pudo avisar del recordatorio '{title}': {e}")
+
         try:
             import subprocess
             ps_script = (
@@ -171,8 +191,8 @@ class TaskScheduler:
                 f'Start-Sleep -Seconds 5'
             )
             subprocess.run(["powershell", "-Command", ps_script], capture_output=True, timeout=10)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"no se pudo mostrar el globo de Windows para '{title}': {e}")
 
     def _send_telegram_message(self, chat_id: str, text: str):
         """Envía un mensaje de Telegram mediante petición HTTP directa."""

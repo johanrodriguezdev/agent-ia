@@ -442,6 +442,28 @@ def test_manager_listado_describe_las_pestanas(manager):
     assert filas[0]["titulo"] and filas[0]["cwd"]
 
 
+def test_el_comando_se_registra_en_info_y_no_en_warning(caplog, monkeypatch):
+    """La accion amarilla es ABRIR la sesion, y esa la registra `require_confirmation()`
+    con su nivel. Cada comando dentro de una terminal que el usuario abrio a proposito no
+    es una anomalia: en WARNING competia con los avisos que si importan (en las sesiones
+    reales del 2026-09-03, los unicos WARNING del log eran estos)."""
+    import logging
+
+    from core.security_manager import security_manager
+
+    auditado = []
+    monkeypatch.setattr(security_manager, "log_action",
+                        lambda accion, canal, resultado, **kw: auditado.append(accion))
+
+    with caplog.at_level(logging.INFO, logger="core.terminal_session"):
+        TerminalSession._record_command("git status")
+
+    registros = [r for r in caplog.records if "comando ejecutado" in r.message]
+    assert [r.levelname for r in registros] == ["INFO"]
+    # El rastro fuerte no es el log: es la fila de auditoria, que no depende del nivel.
+    assert auditado == ["terminal_command"]
+
+
 # --------------------------------------------------------------------------- seguridad
 
 def test_abrir_la_terminal_es_amarillo():

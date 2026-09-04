@@ -82,7 +82,28 @@ try:
 except Exception as e:
     logger.error(f"No se pudieron conectar los servidores MCP: {e}")
 
-proactive_engine.set_notify_callback(lambda msg: msg and logger.info(f"[Proactivo] {msg}"))
+def _avisar_proactivo(msg: str) -> None:
+    """Destino de lo que produce el motor proactivo.
+
+    Antes solo se registraba en el log: el motor pensaba, gastaba una llamada al modelo y
+    la respuesta moría en un archivo que nadie mira. Ahora sale por el canal de avisos
+    (`core/notificaciones.py`), que la muestra en la bandeja del sistema y —si la ventana
+    está abierta— también dentro de la aplicación.
+    """
+    if not msg:
+        return
+    logger.info(f"[Proactivo] {msg}")
+    # Import local: esta función se define antes de la sección de imports de
+    # `config_manager` de más abajo, y en el cuerpo se resolvería igual por ser tardío —
+    # pero dejarlo explícito evita que un reordenamiento futuro lo rompa en silencio.
+    from config_manager import get_agent_name
+    from core.notificaciones import notificar
+
+    texto = " ".join(str(msg).split())
+    notificar(get_agent_name(), texto[:300], "info")
+
+
+proactive_engine.set_notify_callback(_avisar_proactivo)
 
 # ── Registrar triggers proactivos ──────────────────────────────
 class _ProactiveAssistant:
