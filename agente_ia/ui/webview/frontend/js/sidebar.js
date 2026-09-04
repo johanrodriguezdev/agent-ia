@@ -11,6 +11,7 @@
 import {
   newConversation, selectConversation, requestDeleteConversation, loadMoreConversations,
 } from "./bridge_client.js";
+import { icon } from "./icons.js";
 
 // Debe coincidir con `ui/webview/bridge.py::_CONVERSATION_PAGE_SIZE` — usado solo para
 // decidir si "Ver más" sigue teniendo sentido (arquitectura-015.md §10.2 nota de diseño
@@ -60,7 +61,8 @@ function buildConversationItem(conv) {
   deleteBtn.type = "button";
   deleteBtn.className = "conv-delete-btn";
   deleteBtn.setAttribute("aria-label", "Eliminar conversación");
-  deleteBtn.textContent = "✕";
+  deleteBtn.title = "Eliminar conversación";
+  deleteBtn.appendChild(icon("trash", "ic-sm"));
   deleteBtn.addEventListener("click", (evt) => {
     evt.stopPropagation();
     // §10.2: la confirmación YELLOW ahora la resuelve `security_manager` del lado
@@ -87,9 +89,17 @@ function applySearchFilter() {
   }
 }
 
+function setCollapsed(collapsed) {
+  const btn = $("sidebar-collapse-toggle");
+  $("sidebar").classList.toggle("collapsed", collapsed);
+  const label = collapsed ? "Expandir panel lateral" : "Colapsar panel lateral";
+  btn.setAttribute("aria-label", label);
+  btn.title = label;
+}
+
 export function initSidebar() {
   $("sidebar-collapse-toggle").addEventListener("click", () => {
-    $("sidebar").classList.toggle("collapsed");
+    setCollapsed(!$("sidebar").classList.contains("collapsed"));
   });
 
   $("new-conversation-btn").addEventListener("click", () => {
@@ -101,16 +111,32 @@ export function initSidebar() {
     loadMoreConversations(_count);
   });
 
-  $("sidebar-search-toggle").addEventListener("click", () => {
-    const row = $("sidebar-search-row");
-    row.hidden = !row.hidden;
-    $("sidebar-search-toggle").classList.toggle("active", !row.hidden);
-    if (!row.hidden) $("sidebar-search-input").focus();
-  });
+  // El buscador ahora vive en la barra superior y está siempre visible (antes era un
+  // toggle que abría una fila extra dentro del sidebar). Sigue filtrando client-side
+  // sobre los `.conv-item` ya renderizados, sin round-trip al bridge (REQ-016/CA-03).
+  const search = $("conv-search-input");
 
-  $("sidebar-search-input").addEventListener("input", (evt) => {
+  search.addEventListener("input", (evt) => {
     _searchTerm = evt.target.value.trim().toLowerCase();
     applySearchFilter();
+  });
+
+  // Buscar con el sidebar colapsado no tendría dónde mostrar el resultado: se expande.
+  search.addEventListener("focus", () => setCollapsed(false));
+
+  document.addEventListener("keydown", (evt) => {
+    if ((evt.ctrlKey || evt.metaKey) && (evt.key === "k" || evt.key === "K")) {
+      evt.preventDefault();
+      search.focus();
+      search.select();
+      return;
+    }
+    // Escape limpia el filtro en vez de dejar la lista recortada sin que se vea por qué.
+    if (evt.key === "Escape" && document.activeElement === search && search.value !== "") {
+      search.value = "";
+      _searchTerm = "";
+      applySearchFilter();
+    }
   });
 }
 

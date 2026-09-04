@@ -15,6 +15,7 @@
 import {
   requestFlows, runFlow, cancelFlow, requestDeleteFlow, removeFlowStep,
 } from "./bridge_client.js";
+import { icon } from "./icons.js";
 
 let _panelOpen = false;
 
@@ -60,7 +61,7 @@ function renderShell() {
   closeBtn.type = "button";
   closeBtn.className = "panel-close-btn";
   closeBtn.setAttribute("aria-label", "Cerrar");
-  closeBtn.textContent = "✕";
+  closeBtn.appendChild(icon("close", "ic-sm"));
   closeBtn.addEventListener("click", closeFlowsPanel);
   header.append(title, closeBtn);
 
@@ -176,7 +177,7 @@ function buildStep(flujo, paso, indice) {
     const quitar = document.createElement("button");
     quitar.type = "button";
     quitar.className = "flow-step-remove";
-    quitar.textContent = "✕";
+    quitar.appendChild(icon("close", "ic-sm"));
     quitar.setAttribute("aria-label", `Quitar el paso ${indice + 1}: ${paso.accion}`);
     quitar.addEventListener("click", () => {
       quitar.disabled = true;

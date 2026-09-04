@@ -1,0 +1,89 @@
+/* ui/webview/frontend/css/icons.css
+   Rediseño — sistema de iconos. Todos los iconos de la interfaz son SVG de trazo
+   definidos UNA sola vez como `<symbol>` en el sprite de `index.html` y referenciados con
+   `<use href="#ic-...">` (estáticos) o vía `js/icons.js` (los que crea el JS).
+
+   Por qué SVG y no emoji: los emoji que usaba la interfaz (📋 ⚙ 📁 📎 🎤 ➤ 🔍) los pinta
+   la fuente del sistema, así que llegan a color, con peso de trazo y tamaño óptico
+   distintos entre sí, y no siguen el tema. Un trazo de 1.75px en `currentColor` sí: mismo
+   grosor, mismo tamaño, y cambia de color con el resto de la superficie.
+
+   El grosor y el tamaño se declaran acá una vez, en el elemento `<svg>`: `stroke`,
+   `stroke-width`, `fill` y los `linecap/linejoin` son propiedades heredadas, así que las
+   toman los `<path>` clonados del `<symbol>` sin repetirlas en cada uno.
+*/
+
+/* El sprite no se dibuja: se referencia. Se saca del flujo en vez de `display: none`
+   para no depender del comportamiento del motor con `<use>` dentro de un ancestro
+   oculto. */
+#icon-sprite {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.ic {
+  display: block;
+  flex: none;
+  width: var(--icon);
+  height: var(--icon);
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  /* El click siempre es del botón, nunca del SVG — así `evt.target` en los listeners
+     delegados nunca es un nodo interno del icono. */
+  pointer-events: none;
+}
+
+.ic-sm { width: 14px; height: 14px; }
+.ic-lg { width: 18px; height: 18px; }
+
+/* -------------------------------------------------------------- botón de icono genérico */
+
+.icon-btn {
+  flex: none;
+  width: var(--icon-btn);
+  height: var(--icon-btn);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: var(--radius-md);
+  transition: background-color 140ms, color 140ms;
+}
+
+.icon-btn:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.icon-btn:active {
+  transform: scale(0.94);
+}
+
+/* Foco visible en todos los controles de icono: son botones sin texto, sin el foco
+   dibujado no hay forma de navegarlos con teclado. */
+.icon-btn:focus-visible {
+  outline: 2px solid var(--text-accent);
+  outline-offset: 1px;
+}
+
+.icon-btn.active {
+  background-color: var(--bg-hover);
+  color: var(--text-accent);
+}
+
+.icon-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .icon-btn:active { transform: none; }
+}

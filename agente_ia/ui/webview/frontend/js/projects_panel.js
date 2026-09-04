@@ -10,6 +10,7 @@ import {
   requestProjects, createProject, assignConversationToProject,
   unassignConversationFromProject, requestProjectConversations, requestDeleteProject,
 } from "./bridge_client.js";
+import { icon } from "./icons.js";
 import { getLoadedConversations } from "./sidebar.js";   // REQ-016/§0.2
 
 let _panelOpen = false;
@@ -49,7 +50,7 @@ function renderMasterShell() {
   closeBtn.type = "button";
   closeBtn.className = "panel-close-btn";
   closeBtn.setAttribute("aria-label", "Cerrar");
-  closeBtn.textContent = "✕";
+  closeBtn.appendChild(icon("close", "ic-sm"));
   closeBtn.addEventListener("click", closeProjectsPanel);
   header.appendChild(title);
   header.appendChild(closeBtn);
@@ -137,7 +138,8 @@ function buildProjectItem(project) {
   deleteBtn.type = "button";
   deleteBtn.className = "panel-item-btn panel-item-btn-danger";
   deleteBtn.setAttribute("aria-label", "Eliminar proyecto");
-  deleteBtn.textContent = "✕";
+  deleteBtn.title = "Eliminar proyecto";
+  deleteBtn.appendChild(icon("trash", "ic-sm"));
   deleteBtn.addEventListener("click", () => requestDeleteProject(project.id));   // CA-18: YELLOW
   actions.appendChild(deleteBtn);
 
@@ -184,7 +186,7 @@ function renderDetailShell(projectId, projectName) {
   closeBtn.type = "button";
   closeBtn.className = "panel-close-btn";
   closeBtn.setAttribute("aria-label", "Cerrar");
-  closeBtn.textContent = "✕";
+  closeBtn.appendChild(icon("close", "ic-sm"));
   closeBtn.addEventListener("click", closeProjectsPanel);
 
   header.append(backBtn, title, closeBtn);

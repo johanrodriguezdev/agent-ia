@@ -5,11 +5,16 @@
    objectName como en QSS (ver arquitectura-015.md §5.1). Un test automatizado
    (`tests/test_webview_smoke.py`) lee `getComputedStyle()` de `#composer-input` y falla
    si el borde/fondo quedan transparentes o el placeholder vacío.
+
+   Rediseño: el composer pasa de píldora de una fila a tarjeta de dos filas — el texto
+   arriba, ocupando todo el ancho, y los controles abajo. Con la píldora, escribir tres
+   líneas empujaba los iconos y el texto quedaba en un canal angosto entre botones; acá el
+   área de escritura no cambia de forma al crecer.
 */
 
 #composer {
   flex: none;
-  padding: 12px 24px 20px;
+  padding: 4px 24px 18px;
 }
 
 #chips-row {
@@ -25,16 +30,22 @@
   gap: 6px;
   border: 1px solid var(--border);
   background-color: var(--bg-secondary);
-  color: var(--text-primary);
-  border-radius: 999px;
-  padding: 7px 14px;
+  color: var(--text-secondary);
+  border-radius: var(--radius-pill);
+  padding: 6px 13px;
   font-size: 12.5px;
-  transition: background-color 150ms, border-color 150ms;
+  transition: background-color 140ms, border-color 140ms, color 140ms;
 }
 
 .chip:hover {
   background-color: var(--bg-hover);
-  border-color: var(--text-accent);
+  border-color: var(--text-secondary);
+  color: var(--text-primary);
+}
+
+.chip:focus-visible {
+  outline: 2px solid var(--text-accent);
+  outline-offset: 1px;
 }
 
 .chip-risk-dot {
@@ -50,13 +61,13 @@
 
 #composer-input-row {
   display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  /* CA-05: borde y fondo declarados acá, en la fila completa (look "píldora" — CA-46). */
+  flex-direction: column;
+  gap: 4px;
+  /* CA-05: borde y fondo declarados acá, en la tarjeta completa. */
   border: 1px solid var(--border);
   background-color: var(--bg-input);
-  border-radius: 22px;
-  padding: 8px 10px 8px 14px;
+  border-radius: var(--radius-lg);
+  padding: 8px 8px 8px 12px;
   transition: border-color 150ms, background-color 200ms;
 }
 
@@ -65,7 +76,7 @@
 }
 
 #composer-input {
-  flex: 1;
+  width: 100%;
   min-width: 0;
   resize: none;
   border: none;
@@ -73,9 +84,9 @@
   background: transparent;
   color: var(--text-primary);
   font-size: 14px;
-  line-height: 1.4;
-  padding: 6px 4px;
-  max-height: 120px;
+  line-height: 1.45;
+  padding: 5px 2px 2px;
+  max-height: 140px;
   overflow-y: auto;
 }
 
@@ -89,46 +100,38 @@
   opacity: 0.6;
 }
 
-.composer-icon-btn {
-  flex: none;
-  width: 36px;
-  height: 36px;
-  border: none;
-  background: transparent;
-  color: var(--text-secondary);
-  border-radius: 50%;
-  font-size: 15px;
+#composer-actions {
   display: flex;
   align-items: center;
-  justify-content: center;
-  transition: background-color 150ms, color 150ms;
+  justify-content: space-between;
+  gap: 8px;
 }
 
-.composer-icon-btn:hover {
-  background-color: var(--bg-hover);
-  color: var(--text-primary);
+#composer-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
-.composer-icon-btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
+/* Único relleno de color de la pantalla — el resto de los controles son de trazo. */
 .composer-send-btn {
+  border-radius: 50%;
   background-color: var(--text-accent);
   color: #ffffff;
 }
 
 .composer-send-btn:hover {
   background-color: var(--text-accent);
-  filter: brightness(1.1);
+  color: #ffffff;
+  filter: brightness(1.08);
 }
 
-/* CA-36: blanco sobre `--text-accent` da solo 2.53:1 en dark (`#58a6ff` es un azul
-   claro/brillante) — muy por debajo incluso del umbral de 3:1 para componentes de UI no
-   textuales. `--bg-primary` (oscuro) sobre ese mismo azul da 7.49:1. En light,
-   `--text-accent` es más oscuro (`#0969da`) y blanco ya contrasta bien (5.19:1). */
-:root[data-theme="dark"] .composer-send-btn {
+/* CA-36: blanco sobre `--text-accent` no llega al umbral de 3:1 para componentes de UI
+   no textuales en el tema oscuro (`--text-accent` es un azul claro/brillante).
+   `--bg-primary` (oscuro) sobre ese mismo azul sí. En light, `--text-accent` es más
+   oscuro y blanco ya contrasta bien. Fijado por `tests/test_webview_contrast.py`. */
+:root[data-theme="dark"] .composer-send-btn,
+:root[data-theme="dark"] .composer-send-btn:hover {
   color: var(--bg-primary);
 }
 
@@ -147,7 +150,7 @@
   gap: 8px;
   margin-top: 8px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 6px 10px;
   font-size: 12.5px;
   color: var(--text-primary);
@@ -170,5 +173,14 @@
   border: none;
   background: transparent;
   color: var(--text-secondary);
-  font-size: 11px;
+  border-radius: var(--radius-sm);
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#attachment-chip-remove:hover {
+  color: var(--text-primary);
 }

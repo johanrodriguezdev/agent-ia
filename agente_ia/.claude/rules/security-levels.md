@@ -100,6 +100,39 @@ v1 tiene además un techo de `yellow` (`_V1_MAX_OFFERABLE_LEVEL`, `ui/webview/br
 ninguna fila de v1 ofrece ni acepta subir a `red`, para evitar que el usuario autobloquee
 una acción benigna sin `ORION_AUTH_PIN` configurado.
 
+## Terminal embebida — el permiso se pide al abrir, no por comando
+
+La terminal del panel de escritorio (`core/terminal_session.py`, PowerShell sobre ConPTY)
+introduce una superficie que puede ejecutar cualquier cosa. Se acota así:
+
+- **`terminal_open` es 🟡 amarillo.** Es la única acción con confirmación humana. Pedirla
+  por comando no sería una terminal; pedirla una vez, al abrir la sesión, sí es una
+  decisión real que el usuario toma con el modal delante. El gate está en
+  `Bridge.terminal_open()`, que es el único camino que crea la sesión desde la pantalla —
+  y por ser un `@pyqtSlot` alcanzable desde cualquier script de la página (mismo criterio
+  que `delete_conversation`, REQ-015/§10.2), es justamente ahí donde tiene que estar.
+- **Cada shell nueva se confirma aparte.** Hay pestañas: el botón "+" abre otra sesión y
+  vuelve a pedir permiso, porque es otra capacidad de ejecución, no la misma.
+- **`terminal_run_command` (herramienta del agente) es 🟡 amarillo**, y su confirmación
+  muestra el comando exacto: `command` está en `_DETAILS_ALLOWED_KEYS` de
+  `format_details()`. Autorizar sin ver qué se va a ejecutar sería autorizar a ciegas.
+- **`terminal_read_output` (leer lo que se ve en la terminal) es 🟡 amarillo**, y no verde
+  como el resto de las lecturas: en una terminal puede haber quedado impresa una clave o la
+  salida de algo privado, y leerla significa mandarla al proveedor del modelo. Que el
+  usuario lo autorice cada vez es el precio correcto.
+- **Ningún canal remoto la alcanza.** Al ser amarillas, `CHANNEL_ALLOWED_LEVELS` las deja
+  fuera de voz, Telegram, Discord y correo, y no existe ninguna entrada para ellas en
+  `CHANNEL_ACTION_EXCEPTIONS`. Una shell libre disparable por un mensaje —o por un correo
+  que puede mandar cualquiera— es exactamente lo que el modelo de canales existe para
+  impedir. Está fijado por test en `tests/test_terminal_session.py`.
+- **Todo lo que se ejecuta queda auditado**, venga del teclado del usuario o del agente,
+  con `security_manager.log_action("terminal_command", ...)`. La auditoría no se conforma
+  con lo tecleado: `_LineaVisual` reconstruye la línea que de verdad se está viendo en la
+  consola, así que un comando traído con ↑ o completado con Tab —que el usuario nunca
+  escribió— también queda registrado tal cual se ejecutó.
+- **La sesión muere con la ventana.** Cerrar el panel o salir de la app termina el proceso
+  (`MainWindow.aboutToQuit`): nunca queda una shell viva sin nada que la muestre.
+
 ## Verificación en QA
 - [ ] Toda acción destructiva tiene su nivel clasificado
 - [ ] Las acciones Amarillo piden confirmación antes de ejecutar

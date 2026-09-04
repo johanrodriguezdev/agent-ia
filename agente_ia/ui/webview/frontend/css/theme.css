@@ -6,38 +6,52 @@
 
    `set_theme()` (bridge) solo cambia `document.documentElement.dataset.theme` — sin
    recarga de página ni reinicio (CA-37, ver theme.js).
+
+   Rediseño: la paleta es neutra a propósito (grises sin tinte, un único acento azul). El
+   color deja de ser decoración — solo lo usan el acento de acción, los 3 estados de riesgo
+   (verde/amarillo/rojo) y el resaltado de sintaxis. Todo lo demás es superficie + texto.
+
+   Los tokens de geometría (radios, sombras, alto de barra, ancho de columna) viven en el
+   bloque `:root` compartido de más abajo: no son color, no cambian entre temas y el test de
+   drift los ignora (solo compara propiedades cuyo valor es un hex).
 */
 
 :root[data-theme="dark"] {
-  --bg-primary: #0d1117;
-  --bg-secondary: #161b22;
-  --bg-input: #1c2333;
-  --bg-hover: #252d3f;
-  --border: #30363d;
-  --text-primary: #e6edf3;
-  --text-secondary: #8b949e;
+  --bg-primary: #0c0d0f;
+  --bg-secondary: #131417;
+  --bg-input: #17191c;
+  --bg-hover: #1f2226;
+  --border: #262930;
+  --text-primary: #e8eaed;
+  --text-secondary: #9aa0a6;
   --text-accent: #58a6ff;
-  --bubble-user: #1f77b4;
-  --bubble-agent: #2d2d2d;
+  --bubble-user: #1c2430;
+  --bubble-agent: #15171a;
   --success: #3fb950;
   --warning: #d29922;
   --danger: #f85149;
+  --shadow-window: 0 24px 64px rgba(0, 0, 0, 0.55);
+  --shadow-pop: 0 16px 40px rgba(0, 0, 0, 0.5);
+  --overlay: rgba(0, 0, 0, 0.55);
 }
 
 :root[data-theme="light"] {
   --bg-primary: #ffffff;
-  --bg-secondary: #f6f8fa;
-  --bg-input: #f0f2f5;
+  --bg-secondary: #f7f8f9;
+  --bg-input: #f1f2f4;
   --bg-hover: #e8eaed;
-  --border: #d0d7de;
-  --text-primary: #24292f;
-  --text-secondary: #57606a;
+  --border: #e2e4e8;
+  --text-primary: #17181a;
+  --text-secondary: #5f6368;
   --text-accent: #0969da;
-  --bubble-user: #d1e5ff;
-  --bubble-agent: #e8eaed;
-  --success: #2da44e;
-  --warning: #bf8700;
+  --bubble-user: #eaeef4;
+  --bubble-agent: #f7f8f9;
+  --success: #1a7f37;
+  --warning: #9a6700;
   --danger: #cf222e;
+  --shadow-window: 0 18px 48px rgba(16, 18, 24, 0.16);
+  --shadow-pop: 0 14px 36px rgba(16, 18, 24, 0.14);
+  --overlay: rgba(23, 24, 26, 0.32);
 }
 
 /* CA-38: DEFAULT_THEME = "light" — si por alguna razón `data-theme` todavía no fue
@@ -46,18 +60,41 @@
    seguridad adicional, no la única fuente del valor inicial. */
 :root:not([data-theme]) {
   --bg-primary: #ffffff;
-  --bg-secondary: #f6f8fa;
-  --bg-input: #f0f2f5;
+  --bg-secondary: #f7f8f9;
+  --bg-input: #f1f2f4;
   --bg-hover: #e8eaed;
-  --border: #d0d7de;
-  --text-primary: #24292f;
-  --text-secondary: #57606a;
+  --border: #e2e4e8;
+  --text-primary: #17181a;
+  --text-secondary: #5f6368;
   --text-accent: #0969da;
-  --bubble-user: #d1e5ff;
-  --bubble-agent: #e8eaed;
-  --success: #2da44e;
-  --warning: #bf8700;
+  --bubble-user: #eaeef4;
+  --bubble-agent: #f7f8f9;
+  --success: #1a7f37;
+  --warning: #9a6700;
   --danger: #cf222e;
+  --shadow-window: 0 18px 48px rgba(16, 18, 24, 0.16);
+  --shadow-pop: 0 14px 36px rgba(16, 18, 24, 0.14);
+  --overlay: rgba(23, 24, 26, 0.32);
+}
+
+/* -------------------------------------------------------------- geometría (sin color) */
+
+:root {
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+
+  --topbar-h: 44px;
+  --sidebar-w: 252px;
+  --sidebar-w-collapsed: 56px;
+
+  /* Ancho de la columna de lectura: el chat y el composer comparten el mismo eje, así el
+     texto no se estira de borde a borde cuando la ventana está maximizada. */
+  --content-max: 760px;
+
+  --icon: 16px;
+  --icon-btn: 30px;
 }
 
 body {

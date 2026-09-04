@@ -6,8 +6,10 @@ properties estáticas en `ui/webview/frontend/css/theme.css` — un test dedicad
 (`tests/test_webview_theme.py`) parsea ese `.css` y compara contra `DARK_TOKENS`/
 `LIGHT_TOKENS` para detectar drift entre ambas copias.
 
-Valores partidos literalmente de los hex ya validados y documentados en
-`REQ-014-context.md` (ver arquitectura-015.md §1, fila CA-35).
+Paleta neutra (grises sin tinte, superficies casi planas y un único acento) — reemplaza
+la paleta GitHub-like heredada de `REQ-014-context.md`. Cada par texto/fondo que el layout
+combina de verdad está verificado contra WCAG AA en `tests/test_webview_contrast.py`; si se
+cambia un hex acá hay que correr ese test antes de darlo por bueno.
 
 Sin `QObject`/señales — a diferencia de `ui/theme.py::ThemeManager` (REQ-013, eliminado):
 la notificación de cambio de tema va por el bridge (`Bridge.theme_changed`), no por un
@@ -20,16 +22,16 @@ from typing import Any, Dict
 logger = logging.getLogger(__name__)
 
 DARK_TOKENS: Dict[str, str] = {
-    "bg_primary": "#0d1117",
-    "bg_secondary": "#161b22",
-    "bg_input": "#1c2333",
-    "bg_hover": "#252d3f",
-    "border": "#30363d",
-    "text_primary": "#e6edf3",
-    "text_secondary": "#8b949e",
+    "bg_primary": "#0c0d0f",
+    "bg_secondary": "#131417",
+    "bg_input": "#17191c",
+    "bg_hover": "#1f2226",
+    "border": "#262930",
+    "text_primary": "#e8eaed",
+    "text_secondary": "#9aa0a6",
     "text_accent": "#58a6ff",
-    "bubble_user": "#1f77b4",
-    "bubble_agent": "#2d2d2d",
+    "bubble_user": "#1c2430",
+    "bubble_agent": "#15171a",
     "success": "#3fb950",
     "warning": "#d29922",
     "danger": "#f85149",
@@ -37,17 +39,17 @@ DARK_TOKENS: Dict[str, str] = {
 
 LIGHT_TOKENS: Dict[str, str] = {
     "bg_primary": "#ffffff",
-    "bg_secondary": "#f6f8fa",
-    "bg_input": "#f0f2f5",
+    "bg_secondary": "#f7f8f9",
+    "bg_input": "#f1f2f4",
     "bg_hover": "#e8eaed",
-    "border": "#d0d7de",
-    "text_primary": "#24292f",
-    "text_secondary": "#57606a",
+    "border": "#e2e4e8",
+    "text_primary": "#17181a",
+    "text_secondary": "#5f6368",
     "text_accent": "#0969da",
-    "bubble_user": "#d1e5ff",
-    "bubble_agent": "#e8eaed",
-    "success": "#2da44e",
-    "warning": "#bf8700",
+    "bubble_user": "#eaeef4",
+    "bubble_agent": "#f7f8f9",
+    "success": "#1a7f37",
+    "warning": "#9a6700",
     "danger": "#cf222e",
 }
 

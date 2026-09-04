@@ -182,6 +182,20 @@ class MainWindow(QMainWindow):
         # activo) al cierre real del proceso — best-effort, no bloquea el quit().
         QApplication.instance().aboutToQuit.connect(self.bridge.stop_wake_word_worker)
 
+        # Igual con las terminales embebidas: si el proceso termina, los shells que abrió
+        # el panel se terminan con él. Una shell viva sin ventana que la muestre es
+        # exactamente lo que el gate de `terminal_open` intenta evitar.
+        QApplication.instance().aboutToQuit.connect(self._close_terminal)
+
+    def _close_terminal(self) -> None:
+        """Best-effort: nunca bloquea el quit()."""
+        try:
+            from core.terminal_session import terminal_manager
+
+            terminal_manager.close_all()
+        except Exception as e:
+            logger.warning(f"no se pudo cerrar la terminal al salir: {e}")
+
     def _toggle_visible(self) -> None:
         self.setVisible(not self.isVisible())
 

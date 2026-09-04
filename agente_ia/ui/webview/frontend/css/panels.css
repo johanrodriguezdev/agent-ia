@@ -16,12 +16,21 @@
 }
 
 .panel-close-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border: none;
   background: transparent;
   color: var(--text-secondary);
-  border-radius: 6px;
-  width: 24px;
-  height: 24px;
+  border-radius: var(--radius-sm);
+  width: 26px;
+  height: 26px;
+  transition: background-color 140ms, color 140ms;
+}
+
+.panel-close-btn:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 .panel-form {
@@ -45,9 +54,15 @@
   background-color: var(--text-accent);
   color: #ffffff;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 7px 14px;
   font-size: 13px;
+}
+
+/* Ver la nota de `.composer-send-btn` en composer.css: blanco sobre `--text-accent` no
+   llega al umbral de 3:1 en tema oscuro; el fondo oscuro sobre ese azul si. */
+:root[data-theme="dark"] .panel-submit-btn {
+  color: var(--bg-primary);
 }
 
 .panel-list {
@@ -106,6 +121,9 @@
 }
 
 .panel-item-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border: none;
   background: transparent;
   color: var(--text-secondary);
@@ -145,7 +163,7 @@
 
 .flow-card {
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   padding: 12px 14px;
   margin-bottom: 12px;
   background-color: var(--bg-secondary);
@@ -167,7 +185,7 @@
 .flow-state {
   font-size: 11px;
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 1px solid var(--border);
   color: var(--text-secondary);
 }
@@ -175,8 +193,8 @@
 /* Solo tres estados se colorean: los que piden que el usuario haga algo o mire. El
    resto se lee igual de bien en gris y no compite por atencion. */
 .flow-state-esperando { color: var(--text-accent); border-color: var(--text-accent); }
-.flow-state-fallido { color: var(--text-danger, #f85149); border-color: currentColor; }
-.flow-state-exitoso { color: var(--text-success, #3fb950); border-color: currentColor; }
+.flow-state-fallido { color: var(--danger); border-color: currentColor; }
+.flow-state-exitoso { color: var(--success); border-color: currentColor; }
 
 .flow-schedule {
   font-size: 11px;
@@ -222,15 +240,19 @@
 
 .flow-step-remove {
   flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
   background: none;
   border: none;
+  border-radius: var(--radius-sm);
   color: var(--text-secondary);
   cursor: pointer;
-  padding: 0 4px;
-  line-height: 1.2;
 }
 
-.flow-step-remove:hover { color: var(--text-danger, #f85149); }
+.flow-step-remove:hover { background-color: var(--bg-hover); color: var(--danger); }
 
 .flow-step-remove:focus-visible {
   outline: 2px solid var(--text-accent);

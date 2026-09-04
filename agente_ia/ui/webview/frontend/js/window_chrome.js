@@ -51,8 +51,16 @@ export function initWindowChrome() {
     }
   });
 
-  document.getElementById("drag-region").addEventListener("mousedown", (evt) => {
+  // Toda la barra superior arrastra la ventana, MENOS sus zonas interactivas: el
+  // buscador, las herramientas y los controles de ventana están marcados con
+  // `data-no-drag` en index.html. Sin ese chequeo, un click en el input dispararía
+  // `startSystemMove()` y el foco se perdería antes de poder escribir.
+  document.getElementById("window-chrome").addEventListener("mousedown", (evt) => {
     if (evt.button !== 0) return;
+    if (evt.target.closest("[data-no-drag]")) return;
+    // Los 6px de borde de arriba son zona de resize (el listener de `document` de mas
+    // arriba ya disparo `startResize`): ahi no se mueve la ventana.
+    if (edgeAt(evt.clientX, evt.clientY)) return;
     startMove();
   });
 
