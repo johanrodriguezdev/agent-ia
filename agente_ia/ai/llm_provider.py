@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 from ai import provider_health
+from core import streaming
 
 logger = logging.getLogger(__name__)
 
@@ -511,6 +512,15 @@ def _ask_openai(messages, system_prompt, image_path, model_name, tools=None):
             for t in tools
         ]
 
+    if _puede_stremear(api_tools):
+        try:
+            texto, llamadas = _llamada_en_streaming(client, model, openai_msgs, api_tools)
+            if not api_tools:
+                return texto
+            return LLMToolResponse(text=texto, tool_calls=llamadas)
+        except Exception as e:
+            logger.warning(f"streaming de OpenAI fallo ({e}); se reintenta sin streaming")
+
     kwargs = {"tools": api_tools, "tool_choice": "auto"} if api_tools else {}
     response = client.chat.completions.create(
         model=model,
@@ -621,6 +631,75 @@ def _ask_openrouter(messages, system_prompt, image_path, model_name, tools=None)
     return LLMToolResponse(text=msg.content, tool_calls=tool_calls)
 
 
+def _llamada_en_streaming(client, model, mensajes, api_tools):
+    """Pide la respuesta en pedazos y devuelve un mensaje con la misma forma que el normal.
+
+    Se usa cuando hay alguien mirando la pantalla (`core/streaming.hay_sink()`). Los dos
+    proveedores que pasan por acá —DeepSeek y OpenAI— hablan el mismo protocolo del SDK
+    `openai`, así que la función es una sola.
+
+    Reensamblar las tool calls es la parte fina: llegan partidas en deltas y hay que
+    juntarlas por índice (el nombre viene en el primer pedazo, los argumentos van llegando
+    de a cachos de JSON). El texto, en cambio, se emite a medida que llega — que es todo el
+    punto de esto.
+    """
+    kwargs = {"tools": api_tools, "tool_choice": "auto"} if api_tools else {}
+    stream = client.chat.completions.create(
+        model=model, messages=mensajes, max_tokens=1500, stream=True, **kwargs,
+    )
+
+    partes_texto = []
+    tool_calls_parciales = {}
+
+    for chunk in stream:
+        if not chunk.choices:
+            continue
+        delta = chunk.choices[0].delta
+
+        texto = getattr(delta, "content", None)
+        if texto:
+            partes_texto.append(texto)
+            streaming.emitir(texto)
+
+        for tc in (getattr(delta, "tool_calls", None) or []):
+            acumulado = tool_calls_parciales.setdefault(
+                tc.index, {"id": "", "name": "", "arguments": ""}
+            )
+            if tc.id:
+                acumulado["id"] = tc.id
+            funcion = getattr(tc, "function", None)
+            if funcion is not None:
+                if getattr(funcion, "name", None):
+                    acumulado["name"] = funcion.name
+                if getattr(funcion, "arguments", None):
+                    acumulado["arguments"] += funcion.arguments
+
+    texto_final = "".join(partes_texto)
+    llamadas = []
+    for indice in sorted(tool_calls_parciales):
+        crudo = tool_calls_parciales[indice]
+        if not crudo["name"]:
+            continue
+        try:
+            argumentos = json.loads(crudo["arguments"]) if crudo["arguments"] else {}
+        except (json.JSONDecodeError, TypeError):
+            argumentos = {}
+        llamadas.append(ToolCallRequest(id=crudo["id"], name=crudo["name"], arguments=argumentos))
+
+    return texto_final, llamadas
+
+
+def _puede_stremear(api_tools) -> bool:
+    """Solo se pide streaming si hay alguien mirando.
+
+    Con herramientas también se puede: el texto que el modelo escriba antes de decidir una
+    herramienta se ve igual, y las tool calls se reensamblan. Lo que nunca se hace es pedir
+    streaming para llamadas internas (resúmenes, clasificación) que no van a ninguna
+    pantalla — ahí no hay sumidero registrado.
+    """
+    return streaming.hay_sink()
+
+
 def _ask_deepseek(messages, system_prompt, image_path, model_name, tools=None):
     from openai import OpenAI
     from config_manager import get_deepseek_api_key
@@ -656,6 +735,18 @@ def _ask_deepseek(messages, system_prompt, image_path, model_name, tools=None):
             }
             for t in tools
         ]
+
+    if _puede_stremear(api_tools):
+        try:
+            texto, llamadas = _llamada_en_streaming(client, model, deepseek_msgs, api_tools)
+            if not api_tools:
+                return texto
+            return LLMToolResponse(text=texto, tool_calls=llamadas)
+        except Exception as e:
+            # El streaming es una mejora de percepcion, no una dependencia: si falla, se
+            # repite la llamada por el camino de siempre y el usuario ve la respuesta
+            # completa igual. Lo unico que pierde es el efecto de "se esta escribiendo".
+            logger.warning(f"streaming de DeepSeek fallo ({e}); se reintenta sin streaming")
 
     kwargs = {"tools": api_tools, "tool_choice": "auto"} if api_tools else {}
     response = client.chat.completions.create(

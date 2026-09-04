@@ -212,6 +212,11 @@ def _bridge_con_worker(worker=None):
     bridge._speech_seq = 0
     bridge._speech_done_seq = 0
     bridge._wake_worker = worker
+    # Turno cancelable: el `Bridge` real lo abre en `send_message()`. El doble tiene que
+    # tener el mismo estado, o `_on_resolve_done()` no encuentra el atributo (en un QObject
+    # sin `__init__`, leer uno que no existe lanza RuntimeError, no AttributeError).
+    bridge._turno_id = None
+    bridge._turno_cancelado_id = None
     return bridge
 
 

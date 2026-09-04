@@ -45,6 +45,7 @@ desarrollo-log-015.md para el detalle completo):
 
 import json
 import logging
+import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -52,7 +53,10 @@ from PyQt6.QtCore import QObject, QThreadPool, Qt, pyqtSignal, pyqtSlot
 
 import config_manager
 from core.security_manager import ChannelType, RiskLevel, _RISK_LEVEL_ORDER
+from core.cancelacion import cancelar as cancelar_turno
+from core.cancelacion import cerrar_turno, nuevo_turno
 from core.terminal_session import TerminalUnavailable, terminal_manager
+from ui.webview.file_drop import validate_dropped_file
 from ui.gui_workers import run_async
 from ui.webview.gui_state import GLOBAL_STATE, WAKE_STATE  # noqa: F401 (ver poll_state)
 from ui.webview.markdown_render import render_markdown
@@ -186,6 +190,27 @@ class Bridge(QObject):
     terminal_state = pyqtSignal(str, str, str)        # session_id, estado, detalle
     terminal_tabs = pyqtSignal(str)                   # json: [{id, titulo, cwd, activa}]
 
+    # ------------------------------------------------------------ avisos y turno en curso
+    # `error_occurred` ya existia pero moria en un console.error del navegador: los fallos
+    # eran invisibles para el usuario. `notice_shown` es el canal de avisos VISIBLES
+    # (nivel: error | info | ok) que pinta js/toasts.js.
+    # Pedazos de la respuesta a medida que el modelo la escribe (`core/streaming.py`).
+    # Antes el texto aparecia entero de golpe despues de diez segundos; ahora se lee
+    # mientras llega. El mensaje definitivo sigue viniendo por `message_appended`, ya
+    # convertido a HTML y saneado: estos pedazos son texto plano de adelanto.
+    message_chunk = pyqtSignal(str)
+    notice_shown = pyqtSignal(str, str)               # nivel, mensaje
+    # Aviso del SISTEMA (bandeja): lo emite `MainWindow` desde cualquier hilo — un flujo
+    # que falla de madrugada corre en el hilo del planificador, no en el de la GUI.
+    system_notification = pyqtSignal(str, str, str)   # titulo, mensaje, nivel
+    # Arrastrando un archivo por encima de la ventana: el drop ya funcionaba, pero no se
+    # veia por ningun lado que se pudiera soltar.
+    drag_over_changed = pyqtSignal(bool)
+    conversation_search_results = pyqtSignal(str)     # json: [{conversation_id, title, snippet, ...}]
+    models_loaded = pyqtSignal(str)                   # json: {proveedores, activo}
+    project_items_loaded = pyqtSignal(str, int)       # json: [{kind, item_id, label}], project_id
+    assignable_items_loaded = pyqtSignal(str)         # json: {flujos, modulos}
+
     def __init__(self, main_window, parent=None):
         super().__init__(parent)
         self._main_window = main_window
@@ -206,6 +231,11 @@ class Bridge(QObject):
         # tiempo (riesgo R10). Ambos contadores se tocan solo desde el hilo de la GUI.
         self._speech_seq: int = 0
         self._speech_done_seq: int = 0
+
+        # Turno cancelable en curso (`core/cancelacion.py`). `_turno_cancelado_id` recuerda
+        # cual se freno para poder descartar su respuesta si llega igual.
+        self._turno_id: Optional[int] = None
+        self._turno_cancelado_id: Optional[int] = None
 
         # La terminal tiene DOS entradas posibles —el panel y la herramienta del agente— y
         # una sola salida: esta. Se engancha al construir el bridge, no al abrir el panel,
@@ -262,12 +292,20 @@ class Bridge(QObject):
 
         self._pending_user_text = text
         self._resolution_in_flight = True
+        self._turno_id = nuevo_turno()
         # El reportero se registra por turno y se retira al acabar: fuera de una resolución
         # no hay nada que contar, y así ningún proceso de fondo puede escribir en la línea
         # de estado de un turno que ya terminó.
         from core.progress import register_reporter
 
         register_reporter(self._on_progress)
+
+        # Mismo criterio que el reportero de progreso: el sumidero se registra por turno y
+        # se retira al terminar. Fuera de un turno no hay pantalla esperando, y ninguna
+        # llamada interna al modelo (resumenes, clasificacion) debe ir a parar al chat.
+        from core.streaming import register_sink
+
+        register_sink(self._on_stream_chunk)
         self.message_appended.emit(json.dumps({
             "role": "user", "html": render_markdown(text), "timestamp": _now_iso(),
         }))
@@ -276,6 +314,17 @@ class Bridge(QObject):
         from core.resolution import resolve
         run_async(resolve, self._on_resolve_done, self._on_resolve_error, text,
                    ChannelType.DESKTOP, user_id=OWNER_USER_ID)
+
+    def _on_stream_chunk(self, pedazo: str) -> None:
+        """Recibe un pedazo de respuesta DESDE EL HILO que habla con el modelo.
+
+        Solo emite: `pyqtSignal.emit()` cruza al hilo de la GUI por su cuenta. Si el turno
+        ya se cancelo, se descarta — seguir escribiendo en pantalla una respuesta que el
+        usuario mando a parar seria peor que no cancelar nada.
+        """
+        if self._turno_id is not None and self._turno_id == self._turno_cancelado_id:
+            return
+        self.message_chunk.emit(pedazo)
 
     def _on_progress(self, mensaje: str) -> None:
         """Recibe el aviso desde el hilo que trabaja y lo entrega a la interfaz.
@@ -295,8 +344,10 @@ class Bridge(QObject):
         """
         try:
             from core.progress import clear_reporter
+            from core.streaming import clear_sink
 
             clear_reporter()
+            clear_sink()
         except Exception as e:
             logger.warning(f"No se pudo retirar el reportero de progreso: {e}")
 
@@ -309,6 +360,19 @@ class Bridge(QObject):
         from ai.memory_manager import memory
 
         self._stop_progress()
+
+        # Turno cancelado: la respuesta llego igual (la cancelacion es cooperativa y el
+        # modelo ya estaba contestando) pero el usuario dijo que no la queria. No se
+        # muestra ni se guarda en el historial: seria poner en la conversacion algo que
+        # el usuario pidio expresamente descartar.
+        turno = self._turno_id
+        cerrar_turno(turno)
+        self._turno_id = None
+        if turno is not None and turno == self._turno_cancelado_id:
+            self._turno_cancelado_id = None
+            self._pending_user_text = ""
+            self._resolution_in_flight = False
+            return
 
         result_text = resolution.text
         self.message_appended.emit(json.dumps({
@@ -387,6 +451,19 @@ class Bridge(QObject):
         """Un error no es una respuesta de la IA — no se persiste (mismo criterio que
         `JarvisMainWindow._on_command_error()`, REQ-013/eliminado)."""
         self._stop_progress()
+
+        # Un turno cancelado termina levantando `TurnoCancelado` desde el punto de corte,
+        # y llega hasta acá como cualquier otro fallo. Pero no es un fallo: es lo que el
+        # usuario pidió. Pintarlo como "Error: ..." seria acusar al agente de romperse por
+        # haber obedecido.
+        turno = self._turno_id
+        cerrar_turno(turno)
+        self._turno_id = None
+        if turno is not None and turno == self._turno_cancelado_id:
+            self._turno_cancelado_id = None
+            self._pending_user_text = ""
+            self._resolution_in_flight = False
+            return
         self.message_appended.emit(json.dumps({
             "role": "assistant", "html": render_markdown(f"Error: {message}"),
             "timestamp": _now_iso(),
@@ -812,6 +889,169 @@ class Bridge(QObject):
         self.error_occurred.emit(str(message))
         self.request_flows()
 
+    # ------------------------------------------------------------ detener el turno
+    @pyqtSlot()
+    def stop_resolution(self) -> None:
+        """Frena el turno en curso.
+
+        La cancelación es cooperativa (ver `core/cancelacion.py`): se marca el turno y el
+        trabajo se detiene en el próximo punto seguro. La interfaz NO espera a que eso
+        pase — se desbloquea acá mismo, y si la respuesta del turno cancelado llega igual,
+        `_on_resolve_done()` la descarta. Cancelar tiene que sentirse instantáneo aunque
+        por debajo no lo sea.
+        """
+        if not cancelar_turno(self._turno_id):
+            return
+        self._turno_cancelado_id = self._turno_id
+        self._resolution_in_flight = False
+        self._stop_progress()
+        self.typing_stopped.emit()
+        self.notice_shown.emit("info", "Listo, lo dejo acá.")
+
+    # ------------------------------------------------------------ adjuntar archivo
+    @pyqtSlot()
+    def open_attach_dialog(self) -> None:
+        """Abre el diálogo nativo de archivos.
+
+        El botón del clip era solo un cartel que decía "arrastrá el archivo": un clip que
+        no abre nada es un botón roto a los ojos de cualquiera. El archivo elegido pasa por
+        la MISMA validación que el drag&drop (`file_drop.validate_dropped_file`), que es
+        donde viven el límite de tamaño y la lista de extensiones — no se duplica.
+        """
+        from PyQt6.QtWidgets import QFileDialog
+
+        ruta, _ = QFileDialog.getOpenFileName(
+            self._main_window, "Elegir un archivo para adjuntar", "",
+            "Archivos soportados (*.txt *.md *.pdf *.png *.jpg *.jpeg *.csv *.json *.py);;Todos (*.*)",
+        )
+        if not ruta:
+            return
+        aceptado, motivo = validate_dropped_file(ruta)
+        self.file_attached.emit(ruta, os.path.basename(ruta), aceptado, motivo)
+
+    # ------------------------------------------------------------ conversaciones
+    @pyqtSlot(str, str)
+    def rename_conversation(self, conversation_id: str, title: str) -> None:
+        """Le pone un título propio a una conversación. Vacío vuelve al derivado."""
+        from ai.memory_manager import memory
+
+        if memory.rename_conversation(conversation_id, title, user_id=OWNER_USER_ID):
+            self._load_conversations(offset=0)
+        else:
+            self.notice_shown.emit("error", "No pude renombrar esa conversación.")
+
+    @pyqtSlot(str)
+    def search_conversations(self, query: str) -> None:
+        """Busca DENTRO de lo que se dijo, no solo en los títulos que están en pantalla.
+
+        Va por `run_async()` porque recorre toda la tabla de memorias con LIKE: en una base
+        grande eso es medio segundo, y medio segundo en el hilo de la GUI se ve como un
+        tirón mientras se escribe.
+        """
+        run_async(self._search_flow, self._on_search_done, self._on_search_error, query)
+
+    def _search_flow(self, query: str):
+        from ai.memory_manager import memory
+
+        return memory.search_conversations(query, user_id=OWNER_USER_ID)
+
+    def _on_search_done(self, resultados) -> None:
+        self.conversation_search_results.emit(json.dumps(resultados))
+
+    def _on_search_error(self, message: str) -> None:
+        logger.error(f"Error buscando en conversaciones: {message}")
+        self.notice_shown.emit("error", "No pude buscar en el historial.")
+
+    # ------------------------------------------------------------ ejecutar en la terminal
+    @pyqtSlot(str)
+    def run_command_in_terminal(self, command: str) -> None:
+        """Manda a la terminal un comando salido de un bloque de código del chat.
+
+        Es el mismo gate que usa el agente (`terminal_run_command`, 🟡 con el comando a la
+        vista), y a propósito: el comando lo escribió el modelo, no el usuario. Que esté en
+        un bloque de código bonito no lo hace más confiable que si el agente lo propusiera
+        por su cuenta.
+        """
+        run_async(self._run_command_in_terminal_flow, None, self._on_terminal_error, command)
+
+    def _run_command_in_terminal_flow(self, command: str) -> None:
+        from agents.tool_registry import execute_tool
+        from core.security_manager import ActionDenied
+
+        command = (command or "").strip()
+        if not command:
+            return
+        try:
+            execute_tool("terminal_run_command", {"command": command},
+                         ChannelType.DESKTOP, user_id=OWNER_USER_ID)
+        except ActionDenied as e:
+            logger.info(f"comando no ejecutado en la terminal: {e}")
+            self.notice_shown.emit("info", "No ejecuté el comando.")
+
+    # ------------------------------------------------------------ proveedor y modelo
+    @pyqtSlot()
+    def request_models(self) -> None:
+        self.models_loaded.emit(json.dumps(_build_models_payload()))
+
+    @pyqtSlot(str, str)
+    def set_model(self, provider: str, model: str) -> None:
+        """Cambia con qué modelo responde el agente, sin reiniciar.
+
+        `generate_response()` lee `config.json` en CADA llamada (`get_provider_config()`),
+        así que el cambio aplica desde el turno siguiente sin tocar nada más.
+        """
+        if provider not in _MODELOS_CONOCIDOS:
+            logger.warning(f"proveedor desconocido: {provider!r} — se ignora")
+            self.notice_shown.emit("error", "Ese proveedor no está en el catálogo.")
+            return
+        modelos = _MODELOS_CONOCIDOS[provider]["modelos"]
+        if model and model not in modelos:
+            logger.warning(f"modelo {model!r} no listado para {provider!r} — se ignora")
+            self.notice_shown.emit("error", "Ese modelo no está en el catálogo del proveedor.")
+            return
+
+        config_manager.set_ai_provider_and_model(provider, model or (modelos[0] if modelos else ""))
+        self.models_loaded.emit(json.dumps(_build_models_payload()))
+        self.notice_shown.emit("ok", f"Ahora respondo con {_MODELOS_CONOCIDOS[provider]['label']}.")
+
+    # ------------------------------------------------------------ elementos de proyecto
+    @pyqtSlot(int)
+    def request_project_items(self, project_id: int) -> None:
+        from ai.memory_manager import memory
+
+        items = memory.list_items_by_project(int(project_id), user_id=OWNER_USER_ID)
+        self.project_items_loaded.emit(json.dumps(items), int(project_id))
+
+    @pyqtSlot(str, str, int, str)
+    def assign_item_to_project(self, kind: str, item_id: str, project_id: int,
+                               label: str) -> None:
+        """Mete un flujo o un módulo en un proyecto (las conversaciones tienen su propio
+        slot desde REQ-016)."""
+        from ai.memory_manager import memory
+
+        if memory.assign_item_to_project(kind, item_id, int(project_id), label=label,
+                                         user_id=OWNER_USER_ID):
+            self.request_project_items(int(project_id))
+            self.request_projects()
+        else:
+            self.notice_shown.emit("error", "No pude asignarlo a ese proyecto.")
+
+    @pyqtSlot(str, str, int)
+    def unassign_item_from_project(self, kind: str, item_id: str, project_id: int) -> None:
+        from ai.memory_manager import memory
+
+        memory.unassign_item_from_project(kind, item_id, user_id=OWNER_USER_ID)
+        self.request_project_items(int(project_id))
+        self.request_projects()
+
+    @pyqtSlot()
+    def request_assignable_items(self) -> None:
+        """Qué se puede meter en un proyecto, además de conversaciones: los flujos que
+        existen y los módulos de la app. Los módulos son un catálogo fijo — sirven para
+        anotar "esta parte del sistema es de este proyecto", que es lo que pidió el
+        usuario al hablar de "opciones o módulos"."""
+        self.assignable_items_loaded.emit(json.dumps(_build_assignable_payload()))
+
     # ------------------------------------------------------------ terminal embebida
     @pyqtSlot()
     def terminal_open(self) -> None:
@@ -1153,6 +1393,80 @@ class Bridge(QObject):
         """Dispara el mismo `closeEvent` que minimiza a bandeja (CA-01, portado de
         `JarvisMainWindow.closeEvent()`, REQ-008/009, sin cambios de comportamiento)."""
         self._main_window.close()
+
+
+#: Catálogo de proveedores y modelos que se ofrecen desde el composer. Es una lista
+#: cerrada a propósito: `set_model()` valida contra ella, así que un script que corra en la
+#: página no puede escribir cualquier cosa en `config.json` (los slots del bridge son
+#: invocables desde JS — mismo criterio que `_SECURITY_ROWS_V1` para la pantalla de
+#: seguridad). Agregar un modelo nuevo es agregar una línea acá.
+_MODELOS_CONOCIDOS: Dict[str, Dict[str, Any]] = {
+    "deepseek": {"label": "DeepSeek", "modelos": ["deepseek-chat", "deepseek-reasoner"]},
+    "anthropic": {"label": "Claude", "modelos": [
+        "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022",
+    ]},
+    "openai": {"label": "OpenAI", "modelos": ["gpt-4o-mini", "gpt-4o"]},
+    "gemini": {"label": "Gemini", "modelos": ["gemini-1.5-flash", "gemini-1.5-pro"]},
+    "openrouter": {"label": "OpenRouter", "modelos": [
+        "meta-llama/llama-3.3-70b-instruct:free",
+    ]},
+    "ollama": {"label": "Ollama (local)", "modelos": ["qwen3:8b", "llama3.1:8b"]},
+}
+
+#: Módulos de la app que se pueden anotar dentro de un proyecto. No son funcionalidad
+#: nueva: son las piezas que ya existen, para poder decir "esta parte es de este
+#: proyecto" y encontrarla después.
+_MODULOS_ASIGNABLES: List[Dict[str, str]] = [
+    {"id": "terminal", "label": "Terminal embebida"},
+    {"id": "correo", "label": "Correo (canal restringido)"},
+    {"id": "flujos", "label": "Flujos durables"},
+    {"id": "tareas", "label": "Tareas y recordatorios"},
+    {"id": "memoria", "label": "Memoria y conversaciones"},
+    {"id": "voz", "label": "Voz y manos libres"},
+    {"id": "mcp", "label": "Servidores MCP"},
+    {"id": "seguridad", "label": "Niveles de seguridad"},
+]
+
+
+def _build_models_payload() -> Dict[str, Any]:
+    """Catálogo + qué está activo ahora, para el selector del composer."""
+    activo_proveedor = config_manager.get_ai_provider()
+    activo_modelo = config_manager.get_ai_model()
+    proveedores = [
+        {
+            "id": pid,
+            "label": datos["label"],
+            "modelos": datos["modelos"],
+            "activo": pid == activo_proveedor,
+        }
+        for pid, datos in _MODELOS_CONOCIDOS.items()
+    ]
+    etiqueta = _MODELOS_CONOCIDOS.get(activo_proveedor, {}).get("label", activo_proveedor or "?")
+    return {
+        "proveedores": proveedores,
+        "activo": {
+            "proveedor": activo_proveedor,
+            "modelo": activo_modelo,
+            "label": etiqueta,
+            # Lo que se ve en el composer: el modelo si se conoce, si no el proveedor.
+            "resumen": activo_modelo or etiqueta,
+        },
+    }
+
+
+def _build_assignable_payload() -> Dict[str, Any]:
+    """Flujos y módulos que se pueden meter en un proyecto."""
+    flujos: List[Dict[str, str]] = []
+    try:
+        from core.flows import flow_store
+
+        for flujo in flow_store.listar():
+            flujos.append({"id": str(flujo.id), "label": flujo.nombre})
+    except Exception as e:
+        # Sin flujos disponibles la pantalla sigue sirviendo para módulos: no se cae.
+        logger.warning(f"no se pudieron listar los flujos para proyectos: {e}")
+
+    return {"flujos": flujos, "modulos": _MODULOS_ASIGNABLES}
 
 
 def _build_chips_payload() -> List[Dict[str, Any]]:

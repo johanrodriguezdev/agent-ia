@@ -9,6 +9,7 @@
 import {
   requestProjects, createProject, assignConversationToProject,
   unassignConversationFromProject, requestProjectConversations, requestDeleteProject,
+  requestProjectItems, assignItemToProject, unassignItemFromProject, requestAssignableItems,
 } from "./bridge_client.js";
 import { icon } from "./icons.js";
 import { getLoadedConversations } from "./sidebar.js";   // REQ-016/§0.2
@@ -147,10 +148,13 @@ function buildProjectItem(project) {
   return item;
 }
 
+let _pickerProjectId = null;
+
 function openProjectDetail(projectId, projectName) {
   _detailProjectId = projectId;
   renderDetailShell(projectId, projectName);
   requestProjectConversations(projectId);
+  requestProjectItems(projectId);
 }
 
 function renderDetailShell(projectId, projectName) {
@@ -169,7 +173,7 @@ function renderDetailShell(projectId, projectName) {
 
   const backBtn = document.createElement("button");
   backBtn.type = "button";
-  backBtn.className = "panel-item-btn";
+  backBtn.className = "panel-back-btn";
   backBtn.setAttribute("aria-label", "Volver");
   backBtn.textContent = "← Volver";
   backBtn.addEventListener("click", () => {
@@ -191,19 +195,45 @@ function renderDetailShell(projectId, projectName) {
 
   header.append(backBtn, title, closeBtn);
 
+  // Un proyecto agrupa lo que se hizo, no solo lo que se habló: chats, flujos y las
+  // partes del sistema que le corresponden. Dos botones, dos listas.
+  const acciones = document.createElement("div");
+  acciones.className = "panel-form";
+
   const addBtn = document.createElement("button");
   addBtn.type = "button";
   addBtn.className = "panel-submit-btn";
-  addBtn.textContent = "+ Agregar conversación";
+  addBtn.textContent = "+ Conversación";
   addBtn.addEventListener("click", () => openAssignPicker(projectId));
+
+  const addItemBtn = document.createElement("button");
+  addItemBtn.type = "button";
+  addItemBtn.className = "panel-submit-btn panel-submit-btn-secundario";
+  addItemBtn.textContent = "+ Flujo o módulo";
+  addItemBtn.addEventListener("click", () => {
+    _pickerProjectId = projectId;
+    requestAssignableItems();
+  });
+
+  acciones.append(addBtn, addItemBtn);
 
   const list = document.createElement("div");
   list.id = "project-detail-list";
   list.className = "panel-list";
 
+  const tituloItems = document.createElement("div");
+  tituloItems.className = "panel-section-title";
+  tituloItems.textContent = "Flujos y módulos";
+
+  const listaItems = document.createElement("div");
+  listaItems.id = "project-items-list";
+  listaItems.className = "panel-list";
+
   box.appendChild(header);
-  box.appendChild(addBtn);
+  box.appendChild(acciones);
   box.appendChild(list);
+  box.appendChild(tituloItems);
+  box.appendChild(listaItems);
   overlay.appendChild(box);
   root.appendChild(overlay);
 }
@@ -246,6 +276,118 @@ export function renderProjectConversations(conversations, projectId) {
 
 // Si el proyecto en vista detalle es el que se acaba de borrar, volver al maestro
 // (arquitectura-016.md §0.4 — señal "targeted" project_removed).
+/** Flujos y módulos del proyecto. Misma guarda que las conversaciones: una respuesta de
+ *  otro proyecto (doble click rápido entre dos) se descarta en vez de mezclarse. */
+export function renderProjectItems(items, projectId) {
+  if (projectId !== _detailProjectId) return;
+  const lista = document.getElementById("project-items-list");
+  if (!lista) return;
+  lista.replaceChildren();
+
+  if (items.length === 0) {
+    const vacio = document.createElement("div");
+    vacio.className = "panel-empty";
+    vacio.textContent = "Sin flujos ni módulos asignados.";
+    lista.appendChild(vacio);
+    return;
+  }
+
+  for (const item of items) {
+    const fila = document.createElement("div");
+    fila.className = "panel-item";
+
+    const info = document.createElement("div");
+    info.className = "panel-item-info";
+    const titulo = document.createElement("span");
+    titulo.className = "panel-item-title";
+    titulo.textContent = item.label || item.item_id;   // §10.1
+    const meta = document.createElement("span");
+    meta.className = "panel-item-meta";
+    meta.textContent = item.kind === "flujo" ? "Flujo" : "Módulo";
+    info.append(titulo, meta);
+
+    const quitar = document.createElement("button");
+    quitar.type = "button";
+    quitar.className = "panel-item-btn";
+    quitar.textContent = "Quitar";
+    quitar.addEventListener("click", () => {
+      unassignItemFromProject(item.kind, item.item_id, projectId);
+      fila.remove();
+    });
+
+    fila.append(info, quitar);
+    lista.appendChild(fila);
+  }
+}
+
+/** Picker de flujos y módulos: llega cuando Python responde `assignable_items_loaded`. */
+export function renderAssignableItems(payload) {
+  if (_pickerProjectId === null) return;
+  const projectId = _pickerProjectId;
+  _pickerProjectId = null;
+
+  const root = document.getElementById("panel-modal-root");
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.addEventListener("click", (evt) => { if (evt.target === overlay) overlay.remove(); });
+
+  const box = document.createElement("div");
+  box.className = "modal-box";
+
+  const header = document.createElement("div");
+  header.className = "panel-header";
+  const title = document.createElement("div");
+  title.className = "modal-title";
+  title.textContent = "Agregar al proyecto";
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "panel-close-btn";
+  closeBtn.setAttribute("aria-label", "Cerrar");
+  closeBtn.appendChild(icon("close", "ic-sm"));
+  closeBtn.addEventListener("click", () => overlay.remove());
+  header.append(title, closeBtn);
+
+  const lista = document.createElement("div");
+  lista.className = "panel-list";
+
+  function agregarGrupo(etiqueta, kind, elementos) {
+    if (!elementos.length) return;
+    const titulo = document.createElement("div");
+    titulo.className = "panel-section-title";
+    titulo.textContent = etiqueta;
+    lista.appendChild(titulo);
+
+    for (const elemento of elementos) {
+      const boton = document.createElement("button");
+      boton.type = "button";
+      boton.className = "panel-item panel-item-pickable";
+      const nombre = document.createElement("span");
+      nombre.className = "panel-item-title";
+      nombre.textContent = elemento.label;   // §10.1
+      boton.appendChild(nombre);
+      boton.addEventListener("click", () => {
+        assignItemToProject(kind, elemento.id, projectId, elemento.label);
+        overlay.remove();
+      });
+      lista.appendChild(boton);
+    }
+  }
+
+  agregarGrupo("Flujos", "flujo", payload.flujos || []);
+  agregarGrupo("Módulos", "modulo", payload.modulos || []);
+
+  if (!lista.children.length) {
+    const vacio = document.createElement("div");
+    vacio.className = "panel-empty";
+    vacio.textContent = "No hay nada para agregar todavía.";
+    lista.appendChild(vacio);
+  }
+
+  box.append(header, lista);
+  overlay.appendChild(box);
+  root.appendChild(overlay);
+}
+
 export function handleProjectRemoved(projectId) {
   if (_detailProjectId === projectId) {
     _detailProjectId = null;

@@ -84,6 +84,10 @@
 
 .msg-assistant {
   align-self: stretch;
+  /* En columna: la respuesta arriba y sus acciones debajo. En fila (el default de
+     `.message`) las acciones quedaban al costado del texto, flotando a media altura. */
+  flex-direction: column;
+  align-items: flex-start;
 }
 
 .msg-system {
@@ -302,3 +306,89 @@
   #typing-indicator span { animation: none; }
   .message { animation: none; }
 }
+
+/* -------------------------------------------------------------- acciones del mensaje */
+
+/* Aparecen al pasar por encima: estan siempre disponibles pero no ensucian la lectura. */
+.msg-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+  opacity: 0;
+  transition: opacity 140ms;
+}
+
+.msg-assistant:hover .msg-actions,
+.msg-actions:focus-within {
+  opacity: 1;
+}
+
+.msg-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  padding: 3px 7px;
+  font-size: 11.5px;
+  transition: background-color 140ms, color 140ms;
+}
+
+.msg-action:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.msg-action:focus-visible {
+  outline: 2px solid var(--text-accent);
+  outline-offset: 1px;
+}
+
+/* Copiar / ejecutar cada bloque de codigo, arriba a la derecha del bloque. */
+.code-block {
+  position: relative;
+}
+
+.code-actions {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 140ms;
+}
+
+.code-block:hover .code-actions,
+.code-actions:focus-within {
+  opacity: 1;
+}
+
+.code-actions .msg-action {
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border);
+}
+
+/* Respuesta que se esta escribiendo: texto plano hasta que llega la version con formato.
+   El cursor parpadeante dice "sigue viniendo" sin necesidad de otro indicador. */
+.msg-viva .bubble::after {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 14px;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background-color: var(--text-accent);
+  animation: typingBounce 1s infinite ease-in-out;
+}
+
+.msg-viva .bubble {
+  white-space: pre-wrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .msg-viva .bubble::after { animation: none; }
+}
+

@@ -270,3 +270,57 @@
   gap: 8px;
   flex-wrap: wrap;
 }
+
+/* Subtitulo dentro de un panel (Flujos y modulos, Modulos, ...). */
+.panel-section-title {
+  padding: 10px 2px 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+/* "Volver" es un boton de texto, no un icono cuadrado de 26px: con `.panel-item-btn` la
+   palabra no entraba y se partia en dos renglones debajo de la flecha. */
+.panel-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  width: auto;
+  height: 28px;
+  padding: 0 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.panel-back-btn:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* Segunda accion de un panel: mismo tamano, sin relleno de acento. Dos botones llenos de
+   color uno al lado del otro compiten entre si y ninguno se lee como el principal. */
+.panel-submit-btn-secundario {
+  background-color: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+}
+
+.panel-submit-btn-secundario:hover {
+  background-color: var(--bg-hover);
+  border-color: var(--text-secondary);
+}
+
+/* El override de contraste del boton de acento (`:root[data-theme="dark"]
+   .panel-submit-btn`) tiene mas especificidad que la clase de arriba y le ponia texto
+   oscuro sobre fondo transparente: ilegible. Se restituye el color normal. */
+:root[data-theme="dark"] .panel-submit-btn-secundario {
+  color: var(--text-primary);
+}
+

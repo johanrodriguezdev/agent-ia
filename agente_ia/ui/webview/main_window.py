@@ -21,10 +21,12 @@ from PyQt6.QtCore import QEvent, Qt, QTimer, QUrl
 from PyQt6.QtGui import QColor, QIcon, QPixmap
 from PyQt6.QtWidgets import QApplication, QMainWindow, QMenu, QSystemTrayIcon
 from PyQt6.QtWebChannel import QWebChannel
-from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineScript
+from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineScript, QWebEngineSettings
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 
+import config_manager
 from config_manager import get_agent_name
+from core.notificaciones import clear_notifier, register_notifier
 from core.confirmation import register_confirmation_adapter
 from core.security_manager import ChannelType
 from ui.webview.bridge import Bridge
@@ -73,6 +75,7 @@ class MainWindow(QMainWindow):
         self._init_bridge()
         self._fit_to_screen()
         self._setup_tray_icon()
+        self._setup_notificaciones()
         self._setup_state_polling()
 
         self.setAcceptDrops(True)
@@ -88,6 +91,13 @@ class MainWindow(QMainWindow):
         # Ver comentario de WA_TranslucentBackground arriba — mismo motivo, ahora a nivel
         # del propio widget/página, para que el área fuera del contenido pintado por CSS
         # también sea transparente y no un rectángulo blanco/negro sólido (CA-03).
+        # Copiar una respuesta o un bloque de codigo pasa por `navigator.clipboard`, que
+        # QtWebEngine deja cerrado por defecto. Se habilita solo la escritura desde la
+        # pagina propia: no hay contenido remoto cargado en este WebView.
+        ajustes = page.settings()
+        ajustes.setAttribute(QWebEngineSettings.WebAttribute.JavascriptCanAccessClipboard, True)
+        ajustes.setAttribute(QWebEngineSettings.WebAttribute.JavascriptCanPaste, True)
+
         self.web_view.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         page.setBackgroundColor(QColor(Qt.GlobalColor.transparent))
 
@@ -150,10 +160,45 @@ class MainWindow(QMainWindow):
             logger.warning("fit_to_screen(): sin pantalla primaria detectada, se omite")
             return
         available = screen.availableGeometry()
+
+        # Si hay una geometria guardada y sigue entrando en la pantalla de hoy, se respeta:
+        # la app abre donde la dejaste. Si el monitor cambio (portatil que se desconecto de
+        # una pantalla externa), la ventana quedaria fuera de vista, asi que se descarta y
+        # se vuelve al calculo normal — nunca se restaura a ciegas.
+        guardada = config_manager.get_window_geometry()
+        if guardada and self._geometria_visible(guardada, available):
+            self.setGeometry(guardada["x"], guardada["y"],
+                             guardada["width"], guardada["height"])
+            if guardada.get("maximized"):
+                self.showMaximized()
+            return
+
         width, height, x, y = fit_size_to_screen(
             (available.x(), available.y(), available.width(), available.height())
         )
         self.setGeometry(x, y, width, height)
+
+    @staticmethod
+    def _geometria_visible(geometria: dict, disponible) -> bool:
+        """La ventana tiene que quedar mayormente dentro del area de trabajo actual."""
+        derecha = geometria["x"] + geometria["width"]
+        abajo = geometria["y"] + geometria["height"]
+        return (
+            geometria["x"] >= disponible.x() - 40
+            and geometria["y"] >= disponible.y() - 10
+            and derecha <= disponible.x() + disponible.width() + 40
+            and abajo <= disponible.y() + disponible.height() + 40
+        )
+
+    def _guardar_geometria(self) -> None:
+        """Recuerda donde estaba la ventana. Best-effort: nunca bloquea el cierre."""
+        try:
+            geo = self.normalGeometry() if self.isMaximized() else self.geometry()
+            config_manager.set_window_geometry(
+                geo.width(), geo.height(), geo.x(), geo.y(), self.isMaximized(),
+            )
+        except Exception as e:
+            logger.warning(f"no se pudo guardar la geometria de la ventana: {e}")
 
     def _setup_state_polling(self) -> None:
         self._state_poll = QTimer(self)
@@ -186,6 +231,8 @@ class MainWindow(QMainWindow):
         # el panel se terminan con él. Una shell viva sin ventana que la muestre es
         # exactamente lo que el gate de `terminal_open` intenta evitar.
         QApplication.instance().aboutToQuit.connect(self._close_terminal)
+        QApplication.instance().aboutToQuit.connect(self._guardar_geometria)
+        QApplication.instance().aboutToQuit.connect(clear_notifier)
 
     def _close_terminal(self) -> None:
         """Best-effort: nunca bloquea el quit()."""
@@ -195,6 +242,32 @@ class MainWindow(QMainWindow):
             terminal_manager.close_all()
         except Exception as e:
             logger.warning(f"no se pudo cerrar la terminal al salir: {e}")
+
+    def _setup_notificaciones(self) -> None:
+        """Conecta los avisos del sistema (`core/notificaciones.py`) con la bandeja.
+
+        El registro recibe llamadas desde CUALQUIER hilo —el planificador de flujos, un
+        ritual proactivo—, y `QSystemTrayIcon` solo se puede tocar desde el hilo de la GUI.
+        El puente es la senal `system_notification` del bridge: emitirla desde otro hilo la
+        encola sola, que es exactamente la garantia que hace falta.
+        """
+        self.bridge.system_notification.connect(self._mostrar_notificacion)
+        register_notifier(self.bridge.system_notification.emit)
+
+    def _mostrar_notificacion(self, titulo: str, mensaje: str, nivel: str) -> None:
+        """Corre en el hilo de la GUI (conexion en cola desde `_setup_notificaciones`)."""
+        iconos = {
+            "error": QSystemTrayIcon.MessageIcon.Critical,
+            "ok": QSystemTrayIcon.MessageIcon.Information,
+            "info": QSystemTrayIcon.MessageIcon.Information,
+        }
+        try:
+            self.tray_icon.showMessage(titulo, mensaje, iconos.get(nivel, iconos["info"]), 6000)
+        except Exception as e:
+            logger.warning(f"no se pudo mostrar el aviso en la bandeja: {e}")
+        # Y tambien dentro de la ventana: si esta abierta, el aviso de la bandeja se pierde
+        # entre las notificaciones del sistema.
+        self.bridge.notice_shown.emit(nivel, f"{titulo}. {mensaje}" if mensaje else titulo)
 
     def _toggle_visible(self) -> None:
         self.setVisible(not self.isVisible())
@@ -233,6 +306,7 @@ class MainWindow(QMainWindow):
         """CA-01 — portado sin cambios de comportamiento: cerrar minimiza a la bandeja en
         vez de terminar el proceso (idéntico a `JarvisMainWindow.closeEvent()`)."""
         event.ignore()
+        self._guardar_geometria()
         self.hide()
         self.tray_icon.showMessage(
             self._agent_name,
@@ -251,12 +325,16 @@ class MainWindow(QMainWindow):
             if event.type() == QEvent.Type.DragEnter:
                 if event.mimeData().hasUrls():
                     event.acceptProposedAction()
+                    self.bridge.drag_over_changed.emit(True)
                     return True
             elif event.type() == QEvent.Type.DragMove:
                 if event.mimeData().hasUrls():
                     event.acceptProposedAction()
                     return True
+            elif event.type() == QEvent.Type.DragLeave:
+                self.bridge.drag_over_changed.emit(False)
             elif event.type() == QEvent.Type.Drop:
+                self.bridge.drag_over_changed.emit(False)
                 self._handle_drop(event)
                 return True
         return super().eventFilter(obj, event)

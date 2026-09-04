@@ -22,6 +22,7 @@ y que cerrarla mata el proceso.
 """
 
 import json
+import time
 import types
 
 import pytest
@@ -97,6 +98,11 @@ def ventana(qtbot, monkeypatch):
     )
     def _resolve_falso(texto, canal, **kwargs):
         registro["mensajes"].append(texto)
+        # Algunos tests necesitan ver el turno EN CURSO (el boton de detener solo existe
+        # mientras el agente responde). Sin demora, el doble contesta tan rapido que ese
+        # estado no llega a observarse.
+        if registro.get("demora"):
+            time.sleep(registro["demora"])
         # Misma forma que devuelve `core.resolution.resolve()`: el bridge lee `.text` y
         # `.matched_by`. Un string pelado dejaría el turno a medias sin que se note.
         return types.SimpleNamespace(text="respuesta de prueba", matched_by="test")
@@ -143,6 +149,15 @@ def ventana(qtbot, monkeypatch):
     """)
 
     yield window, page, registro
+
+    # Estado global que un test puede dejar a medias: un turno cancelado y un sumidero de
+    # streaming registrado. Sin esto, el test siguiente arranca creyendose cancelado y
+    # `abortar_si_cancelado()` lo hace fallar en un lugar que no tiene nada que ver.
+    from core.cancelacion import cerrar_turno
+    from core.streaming import clear_sink
+
+    cerrar_turno()
+    clear_sink()
 
     try:
         from core.terminal_session import terminal_manager
@@ -464,6 +479,296 @@ def test_los_controles_de_ventana_responden(ventana, qtbot):
     _sin_errores(page)
 
 
+# --------------------------------------------------------------------------- detener
+
+def test_el_boton_de_detener_frena_el_turno_y_descarta_la_respuesta(ventana, qtbot):
+    """Lo que el usuario mandó a parar no puede aparecer igual en pantalla tres segundos
+    después: la cancelación es cooperativa, así que la respuesta puede llegar de todos
+    modos y hay que descartarla."""
+    window, page, registro = ventana
+    registro["demora"] = 6.0     # el turno tiene que seguir vivo cuando se pulsa detener
+
+    _run_js(page, """
+        const input = document.getElementById('composer-input');
+        input.value = 'algo lento';
+        input.dispatchEvent(new Event('input'));
+        true;
+    """)
+    _click(page, "document.getElementById('send-btn')")
+    qtbot.waitUntil(lambda: registro["mensajes"] != [], timeout=5000)
+
+    # Mientras responde, el botón de enviar cede su lugar al de detener.
+    qtbot.waitUntil(
+        lambda: _run_js(page, "document.getElementById('stop-btn').hidden") is False,
+        timeout=5000,
+    )
+
+    _click(page, "document.getElementById('stop-btn')")
+    _esperar(qtbot, 500)
+
+    assert _run_js(page, "document.getElementById('send-btn').hidden") is False
+    assert _run_js(page, "document.querySelector('#toast-host .toast') !== null") is True
+    _sin_errores(page)
+
+
+def test_lo_que_se_esta_escribiendo_se_ve_y_lo_reemplaza_la_respuesta(ventana, qtbot):
+    """Streaming: los pedazos se ven mientras llegan, y el mensaje definitivo (ya con
+    formato) ocupa su lugar en vez de duplicarse."""
+    window, page, _ = ventana
+
+    window.bridge.message_chunk.emit("Estoy escribiendo")
+    window.bridge.message_chunk.emit(" de a poco")
+    _esperar(qtbot, 300)
+
+    assert _run_js(page, "document.querySelector('.msg-viva .bubble').textContent") \
+        == "Estoy escribiendo de a poco"
+
+    window.bridge.message_appended.emit(json.dumps({
+        "role": "assistant", "html": "<p>Estoy escribiendo de a poco</p>",
+    }))
+    _esperar(qtbot, 300)
+
+    assert _run_js(page, "document.querySelectorAll('.msg-viva').length") == 0
+    assert _run_js(page, "document.querySelectorAll('.message').length") == 1
+    _sin_errores(page)
+
+
+# --------------------------------------------------------------------------- modelo
+
+def test_el_selector_de_modelo_muestra_el_activo_y_lo_cambia(ventana, qtbot, monkeypatch):
+    _, page, _ = ventana
+    import config_manager
+
+    cambios = []
+    monkeypatch.setattr(config_manager, "set_ai_provider_and_model",
+                        lambda p, m="": cambios.append((p, m)))
+
+    qtbot.waitUntil(
+        lambda: _run_js(page, "document.getElementById('model-btn-label').textContent")
+        not in ("", "…"),
+        timeout=5000,
+    )
+
+    _click(page, "document.getElementById('model-btn')")
+    _esperar(qtbot, 300)
+    assert _run_js(page, "document.querySelectorAll('.model-option').length") > 1
+
+    _run_js(page, """
+        const opciones = Array.from(document.querySelectorAll('.model-option'));
+        const otra = opciones.find(o => !o.classList.contains('active'));
+        otra.click();
+        true;
+    """)
+    _esperar(qtbot, 400)
+
+    assert cambios, "no se guardó el modelo elegido"
+    assert _run_js(page, "document.getElementById('model-menu') === null") is True
+    _sin_errores(page)
+
+
+# --------------------------------------------------------------------------- adjuntar
+
+def test_el_clip_abre_el_dialogo_y_adjunta(ventana, qtbot, monkeypatch, tmp_path):
+    """El botón de adjuntar era solo un cartel; ahora abre el diálogo nativo. El archivo
+    elegido pasa por la misma validación que el drag&drop."""
+    _, page, _ = ventana
+    from PyQt6.QtWidgets import QFileDialog
+
+    archivo = tmp_path / "informe.txt"
+    archivo.write_text("contenido", encoding="utf-8")
+    monkeypatch.setattr(QFileDialog, "getOpenFileName",
+                        staticmethod(lambda *a, **k: (str(archivo), "")))
+
+    _click(page, "document.getElementById('attach-btn')")
+    _esperar(qtbot, 500)
+
+    assert _run_js(page, "document.getElementById('attachment-chip-name').textContent") \
+        == "informe.txt"
+    assert _run_js(page, "document.getElementById('attachment-chip').hidden") is False
+    _sin_errores(page)
+
+
+def test_cancelar_el_dialogo_no_adjunta_nada(ventana, qtbot, monkeypatch):
+    _, page, _ = ventana
+    from PyQt6.QtWidgets import QFileDialog
+
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: ("", "")))
+    _click(page, "document.getElementById('attach-btn')")
+    _esperar(qtbot, 400)
+
+    assert _run_js(page, "document.getElementById('attachment-chip').hidden") is True
+    _sin_errores(page)
+
+
+# --------------------------------------------------------------------------- renombrar y buscar
+
+def test_renombrar_una_conversacion(ventana, qtbot, monkeypatch):
+    window, page, _ = ventana
+    from ai.memory_manager import memory
+
+    renombrados = []
+    monkeypatch.setattr(memory, "rename_conversation",
+                        lambda cid, titulo, **kw: renombrados.append((cid, titulo)) or True)
+
+    window.bridge.conversation_list_updated.emit(json.dumps([
+        {"conversation_id": "a", "title": "Una charla", "last_activity": None},
+    ]))
+    _esperar(qtbot, 300)
+
+    _click(page, "document.querySelector('.conv-item .conv-icon-btn')")
+    _esperar(qtbot, 200)
+    assert _run_js(page, "document.querySelector('.conv-rename-input') !== null") is True
+
+    _run_js(page, """
+        const campo = document.querySelector('.conv-rename-input');
+        campo.value = 'Certificados del server';
+        campo.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
+        true;
+    """)
+    qtbot.waitUntil(lambda: renombrados != [], timeout=5000)
+
+    assert renombrados == [("a", "Certificados del server")]
+    _sin_errores(page)
+
+
+def test_buscar_en_el_historial_muestra_el_fragmento(ventana, qtbot, monkeypatch):
+    """El filtro de la barra solo mira los títulos en pantalla; esto va a la base y trae
+    la conversación aunque se llame de otra forma."""
+    _, page, _ = ventana
+    from ai.memory_manager import memory
+
+    monkeypatch.setattr(memory, "search_conversations", lambda q, **kw: [
+        {"conversation_id": "z", "title": "Charla vieja",
+         "snippet": "…hablamos del certificado…", "matches": 2, "last_activity": ""},
+    ])
+
+    _run_js(page, """
+        const input = document.getElementById('conv-search-input');
+        input.value = 'certificado';
+        input.dispatchEvent(new Event('input'));
+        true;
+    """)
+    qtbot.waitUntil(
+        lambda: _run_js(page, "document.querySelector('.conv-snippet') !== null") is True,
+        timeout=8000,
+    )
+
+    assert "certificado" in _run_js(page, "document.querySelector('.conv-snippet').textContent")
+    _sin_errores(page)
+
+
+# --------------------------------------------------------------------------- acciones de mensaje
+
+def test_un_bloque_de_codigo_se_puede_mandar_a_la_terminal(ventana, qtbot, monkeypatch):
+    """El comando lo escribió el modelo: pasa por el MISMO gate amarillo que usa el
+    agente, con el comando a la vista."""
+    window, page, _ = ventana
+    import agents.tool_registry as tool_registry
+
+    ejecutados = []
+    monkeypatch.setattr(tool_registry, "execute_tool",
+                        lambda nombre, params, canal, **kw: ejecutados.append(params) or "ok")
+
+    window.bridge.message_appended.emit(json.dumps({
+        "role": "assistant",
+        "html": '<p>Corré esto:</p><div class="codehilite"><pre>git status</pre></div>',
+    }))
+    _esperar(qtbot, 400)
+
+    assert _run_js(page, "document.querySelectorAll('.code-actions .msg-action').length") == 2
+    _run_js(page, """
+        const botones = Array.from(document.querySelectorAll('.code-actions .msg-action'));
+        botones.find(b => b.title === 'Ejecutar').click();
+        true;
+    """)
+    qtbot.waitUntil(lambda: ejecutados != [], timeout=5000)
+
+    assert ejecutados == [{"command": "git status"}]
+    _sin_errores(page)
+
+
+def test_un_bloque_largo_no_ofrece_ejecutarse(ventana, qtbot):
+    """Un bloque de muchas líneas es un programa, no un comando: ofrecer "ejecutar" ahí
+    sería ofrecer pegar un archivo entero en la consola."""
+    window, page, _ = ventana
+
+    codigo = "<pre>" + ("print(1)&#10;" * 8) + "</pre>"
+    window.bridge.message_appended.emit(json.dumps({"role": "assistant", "html": codigo}))
+    _esperar(qtbot, 400)
+
+    titulos = json.loads(_run_js(page, """
+        JSON.stringify(Array.from(document.querySelectorAll('.code-actions .msg-action'))
+            .map(b => b.title))
+    """))
+    assert titulos == ["Copiar"]
+    _sin_errores(page)
+
+
+# --------------------------------------------------------------------------- avisos
+
+def test_un_error_del_bridge_se_ve_en_pantalla(ventana, qtbot):
+    """Antes terminaba en un console.error que nadie mira: la pantalla no decía nada y
+    parecía que el click no había hecho nada."""
+    window, page, _ = ventana
+
+    window.bridge.error_occurred.emit("No pude guardar la configuración")
+    _esperar(qtbot, 300)
+
+    texto = _run_js(page, "document.querySelector('#toast-host .toast-text').textContent")
+    assert "No pude guardar" in texto
+    assert _run_js(page, "document.querySelector('.toast-error') !== null") is True
+
+
+def test_un_aviso_del_sistema_llega_a_la_ventana(ventana, qtbot):
+    """Los avisos de `core/notificaciones.py` (un flujo que falla de madrugada) van a la
+    bandeja Y a la ventana: el globo del sistema se pierde entre los demás."""
+    window, page, _ = ventana
+    from core.notificaciones import notificar
+
+    notificar("El flujo «modo trabajo» falló", "el paso 2 no se pudo ejecutar", "error")
+    _esperar(qtbot, 500)
+
+    texto = _run_js(page, "document.querySelector('#toast-host .toast-text').textContent")
+    assert "modo trabajo" in texto
+
+
+def test_los_avisos_se_pueden_cerrar(ventana, qtbot):
+    window, page, _ = ventana
+    window.bridge.notice_shown.emit("ok", "Listo")
+    _esperar(qtbot, 300)
+    _click(page, "document.querySelector('#toast-host .toast-close')")
+    _esperar(qtbot, 200)
+    assert _run_js(page, "document.querySelector('#toast-host .toast') === null") is True
+
+
+# --------------------------------------------------------------------------- atajos
+
+def test_los_atajos_de_teclado_responden(ventana, qtbot):
+    """Ctrl+N abre un chat nuevo; Ctrl+K enfoca el buscador. Ninguno pisa lo que se está
+    escribiendo (de eso se ocupa `escribiendo()` en shortcuts.js)."""
+    window, page, _ = ventana
+
+    window.bridge.message_appended.emit(json.dumps({"role": "user", "html": "<p>hola</p>"}))
+    _esperar(qtbot, 200)
+
+    _run_js(page, """
+        document.dispatchEvent(new KeyboardEvent(
+            'keydown', {key: 'n', ctrlKey: true, bubbles: true}));
+        true;
+    """)
+    _esperar(qtbot, 400)
+    assert _run_js(page, "document.getElementById('messages').children.length") == 0
+
+    _run_js(page, """
+        document.dispatchEvent(new KeyboardEvent(
+            'keydown', {key: 'k', ctrlKey: true, bubbles: true}));
+        true;
+    """)
+    _esperar(qtbot, 200)
+    assert _run_js(page, "document.activeElement.id") == "conv-search-input"
+    _sin_errores(page)
+
+
 # --------------------------------------------------------------------------- cobertura
 
 def test_todo_boton_con_id_del_html_tiene_su_manejador(ventana):
@@ -480,8 +785,8 @@ def test_todo_boton_con_id_del_html_tiene_su_manejador(ventana):
         "terminal-btn", "tasks-btn", "flows-btn", "projects-btn", "settings-btn",
         "btn-minimize", "btn-maximize", "btn-close",
         "new-conversation-btn", "sidebar-collapse-toggle", "theme-toggle-btn",
-        "load-more-btn", "attach-btn", "wake-toggle-btn", "send-btn",
-        "attachment-chip-remove",
+        "load-more-btn", "attach-btn", "wake-toggle-btn", "send-btn", "stop-btn",
+        "model-btn", "attachment-chip-remove",
     }
     assert set(ids) == esperados, (
         "cambió el inventario de botones del HTML: agregá el nuevo a un test de este "

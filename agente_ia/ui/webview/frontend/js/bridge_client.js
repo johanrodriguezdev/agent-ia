@@ -121,3 +121,40 @@ export function requestTerminalTabs() { _bridge.request_terminal_tabs(); }
 export function onTerminalOutput(cb) { _bridge.terminal_output.connect(cb); }
 export function onTerminalState(cb) { _bridge.terminal_state.connect(cb); }
 export function onTerminalTabs(cb) { _bridge.terminal_tabs.connect(cb); }
+
+// ------------------------------------------------------------ turno en curso y avisos
+export function stopResolution() { _bridge.stop_resolution(); }
+export function onNoticeShown(cb) { _bridge.notice_shown.connect(cb); }
+export function onMessageChunk(cb) { _bridge.message_chunk.connect(cb); }
+
+// ------------------------------------------------------------ adjuntar, renombrar, buscar
+export function openAttachDialog() { _bridge.open_attach_dialog(); }
+export function renameConversation(conversationId, title) {
+  _bridge.rename_conversation(conversationId, title);
+}
+export function searchConversations(query) { _bridge.search_conversations(query); }
+export function onConversationSearchResults(cb) {
+  _bridge.conversation_search_results.connect(cb);
+}
+
+// ------------------------------------------------------------ codigo -> terminal
+export function runCommandInTerminal(command) { _bridge.run_command_in_terminal(command); }
+
+// ------------------------------------------------------------ proveedor y modelo
+export function requestModels() { _bridge.request_models(); }
+export function setModel(provider, model) { _bridge.set_model(provider, model); }
+export function onModelsLoaded(cb) { _bridge.models_loaded.connect(cb); }
+
+// ------------------------------------------------------------ elementos de proyecto
+export function requestProjectItems(projectId) { _bridge.request_project_items(projectId); }
+export function assignItemToProject(kind, itemId, projectId, label) {
+  _bridge.assign_item_to_project(kind, itemId, projectId, label);
+}
+export function unassignItemFromProject(kind, itemId, projectId) {
+  _bridge.unassign_item_from_project(kind, itemId, projectId);
+}
+export function requestAssignableItems() { _bridge.request_assignable_items(); }
+export function onProjectItemsLoaded(cb) { _bridge.project_items_loaded.connect(cb); }
+export function onAssignableItemsLoaded(cb) { _bridge.assignable_items_loaded.connect(cb); }
+export function onDragOverChanged(cb) { _bridge.drag_over_changed.connect(cb); }
+

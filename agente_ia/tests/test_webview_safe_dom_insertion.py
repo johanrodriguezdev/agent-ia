@@ -30,6 +30,11 @@ _FRONTEND_JS_DIR = (
 _MUST_NOT_USE_INNERHTML = [
     "sidebar.js", "composer.js", "confirm_modal.js", "tasks_panel.js", "projects_panel.js",
     "settings_panel.js",   # REQ-019
+    # Archivos nuevos que tambien pintan texto venido de Python y que NO esta saneado:
+    # el motivo de un error o el nombre de un archivo (toasts.js), el titulo y la ruta de
+    # una terminal (terminal_panel.js), el fragmento de una conversacion vieja
+    # (sidebar.js, ya listado arriba). Mismo molde: textContent, nunca innerHTML.
+    "toasts.js", "terminal_panel.js",
 ]
 
 _UNSAFE_PATTERN = re.compile(r"\.innerHTML\s*=|insertAdjacentHTML\s*\(")

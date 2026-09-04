@@ -19,15 +19,20 @@ import {
   onFlowsLoaded,
   onProfileLoaded, onProfileSaved,
   onTerminalOutput, onTerminalState, onTerminalTabs,
+  onNoticeShown, onMessageChunk, onConversationSearchResults, onModelsLoaded,
+  onProjectItemsLoaded, onAssignableItemsLoaded, onDragOverChanged,
+  requestModels, newConversation,
 } from "./bridge_client.js";
 import {
   initSidebar, renderConversationList, clearActiveConversation, removeConversationFromList,
+  renderSearchResults,
 } from "./sidebar.js";
 import {
   initChat, renderTurns, appendMessage, clearMessages, setTyping, setProgress, updateGuiState,
+  appendChunk, clearChunks,
 } from "./chat.js";
 import {
-  initComposer, setComposerEnabled, setWakeState, showAttachment, renderChips,
+  initComposer, setComposerEnabled, setWakeState, showAttachment, renderChips, renderModels,
 } from "./composer.js";
 import { initTheme, applyTheme } from "./theme.js";
 import { showConfirmModal } from "./confirm_modal.js";
@@ -37,9 +42,12 @@ import {
   toggleTerminalPanel, escribirSalida, manejarEstadoTerminal, renderTerminalTabs,
   refrescarTemaTerminal,
 } from "./terminal_panel.js";
+import { initToasts, mostrarAviso } from "./toasts.js";
+import { initShortcuts } from "./shortcuts.js";
 import { openFlowsPanel, renderFlows } from "./flows_panel.js";
 import {
   openProjectsPanel, renderProjects, renderProjectConversations, handleProjectRemoved,
+  renderProjectItems, renderAssignableItems,
 } from "./projects_panel.js";
 import {
   openSettingsPanel, renderSecurityOverrides, handleSecurityOverrideSaved,
@@ -75,10 +83,12 @@ async function bootstrap() {
   setAgentIdentity();
 
   initWindowChrome();
+  initToasts();
   initTheme();
   initSidebar();
   initChat();
   initComposer();
+  initShortcuts({ alternarTerminal: toggleTerminalPanel, chatNuevo: () => newConversation() });
 
   await connectBridge();
 
@@ -109,6 +119,9 @@ async function bootstrap() {
   onTypingStopped(() => {
     setTyping(false);
     setComposerEnabled(true);
+    // Si el turno se corto (boton de detener) no va a llegar ningun `message_appended`
+    // que reemplace lo que se estaba escribiendo: se saca aca.
+    clearChunks();
   });
 
   onConfirmationRequested((requestId, actionName, message) => {
@@ -117,9 +130,24 @@ async function bootstrap() {
   onFileAttached((path, name, accepted, reason) => {
     showAttachment(path, name, accepted, reason);
   });
+  // Los errores del bridge terminaban en un console.error que nadie mira: si fallaba
+  // borrar una conversacion o guardar la configuracion, la pantalla no decia nada.
   onErrorOccurred((message) => {
     // eslint-disable-next-line no-console
     console.error("[bridge:error_occurred]", message);
+    mostrarAviso("error", message);
+  });
+  onNoticeShown((nivel, mensaje) => mostrarAviso(nivel, mensaje));
+
+  // La respuesta se ve mientras se escribe; el mensaje definitivo (ya con formato) la
+  // reemplaza al llegar.
+  onMessageChunk(appendChunk);
+
+  onConversationSearchResults((json) => renderSearchResults(JSON.parse(json)));
+  onModelsLoaded((json) => renderModels(JSON.parse(json)));
+  onDragOverChanged((activo) => {
+    const capa = document.getElementById("drop-overlay");
+    if (capa) capa.hidden = !activo;
   });
   onWindowMaximizedChanged(setMaximizedState);
 
@@ -138,6 +166,8 @@ async function bootstrap() {
   onProjectsLoaded((json) => renderProjects(JSON.parse(json)));
   onProjectConversationsLoaded((json, projectId) => renderProjectConversations(JSON.parse(json), projectId));
   onProjectRemoved((projectId) => handleProjectRemoved(projectId));
+  onProjectItemsLoaded((json, projectId) => renderProjectItems(JSON.parse(json), projectId));
+  onAssignableItemsLoaded((json) => renderAssignableItems(JSON.parse(json)));
 
   // REQ-019: "Configuración" (barra superior) + señales de la sección "Seguridad".
   document.getElementById("settings-btn").addEventListener("click", openSettingsPanel);
@@ -159,6 +189,7 @@ async function bootstrap() {
   onFlowsLoaded((json) => renderFlows(JSON.parse(json)));
 
   requestInitialState();
+  requestModels();   // el composer muestra con que modelo responde
 
   // Hook de sincronización para `tests/test_webview_smoke.py` (QWebEngineView offscreen
   // real) — sin esto, un test que emite un evento del bridge justo después de construir

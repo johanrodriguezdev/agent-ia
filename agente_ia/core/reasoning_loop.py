@@ -11,6 +11,8 @@ import logging
 from typing import Optional
 
 from agents.tool_registry import execute_tool, get_tool, list_tool_names
+from core import streaming
+from core.cancelacion import abortar_si_cancelado
 from ai.llm_provider import LLMToolResponse, generate_response
 from config_manager import get_agent_name, get_display_name, get_user_title
 from core.agent_context import agent_context_manager
@@ -178,15 +180,24 @@ def run(task: str, channel, user_id: str = "default", agent_name: str = "reasoni
     prior_turns = _load_prior_turns(agent_name, user_id)   # REQ-021/CA-22
 
     for call_number in range(1, MAX_LLM_CALLS + 1):
+        # Punto de corte del boton de detener: antes de gastar otra llamada al modelo o
+        # ejecutar otra herramienta. Es donde parar es seguro — no deja nada a medias.
+        abortar_si_cancelado(f"reasoning_loop, vuelta {call_number}")
+
         # El silencio entre que el usuario pregunta y llega la respuesta era indistinguible
         # de un cuelgue. A partir de la segunda vuelta se numera: si el modelo encadena
         # herramientas, se ve que avanza en vez de parecer que se repite.
         progress_report("Pensando" if call_number == 1 else f"Pensando ({call_number})")
 
         prompt = _build_prompt(task, history, prior_turns)
-        response = generate_response(
-            [{"role": "user", "content": prompt}], _build_system_prompt(), tools=tools
-        )
+        # `permitido()`: lo que salga de ESTA llamada es la respuesta al usuario y se
+        # muestra mientras se escribe. Las herramientas que se ejecuten despues pueden
+        # consultar al modelo por su cuenta (resumir un correo, leer una captura) y eso NO
+        # tiene que aparecer en la burbuja del chat: quedan fuera del bloque.
+        with streaming.permitido():
+            response = generate_response(
+                [{"role": "user", "content": prompt}], _build_system_prompt(), tools=tools
+            )
 
         if not isinstance(response, LLMToolResponse):
             # CONFIRMADO 1: degradación silenciosa (proveedor sin tool-calling) — texto

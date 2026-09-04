@@ -65,7 +65,9 @@ def load_config():
 def save_config(config):
     try:
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=4)
+            # `ensure_ascii=False`: sin esto, "Peña" se guarda como "Peña" y el
+            # archivo deja de ser legible para el humano que a veces lo edita a mano.
+            json.dump(config, f, indent=4, ensure_ascii=False)
     except IOError as e:
         logger.error(f"Error saving config: {e}")
 
@@ -248,3 +250,69 @@ def get_wake_words() -> list[str]:
         ])
 
     return sorted(set(words), key=len, reverse=True)
+
+
+# --------------------------------------------------------------------- geometria de ventana
+
+def get_window_geometry() -> dict:
+    """Ultimo tamano/posicion de la ventana, o `{}` si nunca se guardo.
+
+    Se persiste para que la app abra donde la dejaste. Un valor corrupto o de una pantalla
+    que ya no existe se descarta acá mismo devolviendo `{}`: quien llama vuelve al calculo
+    normal contra la pantalla disponible (`ui/webview/window_geometry.py`), que nunca
+    deja la ventana fuera de la vista.
+    """
+    bruto = load_config().get("window_geometry")
+    if not isinstance(bruto, dict):
+        return {}
+    try:
+        geometria = {
+            "width": int(bruto["width"]),
+            "height": int(bruto["height"]),
+            "x": int(bruto["x"]),
+            "y": int(bruto["y"]),
+            "maximized": bool(bruto.get("maximized", False)),
+        }
+    except (KeyError, TypeError, ValueError):
+        logger.warning("window_geometry invalida en config.json — se ignora")
+        return {}
+    if geometria["width"] < 400 or geometria["height"] < 300:
+        return {}
+    return geometria
+
+
+def set_window_geometry(width: int, height: int, x: int, y: int,
+                        maximized: bool = False) -> None:
+    config = load_config()
+    config["window_geometry"] = {
+        "width": int(width), "height": int(height),
+        "x": int(x), "y": int(y), "maximized": bool(maximized),
+    }
+    save_config(config)
+
+
+# --------------------------------------------------------------------- proveedor y modelo
+
+def get_ai_provider() -> str:
+    return (load_config().get("ai_provider") or "").strip().lower()
+
+
+def get_ai_model() -> str:
+    return (load_config().get("ai_model") or "").strip()
+
+
+def set_ai_provider_and_model(provider: str, model: str = "") -> None:
+    """Cambia con QUE modelo responde el agente.
+
+    Los dos valores se escriben juntos a proposito: dejar `ai_provider` nuevo con el
+    `ai_model` del anterior es la forma mas facil de terminar pidiendole a DeepSeek un
+    modelo de Anthropic y ver un 404 sin explicacion.
+    """
+    provider = (provider or "").strip().lower()
+    if not provider:
+        return
+    config = load_config()
+    config["ai_provider"] = provider
+    config["ai_model"] = (model or "").strip()
+    save_config(config)
+    logger.info(f"proveedor de IA cambiado a {provider} ({config['ai_model'] or 'modelo por defecto'})")

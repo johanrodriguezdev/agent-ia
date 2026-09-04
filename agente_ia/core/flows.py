@@ -40,7 +40,8 @@ from contextlib import closing
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from core.security_manager import security_manager
+from core.notificaciones import notificar
+from core.security_manager import ChannelType, security_manager
 
 logger = logging.getLogger(__name__)
 
@@ -495,6 +496,7 @@ def ejecutar(flujo_id: int, canal=None, user_id: str = "default",
                 f"no se puede pedir por {canal_resuelto.value}"
             )
             logger.info(f"Flujo {flujo_id} en espera: {flujo.motivo}")
+            notificar(f"El flujo «{flujo.nombre}» espera permiso", flujo.motivo, "info")
             return _guardar_tolerante(store, flujo)
 
         try:
@@ -513,6 +515,9 @@ def ejecutar(flujo_id: int, canal=None, user_id: str = "default",
             paso.resultado = str(e)[:500]
             flujo.estado = FALLIDO
             flujo.motivo = f"el paso {flujo.paso_actual + 1} («{paso.accion}») falló: {e}"
+            # Un flujo programado puede fallar a las tres de la mañana. Sin este aviso, el
+            # usuario se entera solo si un día abre la pantalla de Flujos y mira.
+            notificar(f"El flujo «{flujo.nombre}» falló", flujo.motivo, "error")
             return _guardar_tolerante(store, flujo)
 
         flujo.paso_actual += 1
@@ -525,6 +530,11 @@ def ejecutar(flujo_id: int, canal=None, user_id: str = "default",
     flujo.estado = EXITOSO
     flujo.motivo = ""
     logger.info(f"Flujo '{flujo.nombre}' completado ({len(flujo.pasos)} pasos)")
+    # Solo se avisa de lo que el usuario no estaba mirando: un flujo lanzado a mano desde
+    # la pantalla ya muestra su resultado ahí, y avisar dos veces es ruido.
+    if canal_resuelto != ChannelType.DESKTOP:
+        notificar(f"Flujo «{flujo.nombre}» completado",
+                  f"{len(flujo.pasos)} pasos, sin errores", "ok")
     return _guardar_tolerante(store, flujo)
 
 

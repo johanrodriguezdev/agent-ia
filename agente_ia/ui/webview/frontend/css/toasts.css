@@ -1,0 +1,110 @@
+/* ui/webview/frontend/css/toasts.css
+   Avisos visibles (js/toasts.js) y la capa de arrastrar-y-soltar. Las dos cosas comparten
+   archivo porque son lo mismo: señales efímeras que se superponen a la ventana sin formar
+   parte del layout.
+*/
+
+/* -------------------------------------------------------------- avisos */
+
+#toast-host {
+  position: fixed;
+  right: 22px;
+  /* Arriba, debajo de la barra de titulo. Abajo a la derecha —el lugar habitual— tapaba
+     el boton de enviar o los chips, y habia que esperar a que el aviso se fuera para
+     poder seguir usando la app. Arriba no hay nada que tapar. */
+  top: 56px;
+  z-index: 1200;          /* por encima de los modales: un error del guardado tiene que
+                             verse aunque el panel que lo provocó siga abierto */
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-end;
+  pointer-events: none;   /* el hueco entre avisos no bloquea la ventana */
+}
+
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  max-width: 380px;
+  padding: 10px 10px 10px 13px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--text-secondary);
+  border-radius: var(--radius-md);
+  background-color: var(--bg-secondary);
+  box-shadow: var(--shadow-pop);
+  font-size: 13px;
+  color: var(--text-primary);
+  animation: fadeSlideIn 200ms ease;
+}
+
+/* El color va en el borde y en el icono, nunca en el fondo: un rectángulo rojo entero
+   sobre la pantalla grita más de lo que informa. */
+.toast-error { border-left-color: var(--danger); }
+.toast-error .ic { color: var(--danger); }
+.toast-ok { border-left-color: var(--success); }
+.toast-ok .ic { color: var(--success); }
+.toast-info { border-left-color: var(--text-accent); }
+.toast-info .ic { color: var(--text-accent); }
+
+.toast-text {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.toast-close {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+}
+
+.toast-close:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast { animation: none; }
+}
+
+/* -------------------------------------------------------------- arrastrar y soltar */
+
+#drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--overlay);
+  /* El puntero lo maneja Qt (el drop nativo lo intercepta `MainWindow.eventFilter`): esta
+     capa es solo señal visual y no debe robar eventos. */
+  pointer-events: none;
+}
+
+#drop-overlay[hidden] {
+  display: none;
+}
+
+#drop-overlay-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 22px 30px;
+  border: 2px dashed var(--text-accent);
+  border-radius: var(--radius-lg);
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 14px;
+  box-shadow: var(--shadow-pop);
+}

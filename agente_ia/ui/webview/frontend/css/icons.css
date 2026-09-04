@@ -78,6 +78,14 @@
   color: var(--text-accent);
 }
 
+/* `[hidden]` del user-agent stylesheet tiene la misma especificidad que `.icon-btn`, y
+   entre reglas de igual especificidad gana la del autor: sin esto, un boton de icono con
+   el atributo `hidden` se seguia viendo (le paso al de detener, que aparecia siempre).
+   Mismo bug que ya esta documentado para `#typing-indicator` y `#attachment-chip`. */
+.icon-btn[hidden] {
+  display: none;
+}
+
 .icon-btn:disabled {
   opacity: 0.45;
   cursor: default;
