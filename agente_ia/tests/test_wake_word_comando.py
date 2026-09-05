@@ -561,14 +561,35 @@ def test_el_eco_del_propio_agente_no_interrumpe(hablando, captado):
 
 
 @pytest.mark.parametrize("captado", [
-    "orion detente por favor",
+    "viernes detente por favor",
     "espera quiero preguntarte otra cosa",
-    "no era eso lo que queria saber",
 ])
-def test_una_interrupcion_real_si_corta(hablando, captado):
+def test_una_interrupcion_real_si_corta(hablando, perfil, captado):
+    """El nombre del agente se fija acá: desde que el barge-in exige que le hablen A ÉL,
+    un nombre cableado ("orion") hacía que el test dependiera del `config.json` real —
+    pasaba o fallaba según cómo tuviera el usuario bautizado a su agente."""
+    perfil("viernes", "viernes")
     from voice.wake_word import _es_interrupcion_real
 
     assert _es_interrupcion_real(captado) is True
+
+
+def test_una_frase_sin_senal_de_corte_ya_no_interrumpe(hablando):
+    """Cambio de contrato deliberado, no una regresión.
+
+    "no era eso lo que queria saber" es una interrupción legítima, y hasta ahora cortaba —
+    porque cortaba CUALQUIER cosa que no fuera el eco del agente. Por contenido es
+    indistinguible de un anuncio de radio, y esa permisividad es la que hizo que
+    "95.3 perfecto para combatir el encrespamiento" se llevara por delante la respuesta a
+    un análisis del precio del dólar (logs/orion.log, 2026-09-04 21:29:41).
+
+    Los dos errores no cuestan lo mismo. Cortar de más pierde la respuesta entera y no hay
+    forma de recuperarla salvo volver a preguntar; cortar de menos hace que el agente
+    termine la frase y el usuario diga "para", que es una sílaba. Se eligió el barato.
+    """
+    from voice.wake_word import _es_interrupcion_real
+
+    assert _es_interrupcion_real("no era eso lo que queria saber") is False
 
 
 def test_sin_locucion_en_curso_no_hay_nada_que_interrumpir(monkeypatch):
@@ -595,3 +616,99 @@ def test_si_no_se_sabe_que_se_esta_diciendo_se_respeta_la_interrupcion(monkeypat
     monkeypatch.setattr(tts, "_current_text", "")
 
     assert _es_interrupcion_real("cualquier cosa") is True
+
+
+# ─────────────────────────────────────────────
+#  El micrófono capta la habitación entera
+#
+#  Todo lo de esta sección salió de una sesión real (logs/orion.log, 2026-09-04 21:28-21:29):
+#  había una radio encendida, y sus anuncios entraban por el micrófono como si fueran el
+#  usuario. Las frases están copiadas literales del log.
+# ─────────────────────────────────────────────
+
+#: Anuncios de radio transcritos de verdad durante esa sesión.
+_LA_RADIO = [
+    "95.3 perfecto para combatir el encrespamiento",
+    "haciendo a su tecnologia debajo inteligente el doctor penetra en la vida",
+    "de cuatro veces mas que un suavizante comun menos abre la cal",
+    "recomiendame me escuchas",
+]
+
+#: Lo que dice alguien que SÍ quiere interrumpir.
+_UNA_INTERRUPCION = ["para", "espera", "detente", "callate", "silencio", "basta"]
+
+
+def _mientras_habla(texto, dicho="El precio del dolar en los ultimos seis meses mostro"):
+    """¿`texto` cortaría la locución en curso?"""
+    from voice.wake_word import _es_interrupcion_real
+
+    with patch("ui.tts_engine.is_speaking", return_value=True), \
+         patch("ui.tts_engine.current_speech_text", return_value=dicho):
+        return _es_interrupcion_real(texto)
+
+
+@pytest.mark.parametrize("anuncio", _LA_RADIO)
+def test_el_ruido_de_fondo_no_corta_la_respuesta_hablada(anuncio):
+    """El caso concreto: a las 21:29:35 terminó un análisis del precio del dólar, y seis
+    segundos después un anuncio de radio cortó la locución a mitad. Desde afuera eso se
+    vive como que el agente no contesta en audio.
+
+    Nótese "95.3 perfecto PARA combatir": cuando la frase de corte se buscaba como
+    subcadena, ese anuncio seguía cortando. Por eso se exige la frase entera."""
+    assert _mientras_habla(anuncio) is False, anuncio
+
+
+@pytest.mark.parametrize("frase", _UNA_INTERRUPCION)
+def test_una_interrupcion_de_verdad_sigue_cortando(frase):
+    """La otra mitad: endurecer el barge-in no puede dejar al agente imposible de callar."""
+    assert _mientras_habla(frase) is True, frase
+
+
+def test_el_nombre_del_agente_tambien_corta(perfil):
+    """Interrumpir con una orden nueva —"viernes, mejor busca otra cosa"— es interrumpir."""
+    perfil("viernes", "viernes")
+    assert _mientras_habla("viernes mejor busca otra cosa") is True
+
+
+def test_el_eco_del_propio_agente_sigue_sin_cortar():
+    """La protección que ya existía no se pierde: el micrófono capta los altavoces."""
+    assert _mientras_habla("el precio del dolar en los ultimos seis meses") is False
+
+
+def test_sin_locucion_en_curso_no_hay_nada_que_interrumpir():
+    from voice.wake_word import _es_interrupcion_real
+
+    with patch("ui.tts_engine.is_speaking", return_value=False):
+        assert _es_interrupcion_real("para") is False
+
+
+def test_una_frase_larga_no_se_corta_a_los_seis_segundos():
+    """La instrucción "orion, ¿me escuchas? hazme un análisis del precio del dólar en los
+    últimos 6 meses" llegó como 'orion Me escuchas Hazme un': el límite de 6 s la partía
+    por la mitad, y el resto entraba después como frase suelta y se descartaba. El propio
+    usuario terminó dictando "se está cortando el audio".
+
+    Se fija el número porque es el que causó el bug, no un detalle de implementación: 6 no
+    alcanza para una frase hablada normal."""
+    from voice.wake_word import _limite_de_frase
+
+    with patch("ui.tts_engine.is_speaking", return_value=False):
+        assert _limite_de_frase() >= 12, (
+            "una instrucción hablada normal pasa de 6 segundos y se estaba partiendo"
+        )
+
+
+def test_mientras_el_agente_habla_la_captura_es_corta():
+    """La otra cara: por los altavoces el micrófono oye voz continua, así que la frase no
+    se cierra por silencio y se estira hasta el tope. Con el límite largo puesto ahí, un
+    "para" tardaría hasta 15 s en transcribirse — el agente seguiría hablando todo ese
+    rato. Interrumpir tiene que ser rápido; dictar, largo. No es el mismo problema."""
+    from voice.wake_word import _limite_de_frase
+
+    with patch("ui.tts_engine.is_speaking", return_value=True):
+        rapido = _limite_de_frase()
+    with patch("ui.tts_engine.is_speaking", return_value=False):
+        largo = _limite_de_frase()
+
+    assert rapido < largo, (rapido, largo)
+    assert rapido <= 6, "una interrupción no puede tardar tanto en llegar"

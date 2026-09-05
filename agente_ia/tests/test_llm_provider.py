@@ -23,6 +23,19 @@ _TOOLS = [{
 }]
 
 
+def _fake_anthropic_module(fake_client) -> ModuleType:
+    """Inyecta un módulo `anthropic` falso en sys.modules.
+
+    El SDK está comentado en requirements.txt (es opcional: solo hace falta si el humano
+    elige Anthropic como proveedor), así que `patch("anthropic.Anthropic")` fallaba con
+    ModuleNotFoundError y dejaba estos dos tests en rojo permanente — con la suite siempre
+    en rojo, un fallo de verdad no se distingue del ruido de fondo.
+    """
+    module = ModuleType("anthropic")
+    module.Anthropic = MagicMock(return_value=fake_client)
+    return module
+
+
 def _fake_openai_module(fake_client) -> ModuleType:
     """Inyecta un módulo `openai` falso en sys.modules — el SDK real no está instalado en
     este entorno (confirmado por `python -c "import openai"` fallando con
@@ -57,7 +70,7 @@ def test_ca04_ask_anthropic_parsea_tool_use_en_llmtoolresponse(monkeypatch):
     fake_client = MagicMock()
     fake_client.messages.create.return_value = fake_response
 
-    with patch("anthropic.Anthropic", return_value=fake_client):
+    with patch.dict(sys.modules, {"anthropic": _fake_anthropic_module(fake_client)}):
         result = llm_provider._ask_anthropic(
             [{"role": "user", "content": "usa la tool"}], "system", None, "", tools=_TOOLS,
         )
@@ -82,7 +95,7 @@ def test_ca04_ask_anthropic_sin_tools_comportamiento_no_roto(monkeypatch):
     fake_client = MagicMock()
     fake_client.messages.create.return_value = fake_response
 
-    with patch("anthropic.Anthropic", return_value=fake_client):
+    with patch.dict(sys.modules, {"anthropic": _fake_anthropic_module(fake_client)}):
         result = llm_provider._ask_anthropic(
             [{"role": "user", "content": "hola"}], "system", None, "",
         )

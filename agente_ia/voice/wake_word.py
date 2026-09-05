@@ -112,6 +112,104 @@ def _report_state(
 #: rara vez acierta dos palabras seguidas por casualidad.
 _ECO_MIN_PALABRAS_COMUNES = 2
 
+#: Cuánto puede durar UNA frase dictada. Estaba en 6 segundos, y con eso una instrucción
+#: normal se partía por la mitad: en la sesión del 2026-09-04 21:28, "orion, ¿me escuchas?
+#: hazme un análisis del precio del dólar en los últimos 6 meses" llegó como
+#: `'orion Me escuchas Hazme un'`, y el resto entró después como una frase suelta sin wake
+#: word, que se descartó. El propio usuario terminó dictando "se está cortando el audio".
+#:
+#: `pause_threshold` cierra la frase ~0.8 s después de que dejás de hablar, así que este
+#: límite solo actúa sobre quien habla de corrido más que eso.
+_LIMITE_DE_FRASE = 15
+
+#: El límite MIENTRAS el agente habla, que es un caso distinto: por los altavoces el
+#: micrófono oye voz continua, así que la frase nunca se cierra por silencio y se estira
+#: hasta el tope. Con 15 s ahí, una interrupción tardaría hasta 15 s en transcribirse y
+#: llegar al barge-in. Cuando el agente habla no hace falta capturar una instrucción larga:
+#: hace falta oír "para" rápido.
+_LIMITE_MIENTRAS_HABLA = 5
+
+
+def _limite_de_frase() -> int:
+    """Cuántos segundos puede durar la captura, según si el agente está hablando."""
+    try:
+        from ui.tts_engine import is_speaking
+
+        return _LIMITE_MIENTRAS_HABLA if is_speaking() else _LIMITE_DE_FRASE
+    except Exception as e:
+        logger.debug(f"No se pudo consultar el estado del TTS: {e}")
+        return _LIMITE_DE_FRASE
+
+#: Con qué se corta una locución en curso. Cortas a propósito: se dicen ENCIMA de la voz
+#: del agente, en el hueco entre dos palabras suyas.
+_FRASES_DE_CORTE = frozenset({
+    "para", "pare", "pará", "detente", "deténgase", "detengase", "basta", "stop",
+    "cállate", "callate", "cállese", "callese", "silencio", "espera", "espere",
+    "ya está", "ya esta", "suficiente",
+})
+
+
+def _es_eco_del_agente(texto: str, dicho: str, contexto: str = "Micrófono") -> bool:
+    """Return True si `texto` es lo que el propio agente está diciendo, captado por el mic.
+
+    La comparación es por palabras y no por subcadena porque la transcripción del eco nunca
+    es exacta —le faltan sílabas, cambia acentos— pero conserva las palabras largas.
+
+    Vive aparte porque hacen falta DOS lectores. El barge-in ya lo usaba; la confirmación
+    hablada no, y por eso el agente terminaba contestándose a sí mismo: preguntaba en voz
+    alta "¿está seguro de que quiere ejecutar...?", el micrófono lo oía, y esa frase entraba
+    como la respuesta del usuario. Al no ser un "confirmo", contaba como rechazo — antes de
+    que el humano abriera la boca (logs/orion.log, 2026-09-04 22:18:47 y 22:20:48).
+    """
+    captadas = {p for p in normalize_for_match(texto).split() if len(p) > 3}
+    pronunciadas = {p for p in normalize_for_match(dicho).split() if len(p) > 3}
+    if not captadas:
+        return False        # ruido sin palabras con contenido: no es nadie hablando
+
+    comunes = captadas & pronunciadas
+
+    # Dos condiciones, cualquiera basta. La segunda cubre el caso de que el micrófono solo
+    # alcance a captar una palabra suelta de la locución: si TODO lo que se oyó está dentro
+    # de lo que el agente está diciendo, no hay nada que sugiera una voz distinta.
+    es_eco = len(comunes) >= _ECO_MIN_PALABRAS_COMUNES or captadas <= pronunciadas
+    if es_eco:
+        logger.info(
+            f"[{contexto}] Descartado: es el eco del propio agente "
+            f"(coinciden {sorted(comunes)[:4]})"
+        )
+    return es_eco
+
+
+def _es_su_propia_pregunta(texto: str) -> bool:
+    """Return True si lo captado es el agente pronunciando su propia petición de permiso.
+
+    Dos candados, porque el eco llega en dos momentos distintos: mientras todavía habla
+    (`is_speaking()`), y en el chunk que se estaba capturando justo cuando terminó, que ya
+    no lo detecta `is_speaking()` pero sigue conteniendo su voz.
+    """
+    from ui.tts_engine import current_speech_text
+    from voice.voice_confirmation import PALABRAS_DE_CONFIRMACION, PALABRAS_DE_RECHAZO
+
+    dicho = current_speech_text()
+    if not dicho:
+        return False
+
+    # El vocabulario de respuesta se quita de LAS DOS partes antes de comparar. Es
+    # imprescindible: la pregunta dice "diga confirmo para ejecutar", así que un "confirmo"
+    # a secas está contenido en ella palabra por palabra y se descartaba como eco — el
+    # filtro contra el agente habría acabado ignorando justo la respuesta del humano.
+    #
+    # Lo que queda después de quitarlo es lo que de verdad distingue quién habló: si TODO
+    # eso está dentro de la pregunta, la dijo el agente.
+    respuestas = set(PALABRAS_DE_CONFIRMACION) | set(PALABRAS_DE_RECHAZO)
+    sin_respuestas = " ".join(
+        p for p in normalize_for_match(texto).split() if p not in respuestas
+    )
+    if not sin_respuestas.strip():
+        return False        # solo dijo "confirmo" / "no": es una respuesta, no un eco
+
+    return _es_eco_del_agente(sin_respuestas, dicho, contexto="Confirmación")
+
 
 def _es_interrupcion_real(texto: str) -> bool:
     """Return True si `texto` es el usuario interrumpiendo, y no el eco del propio agente.
@@ -132,26 +230,50 @@ def _es_interrupcion_real(texto: str) -> bool:
     if not dicho:
         return True         # está hablando pero no sabemos qué: se respeta la interrupción
 
-    captadas = {p for p in normalize_for_match(texto).split() if len(p) > 3}
-    pronunciadas = {p for p in normalize_for_match(dicho).split() if len(p) > 3}
-    if not captadas:
-        return False        # ruido sin palabras con contenido: no es nadie hablando
+    if _es_eco_del_agente(texto, dicho, contexto="Barge-in"):
+        return False
 
-    comunes = captadas & pronunciadas
-
-    # Dos condiciones, cualquiera basta para considerarlo eco. La segunda cubre el caso de
-    # que el micrófono solo alcance a captar una palabra suelta de la locución: si TODO lo
-    # que se oyó está dentro de lo que el agente está diciendo, no hay nada que sugiera una
-    # voz distinta.
-    es_eco = len(comunes) >= _ECO_MIN_PALABRAS_COMUNES or captadas <= pronunciadas
-    if es_eco:
-        logger.info(
-            f"[Barge-in] Descartado: es el eco del propio agente "
-            f"(coinciden {sorted(comunes)[:4]})"
-        )
+    # No basta con que NO sea el agente: tiene que ser alguien hablándole A ÉL.
+    #
+    # Antes alcanzaba con cualquier cosa transcrita, y el micrófono capta la habitación
+    # entera. En la sesión del 2026-09-04 21:29, seis segundos después de terminar un
+    # análisis del precio del dólar, un anuncio de radio —"95.3 perfecto para combatir el
+    # encrespamiento"— cortó la respuesta hablada a mitad. Desde afuera eso se vive como
+    # que el agente no contesta en audio.
+    #
+    # Cortar de más y cortar de menos no cuestan lo mismo: si de verdad querés
+    # interrumpirlo y no reconoce la frase, lo repetís; si corta solo, perdés la respuesta
+    # entera y no hay forma de recuperarla salvo volver a preguntar.
+    if not _pide_la_palabra(texto):
+        logger.info(f"[Barge-in] Descartado: ruido de fondo mientras habla — '{texto[:50]}'")
         return False
 
     return True
+
+
+def _pide_la_palabra(texto: str) -> bool:
+    """Return True si `texto` es alguien pidiéndole al agente que se calle o atienda.
+
+    Dos formas, las dos deliberadas: el nombre del agente (que es como se le habla) o una
+    frase de corte explícita ("para", "espera"). Cualquier otra cosa dicha mientras habla
+    es la habitación, no una orden.
+    """
+    # Al PRINCIPIO de la frase, no en cualquier parte. Quien interrumpe abre con la palabra
+    # de corte ("espera, quiero preguntarte otra cosa"); un anuncio la lleva enterrada en
+    # medio — "95.3 perfecto PARA combatir el encrespamiento" cortaba la locución cuando
+    # esto se buscaba como subcadena.
+    limpio = normalize_for_match(texto).strip()
+    if limpio in _FRASES_DE_CORTE:
+        return True
+    if any(limpio.startswith(f"{frase} ") for frase in _FRASES_DE_CORTE):
+        return True
+    try:
+        es_wake, _ = parse_wake_command(texto)
+        return bool(es_wake)
+    except Exception as e:
+        # Sin poder decidir, se respeta la interrupción: es el comportamiento de antes.
+        logger.warning(f"No se pudo evaluar la wake word para el barge-in: {e}")
+        return True
 
 
 def _report_awake(wake_state_callback: Optional[Callable[[str], None]]) -> None:
@@ -209,7 +331,9 @@ def listen_for_wake_word(
                 # capturarse mientras el agente hablaba no puede aceptarse sin wake word
                 # aunque termine después de abrirse la ventana.
                 listen_started_at = time.monotonic()
-                audio = recognizer.listen(source, timeout=1, phrase_time_limit=6)
+                audio = recognizer.listen(
+                    source, timeout=1, phrase_time_limit=_limite_de_frase(),
+                )
 
                 if wake_state_callback is None:
                     try:
@@ -278,6 +402,19 @@ def listen_for_wake_word(
 
                     if voice_confirmation.hay_pendiente():
                         accion = voice_confirmation.accion_pendiente()
+                        # El agente pregunta EN VOZ ALTA y el micrófono lo oye. Sin este
+                        # filtro, su propia pregunta entraba como la respuesta y, al no ser
+                        # un "confirmo", se contaba como rechazo antes de que el humano
+                        # dijera nada. Se descarta y se sigue escuchando: la petición
+                        # queda viva hasta que responda alguien de verdad, o venza sola.
+                        if not voice_confirmation.acepta(listen_started_at):
+                            logger.info(
+                                "[Confirmación] descartado: la captura empezó mientras el "
+                                "agente todavía preguntaba"
+                            )
+                            continue
+                        if _es_su_propia_pregunta(text):
+                            continue
                         logger.info(
                             f"[Confirmación] respuesta hablada a '{accion}': {text[:40]!r}"
                         )

@@ -88,6 +88,35 @@ def _norm(proveedor: str) -> str:
     return str(proveedor).strip().lower()
 
 
+def _clave(proveedor: str, modelo: str = "") -> str:
+    """Clave bajo la que se aparta un destino.
+
+    Con modelo, aparta SOLO ese modelo de ese proveedor. Es lo que hace falta para los
+    catalogos gratuitos: en OpenRouter, que un modelo se quede sin cuota no dice nada de
+    los otros veinte, y apartar "openrouter" entero por un 429 de uno solo dejaba fuera a
+    todos los que seguian funcionando.
+
+    Sin modelo, la clave es el proveedor — el comportamiento de siempre para quien no
+    distingue modelos (DeepSeek, Anthropic: la cuota es de la cuenta, no del modelo).
+    """
+    base = _norm(proveedor)
+    modelo = str(modelo or "").strip().lower()
+    return f"{base}:{modelo}" if modelo else base
+
+
+def _destino(candidato) -> tuple:
+    """Normaliza un candidato a `(proveedor, modelo)`.
+
+    Acepta un string (proveedor suelto, como siempre) o una tupla. Asi las dos formas
+    conviven en la misma lista sin que el caller tenga que uniformarlas.
+    """
+    if isinstance(candidato, (tuple, list)) and candidato:
+        proveedor = candidato[0]
+        modelo = candidato[1] if len(candidato) > 1 else ""
+        return _norm(proveedor), str(modelo or "").strip()
+    return _norm(candidato), ""
+
+
 def clasificar_error(error: Any) -> str:
     """Return la categoría de `error`: cuota, credenciales, limite_tasa u otro.
 
@@ -185,10 +214,21 @@ def _guardar() -> None:
             logger.debug(f"Tampoco se pudo borrar el temporal {tmp_path}: {e_rm}")
 
 
-def segundos_restantes(proveedor: str) -> float:
-    """Return cuántos segundos le quedan de cooldown a `proveedor` (0.0 si ya está listo)."""
+def segundos_restantes(proveedor: str, modelo: str = "") -> float:
+    """Return cuántos segundos le quedan de cooldown (0.0 si ya está listo).
+
+    Con `modelo`, se toma el MAYOR de los dos cooldowns: el del modelo y el del proveedor
+    entero. Un problema de credenciales aparta al proveedor completo y ningun modelo suyo
+    puede responder mientras dure.
+    """
     _cargar_si_hace_falta()
-    entrada = _cooldowns.get(_norm(proveedor))
+    if modelo:
+        return max(_restante_de(_clave(proveedor, modelo)), _restante_de(_norm(proveedor)))
+    return _restante_de(_norm(proveedor))
+
+
+def _restante_de(clave: str) -> float:
+    entrada = _cooldowns.get(clave)
     if not entrada:
         return 0.0
     restante = entrada["hasta"] - time.time()
@@ -199,12 +239,12 @@ def segundos_restantes(proveedor: str) -> float:
     return min(restante, float(_COOLDOWN_MAXIMO))
 
 
-def en_cooldown(proveedor: str) -> bool:
-    """Return True si a `proveedor` conviene no preguntarle todavía."""
-    return segundos_restantes(proveedor) > 0
+def en_cooldown(proveedor: str, modelo: str = "") -> bool:
+    """Return True si a ese destino conviene no preguntarle todavía."""
+    return segundos_restantes(proveedor, modelo) > 0
 
 
-def registrar_fallo(proveedor: str, error: Any) -> float:
+def registrar_fallo(proveedor: str, error: Any, modelo: str = "") -> float:
     """Aparta a `proveedor` si `error` lo amerita. Return los segundos aplicados (0 si no).
 
     Solo los fallos que no se arreglan en el mensaje siguiente generan cooldown: quedarse
@@ -217,7 +257,14 @@ def registrar_fallo(proveedor: str, error: Any) -> float:
         logger.debug(f"Fallo de '{proveedor}' sin cooldown (categoría '{categoria}'): {error}")
         return 0.0
 
-    clave = _norm(proveedor)
+    # Las credenciales son del proveedor, no del modelo: sin clave valida no responde
+    # ninguno de sus modelos, asi que se aparta el proveedor entero. Cuota y limite de
+    # tasa, en cambio, son del modelo cuando se sabe cual — es lo que permite seguir
+    # usando los otros gratuitos del mismo catalogo.
+    if categoria == CATEGORIA_CREDENCIALES:
+        clave = _norm(proveedor)
+    else:
+        clave = _clave(proveedor, modelo)
     _cooldowns[clave] = {"hasta": time.time() + segundos, "categoria": categoria}
     logger.warning(
         f"Proveedor '{clave}' apartado {segundos}s por '{categoria}'. Mientras dure se "
@@ -227,26 +274,37 @@ def registrar_fallo(proveedor: str, error: Any) -> float:
     return float(segundos)
 
 
-def registrar_exito(proveedor: str) -> None:
-    """Devuelve a `proveedor` a la rotación. No toca disco si no estaba apartado."""
+def registrar_exito(proveedor: str, modelo: str = "") -> None:
+    """Devuelve ese destino a la rotación. No toca disco si no estaba apartado.
+
+    Una respuesta buena levanta el cooldown del modelo Y el del proveedor: si contesto, ni
+    las credenciales ni la cuota de la cuenta estaban rotas.
+    """
     _cargar_si_hace_falta()
-    clave = _norm(proveedor)
-    if _cooldowns.pop(clave, None) is None:
+    claves = [_norm(proveedor)]
+    if modelo:
+        claves.insert(0, _clave(proveedor, modelo))
+
+    levantadas = [c for c in claves if _cooldowns.pop(c, None) is not None]
+    if not levantadas:
         return
-    logger.info(f"Proveedor '{clave}' respondió bien: se levanta su cooldown")
+    logger.info(f"'{'/'.join(levantadas)}' respondió bien: se levanta su cooldown")
     _guardar()
 
 
-def ordenar_por_disponibilidad(candidatos: List[str]) -> List[str]:
+def ordenar_por_disponibilidad(candidatos: List[Any]) -> List[Any]:
     """Return `candidatos` con los disponibles primero, respetando el orden relativo.
 
-    Reordena, nunca descarta: si todos están en cooldown se devuelven igual, en su orden
-    original. Que el agente pierda unos segundos es preferible a que se quede mudo.
+    Cada candidato puede ser un proveedor suelto (string) o un `(proveedor, modelo)`: se
+    devuelven tal como entraron, solo cambia el orden. Reordena, nunca descarta: si todos
+    están en cooldown se devuelven igual, en su orden original. Que el agente pierda unos
+    segundos es preferible a que se quede mudo.
     """
-    disponibles: List[str] = []
-    esperando: List[str] = []
-    for proveedor in candidatos:
-        (esperando if en_cooldown(proveedor) else disponibles).append(proveedor)
+    disponibles: List[Any] = []
+    esperando: List[Any] = []
+    for candidato in candidatos:
+        proveedor, modelo = _destino(candidato)
+        (esperando if en_cooldown(proveedor, modelo) else disponibles).append(candidato)
     return disponibles + esperando
 
 

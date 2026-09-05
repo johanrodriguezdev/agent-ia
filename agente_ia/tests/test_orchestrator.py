@@ -130,7 +130,8 @@ def test_la_tarea_del_orquestador_llega_al_bucle_de_razonamiento(monkeypatch):
 
     llamadas = []
 
-    def _razonar_falso(task, channel, user_id="default", agent_name="reasoning_loop"):
+    def _razonar_falso(task, channel, user_id="default", agent_name="reasoning_loop",
+                       estado=None):
         llamadas.append((task, channel, user_id))
         return "lo resolvio el modelo"
 

@@ -59,7 +59,50 @@ seguridad que hayas hecho, y vive separado para que una configuración corrupta 
 rebajar la seguridad del sistema.
 
 Variables de entorno relevantes: `ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`, `DISCORD_BOT_TOKEN`,
-y `ORION_AUTH_PIN` para las acciones que exigen verificación.
+`OPENROUTER_API_KEY`, y `ORION_AUTH_PIN` para las acciones que exigen verificación.
+
+### Un modelo distinto para cada tipo de trabajo
+
+No todo lo que hace el agente necesita el mismo modelo. Resumir un correo o compactar el
+historial es trabajo mecánico; contestarte en el chat, no. En **Configuración → Modelos**
+puedes asignar a cada tipo de trabajo el modelo que lo atienda:
+
+| Tipo de trabajo | Qué cubre |
+|---|---|
+| Respuesta principal | Lo que te contesta en el chat. Necesita un modelo con tool-calling. |
+| Escribir código | Cuando le pides un script. |
+| Trabajo mecánico | Resumir, compactar historial, destilar memoria. Lo que más conviene mandar a un modelo gratuito. |
+
+Lo que no esté asignado usa el modelo general de siempre, así que dejarlo todo vacío deja el
+comportamiento exactamente como estaba.
+
+**Se pueden poner varios modelos por tarea, y el orden importa.** Los catálogos gratuitos de
+OpenRouter se quedan sin cuota a cada rato: con una lista, el agente pasa al siguiente de la
+cadena en la misma llamada en vez de abandonar la tarea o irse a un modelo de pago. Un modelo
+que falla por cuota queda apartado unos minutos — solo ese modelo, no el proveedor entero,
+porque en OpenRouter la cuota es por modelo.
+
+Para usar los modelos `:free` hace falta una cuenta en [openrouter.ai](https://openrouter.ai)
+y su clave en `OPENROUTER_API_KEY` (o en `openrouter_api_key` dentro de `config.json`). Son
+gratuitos, pero con límite de peticiones por minuto y por día.
+
+Dos avisos sobre los gratuitos: **no todos soportan tool-calling**, así que para "Respuesta
+principal" hay que elegir uno que sí (la pantalla lo dice en la descripción de la tarea); y
+**los IDs entran y salen del catálogo** de OpenRouter con el tiempo. Si uno empieza a
+responder "model not found", se quita desde la misma pantalla y se pone otro.
+
+También se puede editar a mano en `task_providers` de `config.json`, que acepta tanto un
+destino suelto como una lista:
+
+```json
+"task_providers": {
+    "ligera": {"proveedor": "openrouter", "modelo": "google/gemma-4-31b-it:free"},
+    "razonamiento": [
+        {"proveedor": "openrouter", "modelo": "z-ai/glm-5.2:free"},
+        {"proveedor": "deepseek", "modelo": "deepseek-chat"}
+    ]
+}
+```
 
 ---
 
@@ -84,12 +127,36 @@ tests/          Suite de pytest
 ### El punto por el que pasa todo
 
 `core/resolution.py::resolve()` es el **único** punto de resolución del sistema. Los cuatro canales
-—escritorio, voz, Telegram, Discord— entran por ahí y recorren la misma lista ordenada de
-estrategias: rutinas aprendidas, planes autónomos, comandos enseñados, tareas, capacidades del
-sistema, intenciones clasificadas, y por último el modelo de lenguaje.
+—escritorio, voz, Telegram, Discord— entran por ahí, y **el modelo lee siempre primero**: es él
+quien decide si el mensaje se contesta hablando o llamando a una herramienta.
 
 Que sea uno solo es deliberado: antes había tres motores divergentes y el comportamiento cambiaba
 según por dónde le hablaras.
+
+Que el modelo vaya primero también lo es, y es reciente. Antes había siete heurísticas por delante
+—rutinas, planes autónomos, comandos enseñados, tareas, capacidades del sistema, intenciones
+clasificadas— y cualquiera podía quedarse con el mensaje sin que el modelo llegara a verlo. El caso
+que lo cambió: un JSON de rangos de colores, pidiendo mejorar la paleta, se contestó con
+`0 × 12 = 0`, porque el clasificador lo leyó como una multiplicación y tomó los dos primeros
+números que encontró.
+
+Ninguna de las siete se perdió: todas siguen ahí como herramientas, y ahora es el modelo el que
+elige cuál usar. La única excepción que sigue delante es el **diálogo pendiente**: cuando el agente
+acaba de preguntar "¿para cuándo?", la respuesta "mañana a las 9" es el dato que falta, no un
+mensaje nuevo.
+
+El coste está asumido: una orden simple como "sube el volumen" ya no se resuelve en local en
+milisegundos, cuesta una llamada al modelo. A cambio, no hay heurística que pueda contestar rápido
+algo que no se le preguntó.
+
+**Sin conexión, las órdenes locales siguen funcionando.** Si no se consigue hablar con ningún
+proveedor, el camino de siempre —rutinas, comandos enseñados, tareas, intenciones clasificadas—
+actúa como respaldo, y la respuesta lo dice: *"Sin conexión con el modelo, pero esto sí puedo
+hacerlo."* Eso no reintroduce el problema de antes, y la diferencia es toda de orden: esas
+heurísticas ya no pueden quedarse con un mensaje que el modelo habría contestado, porque solo
+corren cuando el modelo no contestó. Lo que era un filtro delante ahora es una red debajo. Y lo
+que ninguna reconoce se responde con la verdad —"no consigo comunicarme con ningún proveedor"—
+en vez de con una acción inventada.
 
 ### Seguridad
 

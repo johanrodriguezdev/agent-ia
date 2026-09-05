@@ -192,8 +192,10 @@ def run_discord_bot():
         if image_path:
             try:
                 os.unlink(image_path)
-            except Exception:
-                pass
+            except Exception as e:
+                # Esperable (el archivo puede seguir abierto), pero no mudo: si los
+                # temporales empiezan a acumularse, este es el unico rastro.
+                logger.debug(f"no se pudo borrar el temporal: {e}")
 
         # Responder con embed elegante
         embed = discord.Embed(
@@ -234,8 +236,10 @@ def run_discord_bot():
         try:
             from ai.claude_brain import clear_conversation
             clear_conversation()
-        except Exception:
-            pass
+        except Exception as e:
+            # El usuario pidio empezar de cero: si no se pudo, decirlo. En silencio, el
+            # agente sigue arrastrando la conversacion vieja y parece que ignora el pedido.
+            logger.warning(f"no se pudo limpiar la conversacion: {e}")
         await interaction.response.send_message(
             f"Historial reiniciado. Listo para nuevas órdenes{vocative()}.",
             ephemeral=True

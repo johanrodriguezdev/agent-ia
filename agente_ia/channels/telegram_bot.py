@@ -74,8 +74,10 @@ def _clean_for_tts(text: str) -> str:
             pattern = (r'(?i)\b' + re.escape(agent_name)
                        + (r'\b' if agent_name[-1:].isalnum() else ''))
             text = re.sub(pattern, agent_pron, text)
-    except Exception:
-        pass
+    except Exception as e:
+        # Sin esto, el agente se pronuncia con el nombre escrito en vez del fonetico y no
+        # hay forma de saber por que (el texto sale igual, solo suena mal).
+        logger.warning(f"no se pudo aplicar la pronunciacion del agente: {e}")
 
     return text.strip()
 
@@ -128,8 +130,10 @@ async def _generate_audio(text: str) -> tuple[str | None, str]:
         if not Path(mp3_path).exists() or Path(mp3_path).stat().st_size < 500:
             try:
                 os.unlink(mp3_path)
-            except Exception:
-                pass
+            except Exception as e:
+                # Esperable (el archivo puede seguir abierto), pero no mudo: si los
+                # temporales empiezan a acumularse, este es el unico rastro.
+                logger.debug(f"no se pudo borrar el temporal: {e}")
             return None, "none"
 
         if FFMPEG_AVAILABLE:
@@ -141,8 +145,10 @@ async def _generate_audio(text: str) -> tuple[str | None, str]:
             ], capture_output=True, timeout=30)
             try:
                 os.unlink(mp3_path)
-            except Exception:
-                pass
+            except Exception as e:
+                # Esperable (el archivo puede seguir abierto), pero no mudo: si los
+                # temporales empiezan a acumularse, este es el unico rastro.
+                logger.debug(f"no se pudo borrar el temporal: {e}")
             if r.returncode == 0 and Path(ogg_path).exists():
                 return ogg_path, "voice"
 
@@ -168,8 +174,8 @@ async def send_voice_parts(update, text: str):
     for i, part in enumerate(parts):
         try:
             await update.message.chat.send_action("record_voice")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"no se pudo mostrar 'grabando audio' en el chat: {e}")
 
         audio_path, audio_type = await _generate_audio(part)
         if not audio_path or not Path(audio_path).exists():
@@ -188,8 +194,10 @@ async def send_voice_parts(update, text: str):
         finally:
             try:
                 os.unlink(audio_path)
-            except Exception:
-                pass
+            except Exception as e:
+                # Esperable (el archivo puede seguir abierto), pero no mudo: si los
+                # temporales empiezan a acumularse, este es el unico rastro.
+                logger.debug(f"no se pudo borrar el temporal: {e}")
 
         if i < len(parts) - 1:
             await asyncio.sleep(0.5)
@@ -206,7 +214,10 @@ def _transcribe_audio(audio_path: str) -> str:
         if text:
             return text
     except ImportError:
-        pass
+        # Whisper es opcional (no esta en requirements.txt): sin el, la transcripcion local
+        # no esta disponible y se sigue por el camino de siempre. Se deja dicho para que
+        # "no me transcribe los audios" tenga una explicacion a mano.
+        logger.info("transcripcion local no disponible: falta el paquete 'whisper'")
     except Exception as e:
         logger.warning(f"Whisper falló: {e}")
 
@@ -246,8 +257,10 @@ async def _send_response(update, context, response, send_voice: bool = False):
         finally:
             try:
                 os.unlink(response.image_path)
-            except Exception:
-                pass
+            except Exception as e:
+                # Esperable (el archivo puede seguir abierto), pero no mudo: si los
+                # temporales empiezan a acumularse, este es el unico rastro.
+                logger.debug(f"no se pudo borrar el temporal: {e}")
 
     # Voz
     if send_voice:
@@ -783,8 +796,10 @@ async def handle_voice(update, context):
     transcribed = _transcribe_audio(tmp)
     try:
         os.unlink(tmp)
-    except Exception:
-        pass
+    except Exception as e:
+        # Esperable (el archivo puede seguir abierto), pero no mudo: si los
+        # temporales empiezan a acumularse, este es el unico rastro.
+        logger.debug(f"no se pudo borrar el temporal: {e}")
 
     if not transcribed:
         await update.message.reply_text(
@@ -906,8 +921,10 @@ async def handle_photo(update, context):
     finally:
         try:
             os.unlink(tmp)
-        except Exception:
-            pass
+        except Exception as e:
+            # Esperable (el archivo puede seguir abierto), pero no mudo: si los
+            # temporales empiezan a acumularse, este es el unico rastro.
+            logger.debug(f"no se pudo borrar el temporal: {e}")
 
     await _send_response(
         update, context,
@@ -954,8 +971,10 @@ async def handle_document(update, context):
     finally:
         try:
             os.unlink(filepath)
-        except Exception:
-            pass
+        except Exception as e:
+            # Esperable (el archivo puede seguir abierto), pero no mudo: si los
+            # temporales empiezan a acumularse, este es el unico rastro.
+            logger.debug(f"no se pudo borrar el temporal: {e}")
 
     await _send_response(update, context, response, send_voice=voice_mode)
 

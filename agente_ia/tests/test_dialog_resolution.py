@@ -3,14 +3,22 @@ tests/test_dialog_resolution.py
 
 REQ-021 — el diálogo pendiente dentro de `core/resolution.py::resolve()`.
 
-La primera sección (CA-09) es la RED DE SEGURIDAD del REQ: fija el `matched_by` de los 7
-resolvers actuales antes de insertar `_try_pending_dialog` en posición 0. Cuatro de los
-siete (`routine`, `autopilot`, `learned`, `capability`) no se aseveraban en ningún test
-hasta este REQ (baseline-021.md §3).
+Actualizado al invertir el orden de resolución: el modelo lee primero y `RESOLVERS` quedó
+en `[pending_dialog, claude]`. La primera sección era la red de regresión del orden VIEJO
+—fijaba el `matched_by` de los 7 resolvers que iban delante del modelo—; ahora fija dos
+cosas distintas: que delante del modelo no quede nada más que el diálogo pendiente, y que
+ninguno de los 7 retirados se haya perdido, porque todos siguen alcanzables como
+herramienta.
+
+El resto de las pruebas no cambió de intención, solo de etiqueta: donde antes un desvío se
+resolvía con `matched_by == "intent:CALCULATE"`, ahora se resuelve con `"claude"`. Lo que
+verifican —que el diálogo no se coma la frase, que sobreviva al desvío, que el gate reciba
+el canal real— es exactamente lo mismo.
 
 Sin red, sin micrófono, sin `sleep` real (.claude/rules/testing.md). Ningún test de este
-archivo llega a un proveedor LLM real: `ask_question()` se mockea siempre que el camino
-pueda invocarlo.
+archivo llega a un proveedor LLM real: el bucle de razonamiento se sustituye por un modelo
+falso que decide como decidiría el real (ver `sin_llm`), y `ask_question()` se mockea
+siempre que el camino pueda invocarlo.
 """
 
 from unittest.mock import MagicMock, patch
@@ -18,6 +26,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from core.dialog_state import DialogStore, dialog_store
+from tests import modelo_falso
 from core.resolution import resolve
 from core.security_manager import ChannelType, security_manager
 
@@ -33,16 +42,64 @@ class FakeClock:
         self.now += seconds
 
 
+@pytest.fixture(autouse=True, scope="module")
+def _tools_registradas():
+    """El catálogo de herramientas que en producción arma `main.py` al arrancar.
+
+    Desde la inversión, una orden se ejecuta porque el modelo llama a `dispatcher`. Si ese
+    tool no está registrado, la orden muere con "tool no registrado" — y que lo estuviera
+    dependía de qué otro test hubiera corrido antes en la sesión.
+    """
+    modelo_falso.registrar_tools()
+
+
+class _Espia(list):
+    """Las llamadas a `execute_tool`, y aparte las tareas REALMENTE creadas.
+
+    Hacen falta las dos listas desde que el modelo llama `task_create` tambien cuando
+    faltan datos: esa llamada existe —y se cuenta— pero no crea nada, responde la pregunta.
+    Confundir "se llamo a la herramienta" con "se creo una tarea" haria que estas pruebas
+    dieran por creada una tarea que nunca existio.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.creadas = []
+
+
 @pytest.fixture
 def spy_execute_tool(monkeypatch):
-    """Espía sobre `execute_tool` — ningún test de este archivo toca `tasks.db`."""
-    calls = []
+    """Espía sobre `execute_tool` — ningún test de este archivo toca `tasks.db`.
+
+    ENVUELVE al real para `task_create` en vez de reemplazarlo. El chequeo de "pregunta lo
+    que falta en vez de inventarlo" (CA-01) se mudó de `core/resolution.py` al invoke de la
+    herramienta, porque desde la inversión quien la llama es el modelo y la guarda tiene que
+    valer para él también. Sustituir `execute_tool` por un doble apagaba justo eso. Lo que
+    sí se stubbea es la ÚNICA línea que tocaría la base: `create_from_natural()`.
+    """
+    from agents import tool_registry
+    from tasks.task_manager import task_manager
+
+    calls = _Espia()
+    real = tool_registry.execute_tool
 
     def fake_execute_tool(name, params, channel, user_id):
         calls.append({"name": name, "params": params, "channel": channel, "user_id": user_id})
+        # `task_create` y `dispatcher` pasan al REAL: son los dos caminos donde estas
+        # pruebas verifican logica que vive del otro lado del gate —el chequeo de slots y
+        # la denegacion de una accion YELLOW/RED—. Antes `dispatch()` no pasaba por
+        # `execute_tool`, asi que el espia no lo tapaba; desde la inversion sí.
+        if name in ("task_create", "dispatcher"):
+            return real(name, params, channel, user_id)
         return f"resultado:{name}"
 
+    def fake_create(text, user_id, channel="telegram"):
+        calls.creadas.append({"text": text, "user_id": user_id, "channel": channel})
+        return {"id": 1, "title": text, "remind_at": None}
+
     monkeypatch.setattr("agents.tool_registry.execute_tool", fake_execute_tool)
+    monkeypatch.setattr(task_manager, "create_from_natural", fake_create)
+    monkeypatch.setattr(task_manager, "format_task_created", lambda info: "resultado:task_create")
     return calls
 
 
@@ -63,20 +120,33 @@ def preguntas(monkeypatch):
     return llamadas
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def sin_llm(monkeypatch):
-    """Ninguna prueba de este archivo puede llegar a un proveedor real."""
-    def explotar(*a, **k):  # pragma: no cover - salta solo si algo se escapa
-        raise AssertionError("un test intentó llamar al LLM real")
+    """Ningun test llega a un proveedor real, y `resolve()` sigue probandose de punta a punta.
 
-    monkeypatch.setattr("ai.llm_provider.generate_response", explotar)
+    Desde la inversion, TODO lo que no sea la respuesta a un dialogo pendiente termina en
+    `reasoning_loop.run()`. Si aca solo se prohibiera la llamada real, cada test moriria en
+    la prohibicion y no se probaria nada. Se sustituye entonces el bucle por un modelo falso
+    que decide como decidiria el real: reconoce un recordatorio y llama `task_create`,
+    reconoce una orden del sistema y llama `dispatcher`, y si no es ninguna de las dos,
+    contesta el mismo. Las herramientas que ejecuta son las de verdad, con su gate.
+    """
+    modelo_falso.instalar(monkeypatch)
 
 
 @pytest.fixture
 def reloj_de_dialogo(monkeypatch):
-    """Sustituye el singleton por un store con reloj inyectado (sin `sleep` real)."""
+    """Sustituye el singleton por un store con reloj inyectado (sin `sleep` real).
+
+    Se sustituye en los DOS sitios que lo referencian. `core/resolution.py` lo importó al
+    cargarse, y desde que el chequeo de slots vive en `agents/tool_registry.py`, la
+    herramienta `task_create` lo busca por su cuenta: parchear solo uno dejaba al diálogo
+    abriéndose en un almacén y leyéndose desde el otro.
+    """
     clock = FakeClock()
-    monkeypatch.setattr("core.resolution.dialog_store", DialogStore(clock=clock))
+    store = DialogStore(clock=clock)
+    monkeypatch.setattr("core.resolution.dialog_store", store)
+    monkeypatch.setattr("core.dialog_state.dialog_store", store)
     return clock
 
 
@@ -129,98 +199,93 @@ def _abrir_dialogo(preguntas, spy_execute_tool, texto="recuérdame algo",
                    channel=ChannelType.DESKTOP, user_id="u1"):
     """Deja un diálogo abierto y devuelve el resultado del turno que lo abrió."""
     result = resolve(texto, channel, user_id=user_id)
-    assert result.matched_by == "task_tool:dialog_open", result.matched_by
+    # El diálogo lo abre ahora `task_create` desde dentro del bucle del modelo, así que
+    # quien responde es "claude". Lo que importa —que quedó una pregunta en el aire— se
+    # verifica con `expects_reply`, que es lo que de verdad consume la voz.
+    assert result.matched_by == "claude", result.matched_by
+    assert result.expects_reply is True, "el turno dejó una pregunta sin marcar"
     return result
 
 
 # ─────────────────────────────────────────────
-#  CA-09 — set de regresión de `matched_by` con el estado de diálogo VACÍO
+#  Red de regresión del orden INVERTIDO
+#
+#  Antes esta sección fijaba el `matched_by` de los 7 resolvers que iban delante del
+#  modelo. Ese orden ya no existe: el modelo lee primero. Lo que hay que proteger ahora es
+#  lo contrario — que nadie vuelva a meterse delante, y que ninguna de las 7 capacidades
+#  retiradas se haya perdido por el camino.
 # ─────────────────────────────────────────────
 
-def test_ca09_routine(monkeypatch):
-    monkeypatch.setattr(
-        "learning.routines_engine.try_routine", lambda text, channel=None: "rutina ok"
-    )
+def test_delante_del_modelo_solo_queda_el_dialogo_pendiente():
+    """La propiedad central de la inversión. Cada resolver que se agregue acá es una
+    heurística que puede quedarse con un mensaje sin que el modelo lo vea nunca — que es
+    exactamente como un JSON de colores terminó contestado con "0 x 12 = 0"."""
+    from core.resolution import RESOLVERS
 
-    result = resolve("modo trabajo", ChannelType.DESKTOP, user_id="u1")
-
-    assert result.matched_by == "routine"
-    assert result.expects_reply is False
+    assert [nombre for nombre, _ in RESOLVERS] == ["pending_dialog", "claude"]
 
 
-def test_ca09_autopilot(monkeypatch):
-    from agents.task_executor import TaskExecutor
-    from agents.task_planner import TaskPlanner
+def test_ninguna_capacidad_retirada_se_perdio():
+    """Los 7 resolvers retirados siguen siendo alcanzables: ahora los elige el modelo.
 
-    monkeypatch.setattr(TaskPlanner, "generate_plan", lambda self, text: [{"action": "noop"}])
-    monkeypatch.setattr(TaskExecutor, "execute", lambda self, plan, channel=None: "plan ejecutado")
+    Sin esto, invertir el orden habría borrado en silencio las rutinas del usuario, sus
+    comandos aprendidos y el planificador — nadie los llamaría nunca más.
+    """
+    from agents.skill_tools import register_dispatcher_tool, register_skill_tools
+    from agents.tool_registry import list_tool_names
+    from agents.user_defined_tools import register_user_defined_tools
+    from skills.skill_manager import skill_manager
 
-    result = resolve("haz un informe de ventas", ChannelType.DESKTOP, user_id="u1")
+    register_dispatcher_tool()
+    register_skill_tools(skill_manager)
+    register_user_defined_tools()
+    tools = set(list_tool_names())
 
-    assert result.matched_by == "autopilot"
-    assert result.expects_reply is False
+    equivalencias = {
+        "routine": ("routine_run", "routine_list"),
+        "autopilot": ("autopilot_run",),
+        "learned": ("learned_command_run", "learned_command_list"),
+        "standing_intent": ("intent_create", "intent_list", "intent_cancel"),
+        "task_tool": ("task_create", "task_list", "task_complete"),
+        "intent": ("dispatcher",),
+    }
+    from core.resolution import RESOLVERS_RETIRADOS
 
+    retirados = {nombre for nombre, _ in RESOLVERS_RETIRADOS}
+    # `capability` es el único sin tool fijo: solo se registra si hay capacidades
+    # declaradas en system_capabilities.json, que es un archivo opcional.
+    assert retirados == set(equivalencias) | {"capability"}
 
-def test_ca09_learned(monkeypatch):
-    monkeypatch.setattr(
-        "learning.command_learning.run_custom_command", lambda phrase, execute_callback: True
-    )
-
-    result = resolve("mi comando aprendido xyz", ChannelType.DESKTOP, user_id="u1")
-
-    assert result.matched_by == "learned"
-    assert result.expects_reply is False
-
-
-def test_ca09_task_tool_las_4_ramas(spy_execute_tool):
-    """Las 4 ramas de `task_tool` conservan `matched_by == "task_tool"`. La rama `create`
-    solo cambia de etiqueta cuando la frase está INCOMPLETA (ver CA-01)."""
-    casos = [
-        ("recuérdame llamar al contador mañana a las 9", "task_create"),
-        ("mis tareas pendientes", "task_list"),
-        ("completa todas las tareas pendientes", "task_complete_all"),
-        ("ya completé la tarea", "task_complete"),
-    ]
-
-    for texto, tool_esperada in casos:
-        spy_execute_tool.clear()
-        result = resolve(texto, ChannelType.DESKTOP, user_id="u1")
-        assert result.matched_by == "task_tool", (texto, result.matched_by)
-        assert [c["name"] for c in spy_execute_tool] == [tool_esperada], texto
-        assert result.expects_reply is False, texto
+    for resolver, esperadas in equivalencias.items():
+        faltan = [t for t in esperadas if t not in tools]
+        assert not faltan, f"'{resolver}' se retiró y sus tools no existen: {faltan}"
 
 
-def test_ca09_capability(monkeypatch):
-    monkeypatch.setattr(
-        "os_integration.capabilities_router.try_capability", lambda text, channel=None: "cap ok"
-    )
-
-    result = resolve("pon música", ChannelType.DESKTOP, user_id="u1")
-
-    assert result.matched_by == "capability"
-    assert result.expects_reply is False
-
-
-def test_ca09_intent():
-    result = resolve("suma 3 mas 4", ChannelType.DESKTOP, user_id="u1")
-
-    assert result.matched_by == "intent:CALCULATE"
-    assert result.expects_reply is False
-
-
-def test_ca09_claude():
-    from intent import classifier as classifier_module
-
-    with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(classifier_module.ai_system, "predict", lambda text: "UNKNOWN")
-        result = resolve(
-            "texto sin clasificar qwerty987", ChannelType.DESKTOP, user_id="u1",
-            claude_fn=lambda t: f"echo:{t}",
-        )
+def test_una_orden_del_sistema_sigue_ejecutandose_via_el_modelo(spy_gate):
+    """La contracara del coste asumido: la orden ya no se resuelve en local, pero se
+    ejecuta igual — el modelo llama `dispatcher` y el gate se evalúa como siempre."""
+    result = resolve("sube el volumen", ChannelType.DESKTOP, user_id="u1")
 
     assert result.matched_by == "claude"
-    assert result.expects_reply is False
+    assert any(c["action"] == "SYS_VOL_UP" for c in spy_gate), [c["action"] for c in spy_gate]
 
+
+def test_un_pedido_de_analisis_llega_al_modelo_sin_ejecutar_nada(spy_gate):
+    """El caso que motivó todo: un JSON de rangos de colores pidiendo mejorar la paleta.
+    Antes lo contestaba la calculadora con "0 x 12 = 0"."""
+    json_cosecha = (
+        '[{"ini": 0, "fin": 12, "color": "#92D050", "label": "0 - 12 dias"},'
+        '{"ini": 13, "fin": 16, "color": "#ECEF12", "label": "13 - 16 dias"}] '
+        "este json con diferentes colores quiero que me ayudes a mejorar esta "
+        "visualizacion para que le asignes otra paleta de colores mejor, esto es para "
+        "los ciclos de cosecha."
+    )
+
+    result = resolve(json_cosecha, ChannelType.DESKTOP, user_id="u1")
+
+    assert result.matched_by == "claude"
+    assert "0 × 12" not in result.text and "0 x 12" not in result.text
+    assert not spy_gate, f"no debía ejecutarse ninguna acción: {[c['action'] for c in spy_gate]}"
 
 # ─────────────────────────────────────────────
 #  CA-01, CA-02, CA-03 — no se inventa nada; se pregunta
@@ -237,8 +302,9 @@ def test_ca01_frase_sin_contenido_no_crea_nada_y_repregunta(
     en el aire."""
     result = resolve(texto, ChannelType.DESKTOP, user_id="u1")
 
-    assert spy_execute_tool == [], f"{texto} creó una tarea"
-    assert result.matched_by == "task_tool:dialog_open"
+    assert spy_execute_tool.creadas == [], f"{texto} creó una tarea"
+    assert result.matched_by == "claude"
+    assert result.expects_reply is True
     assert result.expects_reply is True
     assert result.text == "¿Pregunta por que?"
     assert dialog_store.get("u1", ChannelType.DESKTOP) is not None
@@ -247,7 +313,7 @@ def test_ca01_frase_sin_contenido_no_crea_nada_y_repregunta(
 def test_ca01_falta_solo_el_cuando(preguntas, spy_execute_tool, sin_llm):
     result = resolve("recuérdame llamar al contador", ChannelType.DESKTOP, user_id="u1")
 
-    assert spy_execute_tool == []
+    assert spy_execute_tool.creadas == []
     assert result.text == "¿Pregunta por cuando?"
     assert preguntas[0]["slot"] == "cuando"
     assert preguntas[0]["slots"] == {"que": "llamar al contador"}
@@ -256,7 +322,7 @@ def test_ca01_falta_solo_el_cuando(preguntas, spy_execute_tool, sin_llm):
 def test_ca01_falta_solo_el_que(preguntas, spy_execute_tool, sin_llm):
     result = resolve("recuérdame mañana a las 9", ChannelType.DESKTOP, user_id="u1")
 
-    assert spy_execute_tool == []
+    assert spy_execute_tool.creadas == []
     assert result.text == "¿Pregunta por que?"
     assert preguntas[0]["slots"] == {"cuando": "mañana a las 9"}
 
@@ -271,7 +337,7 @@ def test_ca03_no_regresion_de_un_solo_tiro(preguntas, spy_execute_tool, sin_llm)
     assert spy_execute_tool[0]["params"]["text"] == (
         "recuérdame llamar al contador mañana a las 9"
     )
-    assert result.matched_by == "task_tool"
+    assert result.matched_by == "claude"
     assert result.expects_reply is False
     assert preguntas == [], "una frase completa no puede consultar al LLM para repreguntar"
     assert dialog_store.get("u1", ChannelType.DESKTOP) is None
@@ -293,15 +359,18 @@ def test_ca04_ca05_caso_de_referencia_completo(preguntas, monkeypatch, sin_llm):
 
     creadas = []
 
-    def fake_execute_tool(name, params, channel, user_id):
-        info = parse_natural_task(params["text"], user_id)
+    # Se stubbea la ESCRITURA, no la herramienta. Sustituir `execute_tool` apagaba el
+    # chequeo de slots, que ahora vive dentro de `task_create`: con el doble puesto, el
+    # turno 1 creaba una tarea llamada "Algo" — justo la regresión que CA-02 vigila.
+    def fake_create(text, user_id, channel="telegram"):
+        info = parse_natural_task(text, user_id)
         creadas.append(info)
-        return task_manager.format_task_created({**info, "id": 12})
+        return {**info, "id": 12}
 
-    monkeypatch.setattr("agents.tool_registry.execute_tool", fake_execute_tool)
+    monkeypatch.setattr(task_manager, "create_from_natural", fake_create)
 
     t1 = resolve("recuérdame algo", ChannelType.DESKTOP, user_id="u1")
-    assert t1.matched_by == "task_tool:dialog_open"
+    assert t1.matched_by == "claude"
     assert t1.expects_reply is True
     assert creadas == []
 
@@ -341,7 +410,7 @@ def test_ca04_la_frase_suelta_no_la_resuelve_ningun_otro_resolver(
     result = resolve("llamar al contador", ChannelType.DESKTOP, user_id="u1")
 
     assert result.matched_by == "pending_dialog"
-    assert spy_execute_tool == []
+    assert spy_execute_tool.creadas == []
 
 
 # ─────────────────────────────────────────────
@@ -356,12 +425,12 @@ def test_ca06_cancelacion(frase, preguntas, spy_execute_tool, sin_llm):
 
     assert result.matched_by == "pending_dialog:cancel"
     assert result.expects_reply is False
-    assert spy_execute_tool == [], "cancelar no puede crear una tarea"
+    assert spy_execute_tool.creadas == [], "cancelar no puede crear una tarea"
     assert dialog_store.get("u1", ChannelType.DESKTOP) is None
 
     # Y la frase siguiente se resuelve por el orden normal de RESOLVERS.
     siguiente = resolve("suma 3 mas 4", ChannelType.DESKTOP, user_id="u1")
-    assert siguiente.matched_by == "intent:CALCULATE"
+    assert siguiente.matched_by == "claude"
     assert "Por cierto" not in siguiente.text
 
 
@@ -402,9 +471,9 @@ def test_ca07_dialogo_expirado_no_crea_nada_ni_avisa(
 
     result = resolve("suma 3 mas 4", ChannelType.DESKTOP, user_id="u1")
 
-    assert result.matched_by == "intent:CALCULATE", "debía resolverse como comando nuevo"
+    assert result.matched_by == "claude", "debía resolverse como mensaje nuevo"
     assert "Por cierto" not in result.text, "un diálogo expirado no puede repreguntar"
-    assert spy_execute_tool == []
+    assert spy_execute_tool.creadas == []
 
 
 # ─────────────────────────────────────────────
@@ -416,12 +485,12 @@ def test_ca08_aislamiento_por_usuario_y_canal(preguntas, spy_execute_tool, sin_l
 
     # Usuario B en el mismo canal: su frase NO la absorbe el diálogo de A.
     b = resolve("suma 3 mas 4", ChannelType.TELEGRAM, user_id="B")
-    assert b.matched_by == "intent:CALCULATE"
+    assert b.matched_by == "claude"
     assert "Por cierto" not in b.text
 
     # El mismo usuario A en otro canal: tampoco.
     a_desktop = resolve("suma 3 mas 4", ChannelType.DESKTOP, user_id="A")
-    assert a_desktop.matched_by == "intent:CALCULATE"
+    assert a_desktop.matched_by == "claude"
     assert "Por cierto" not in a_desktop.text
 
     # Y el de A en TELEGRAM sigue vivo.
@@ -441,19 +510,22 @@ def test_ca11_mismo_dialogo_en_los_3_canales(
 ):
     """CA-11: mismo mecanismo, sin una sola línea de lógica por canal."""
     t1 = resolve("recuérdame algo", channel, user_id=user_id)
-    assert t1.matched_by == "task_tool:dialog_open"
+    assert t1.matched_by == "claude"
+    assert t1.expects_reply is True
 
     t2 = resolve("llamar al contador", channel, user_id=user_id)
     assert t2.matched_by == "pending_dialog"
 
     t3 = resolve("mañana a las 9", channel, user_id=user_id)
     assert t3.matched_by == "pending_dialog"
-    assert [c["name"] for c in spy_execute_tool] == ["task_create"]
-    assert spy_execute_tool[0]["params"]["text"] == (
-        "recuérdame llamar al contador mañana a las 9"
-    )
-    assert spy_execute_tool[0]["channel"] == channel
-    assert spy_execute_tool[0]["user_id"] == user_id
+    # Dos llamadas a `task_create`, no una: la del turno 1 —el modelo la intenta y la
+    # herramienta responde con la pregunta en vez de crear nada— y la del turno 3, ya con
+    # los slots completos. La que crea la tarea es la ÚLTIMA.
+    assert [c["name"] for c in spy_execute_tool] == ["task_create", "task_create"]
+    creacion = spy_execute_tool[-1]
+    assert creacion["params"]["text"] == "recuérdame llamar al contador mañana a las 9"
+    assert creacion["channel"] == channel
+    assert creacion["user_id"] == user_id
 
 
 # ─────────────────────────────────────────────
@@ -473,7 +545,7 @@ def test_ca30_ca31_desvio_se_responde_y_el_dialogo_sigue_vivo(
     assert result.expects_reply is True
     assert "Por cierto, ¿pregunta por que?" in result.text
     assert dialog_store.get("u1", ChannelType.DESKTOP) is not None, "el diálogo murió"
-    assert spy_execute_tool == []
+    assert spy_execute_tool.creadas == []
 
 
 def test_ca31_la_repregunta_no_se_cuelga_dos_veces_ni_al_propio_dialogo(
@@ -541,7 +613,7 @@ def test_ca18_b_desvio_yellow_pasa_por_el_gate_con_el_canal_real(
 
     result = resolve("cierra chrome", ChannelType.DESKTOP, user_id="u1")
 
-    assert result.matched_by == "intent:CLOSE_APP", result.matched_by
+    assert result.matched_by == "claude", result.matched_by
     assert result.denied is True, "una acción YELLOW rechazada sigue denegada"
     assert spy_gate, "el gate no se evaluó"
     for llamada in spy_gate:
@@ -567,7 +639,7 @@ def test_ca18_b_desvio_red_sigue_bloqueado_por_el_fail_closed(
     result = resolve("borra la base de datos", ChannelType.DESKTOP, user_id="u1")
 
     assert result.denied is True
-    assert result.matched_by == "intent:delete_database", result.matched_by
+    assert result.matched_by == "claude", result.matched_by
     assert any(c["action"] == "delete_database" for c in spy_gate)
     for llamada in spy_gate:
         assert security_manager.resolve_channel(llamada["channel"]) == ChannelType.DESKTOP
@@ -600,7 +672,8 @@ def test_ca19_el_contenido_de_un_slot_nunca_cambia_la_accion_destino(
     resolve("apaga el pc", ChannelType.DESKTOP, user_id="u1")
     resolve("mañana a las 9", ChannelType.DESKTOP, user_id="u1")
 
-    assert [c["name"] for c in spy_execute_tool] == ["task_create"]
+    # Dos: la del turno que preguntó (que no creó nada) y la del turno que completó.
+    assert [c["name"] for c in spy_execute_tool] == ["task_create", "task_create"]
     assert sin_dispatch == []
 
 
@@ -638,7 +711,7 @@ def test_ca19_una_accion_no_cableada_no_se_ejecuta_y_la_frase_sigue_el_camino_no
         claude_fn=lambda t: f"respuesta normal a: {t}",
     )
 
-    assert spy_execute_tool == [], (
+    assert spy_execute_tool.creadas == [], (
         "se ejecutó una acción que v1 no cablea: el guard fail-safe no corrió"
     )
     assert "shutdown_pc" not in spy_dispatch, (
@@ -711,7 +784,7 @@ def test_ca21_detectar_no_consume_llm_y_el_respaldo_mantiene_el_flujo(
 
     assert result.text == FALLBACK_QUESTIONS["que"]
     assert result.expects_reply is True
-    assert spy_execute_tool == []
+    assert spy_execute_tool.creadas == []
     assert len(llamadas) == 1, "solo la redacción puede llamar al LLM"
 
     # Y el flujo continúa igual pese al fallo del proveedor.
@@ -780,7 +853,7 @@ def test_ca29_el_dialogo_pendiente_sobrevive_al_barge_in(
     avance = resolve("llamar al contador", ChannelType.DESKTOP, user_id="u1")
     assert avance.matched_by == "pending_dialog"
     assert avance.text == "¿Pregunta por cuando?"
-    assert spy_execute_tool == []
+    assert spy_execute_tool.creadas == []
 
 
 def test_ca29_la_frase_que_interrumpe_la_locucion_avanza_el_dialogo(
@@ -832,4 +905,4 @@ def test_ca29_la_frase_que_interrumpe_la_locucion_avanza_el_dialogo(
         "la frase que interrumpió al agente se resolvió como comando nuevo"
     )
     assert dialog_store.get("u1", ChannelType.DESKTOP).slots["que"] == "llamar al contador"
-    assert spy_execute_tool == []
+    assert spy_execute_tool.creadas == []

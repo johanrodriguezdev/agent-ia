@@ -87,5 +87,8 @@ def _atomic_write(data: Dict[str, str]) -> None:
         logger.error(f"No se pudo guardar security_overrides.json: {e}")
         try:
             os.remove(tmp_path)
-        except OSError:
-            pass
+        except OSError as e:
+            # El fallo principal ya quedo registrado arriba; esto es solo el temporal que
+            # no se pudo limpiar. Igual se deja dicho: si empiezan a quedar .tmp sueltos
+            # al lado del archivo de configuracion, este es el unico rastro.
+            logger.debug(f"quedo un temporal sin borrar: {e}")

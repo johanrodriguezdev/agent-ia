@@ -1,3 +1,4 @@
+import logging
 import os
 import re
 import time
@@ -6,6 +7,9 @@ from typing import Dict, List, Tuple, Any
 from skills.base_skill import BaseSkill
 from ai.llm_provider import generate_response
 from core.address import vocative, vocative_start
+
+logger = logging.getLogger(__name__)
+
 
 class ScreenAnalysisSkill(BaseSkill):
     @property
@@ -80,5 +84,7 @@ class ScreenAnalysisSkill(BaseSkill):
         finally:
             try:
                 os.unlink(tmp_path)
-            except Exception:
-                pass
+            except Exception as e:
+                # Esperable (el archivo puede seguir abierto), pero no mudo: si los
+                # temporales empiezan a acumularse, este es el unico rastro.
+                logger.debug(f"no se pudo borrar el temporal: {e}")

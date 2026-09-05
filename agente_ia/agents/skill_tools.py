@@ -23,11 +23,16 @@ def register_dispatcher_tool() -> None:
         name="dispatcher",
         description=(
             "Ejecuta comandos directos del sistema cuando ninguna otra herramienta "
-            "encaja mejor: abrir apps, controlar volumen, hora, etc."
+            "encaja mejor: abrir apps, controlar volumen, hora, etc. Pásale la frase del "
+            "usuario TAL CUAL, sin reformularla ni traducirla a infinitivo."
         ),
         parameters_schema={
             "type": "object",
-            "properties": {"task": {"type": "string", "description": "El comando en lenguaje natural."}},
+            "properties": {"task": {"type": "string", "description": (
+                "El comando con las palabras EXACTAS del usuario. El clasificador que hay "
+                "detrás está entrenado con la forma en que habla la gente ('abre la "
+                "calculadora'), no con paráfrasis ('abrir la calculadora de windows')."
+            )}},
             "required": ["task"],
         },
         risk_level=RiskLevel.GREEN,

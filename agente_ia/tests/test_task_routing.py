@@ -14,7 +14,6 @@ Ningún test llama a un proveedor real ni a la red.
 """
 
 import json
-import pathlib
 
 import pytest
 
@@ -25,12 +24,14 @@ from ai import provider_health as salud
 def _config_falsa(monkeypatch, tmp_path, contenido):
     """Hace que `llm_provider` lea un config.json temporal en vez del real.
 
-    El módulo resuelve la ruta como `Path(__file__).parent.parent / "config.json"`, así que
-    basta con que `Path(...)` devuelva algo dos niveles por debajo del temporal.
+    La ruta sale de `config_manager.CONFIG_FILE` — la misma constante que usa la pantalla
+    de configuración para escribir —, así que apuntarla al temporal mueve las dos puntas.
     """
-    (tmp_path / "config.json").write_text(json.dumps(contenido), encoding="utf-8")
-    señuelo = tmp_path / "ai" / "llm_provider.py"
-    monkeypatch.setattr(prov, "Path", lambda _: pathlib.Path(str(señuelo)))
+    import config_manager
+
+    ruta = tmp_path / "config.json"
+    ruta.write_text(json.dumps(contenido), encoding="utf-8")
+    monkeypatch.setattr(config_manager, "CONFIG_FILE", str(ruta))
 
 
 def _proveedores(principal="deepseek", respaldo="", modelo="deepseek-chat", vision=""):
@@ -95,10 +96,19 @@ def test_un_mapeo_con_forma_absurda_se_ignora_sin_lanzar(monkeypatch, tmp_path):
 
 
 def test_un_config_ilegible_no_rompe_el_enrutado(monkeypatch, tmp_path):
-    señuelo = tmp_path / "ai" / "llm_provider.py"
-    monkeypatch.setattr(prov, "Path", lambda _: pathlib.Path(str(señuelo)))
+    """Ni un config.json roto ni uno inexistente pueden tumbar una consulta al modelo."""
+    import config_manager
 
+    roto = tmp_path / "config.json"
+    roto.write_text("{esto no es json", encoding="utf-8")
+    monkeypatch.setattr(config_manager, "CONFIG_FILE", str(roto))
     assert prov.get_proveedor_de_tarea("ligera") == ("", "")
+
+    monkeypatch.setattr(config_manager, "CONFIG_FILE", str(tmp_path / "no-existe.json"))
+    assert prov.get_proveedor_de_tarea("ligera") == ("", "")
+    assert not (tmp_path / "no-existe.json").exists(), (
+        "consultar el modelo de una tarea no debe crear ni reescribir config.json"
+    )
 
 
 # ── Efecto sobre el router ──────────────────────────────────────────
@@ -106,7 +116,7 @@ def test_un_config_ilegible_no_rompe_el_enrutado(monkeypatch, tmp_path):
 def test_una_tarea_ligera_va_al_proveedor_configurado(monkeypatch):
     llamados = []
     monkeypatch.setattr(prov, "get_provider_config", _proveedores("deepseek"))
-    monkeypatch.setattr(prov, "get_proveedor_de_tarea", lambda t: ("ollama", ""))
+    monkeypatch.setattr(prov, "destinos_de_tarea", lambda t: [("ollama", "")])
     monkeypatch.setattr(
         prov, "_cached_call", lambda p, *a, **k: (llamados.append(p), "resumen")[1],
     )
@@ -119,7 +129,7 @@ def test_una_tarea_ligera_va_al_proveedor_configurado(monkeypatch):
 def test_al_enrutar_por_tarea_tambien_cambia_el_modelo(monkeypatch):
     recibido = {}
     monkeypatch.setattr(prov, "get_provider_config", _proveedores("deepseek"))
-    monkeypatch.setattr(prov, "get_proveedor_de_tarea", lambda t: ("ollama", ""))
+    monkeypatch.setattr(prov, "destinos_de_tarea", lambda t: [("ollama", "")])
 
     def _fake(proveedor, messages, system_prompt, image_path, model):
         recibido["modelo"] = model
@@ -136,7 +146,7 @@ def test_el_modelo_explicito_de_la_config_gana(monkeypatch):
     recibido = {}
     monkeypatch.setattr(prov, "get_provider_config", _proveedores("deepseek"))
     monkeypatch.setattr(
-        prov, "get_proveedor_de_tarea", lambda t: ("openrouter", "qwen/qwen3-32b:free"),
+        prov, "destinos_de_tarea", lambda t: [("openrouter", "qwen/qwen3-32b:free")],
     )
 
     def _fake(proveedor, messages, system_prompt, image_path, model):
@@ -169,7 +179,7 @@ def test_con_una_imagen_la_vision_le_gana_al_enrutado_por_tarea(monkeypatch, tmp
 
     recibido = {}
     monkeypatch.setattr(prov, "get_provider_config", _proveedores("deepseek", vision="gemini"))
-    monkeypatch.setattr(prov, "get_proveedor_de_tarea", lambda t: ("ollama", ""))
+    monkeypatch.setattr(prov, "destinos_de_tarea", lambda t: [("ollama", "")])
 
     def _fake(proveedor, messages, system_prompt, image_path, model):
         recibido["proveedor"] = proveedor
@@ -189,7 +199,7 @@ def test_el_enrutado_por_tarea_respeta_el_cooldown(monkeypatch):
     """Si al modelo gratuito se le acabó la cuota, la tarea ligera cae al de siempre."""
     llamados = []
     monkeypatch.setattr(prov, "get_provider_config", _proveedores("deepseek", respaldo="deepseek"))
-    monkeypatch.setattr(prov, "get_proveedor_de_tarea", lambda t: ("openrouter", ""))
+    monkeypatch.setattr(prov, "destinos_de_tarea", lambda t: [("openrouter", "")])
     monkeypatch.setattr(
         prov, "_cached_call", lambda p, *a, **k: (llamados.append(p), "ok")[1],
     )
@@ -289,3 +299,156 @@ def test_la_cadena_de_respaldo_usa_la_misma_lista_de_tool_calling(monkeypatch):
     )
 
     assert recibido["tools"] == herramientas
+
+
+# ── Varios modelos para la misma tarea ────────────────────────────────────────────────
+#
+# El caso que motiva todo esto: los catalogos gratuitos (OpenRouter) se quedan sin cuota
+# todo el tiempo, y tener un solo modelo por tarea significa quedarse sin la tarea.
+
+def test_una_tarea_puede_tener_varios_modelos(monkeypatch, tmp_path):
+    _config_falsa(monkeypatch, tmp_path, {"task_providers": {
+        "codigo": {"proveedor": "openrouter",
+                   "modelos": ["cohere/north-mini-code:free", "poolside/laguna-s-2.1:free"]},
+    }})
+    assert prov.destinos_de_tarea("codigo") == [
+        ("openrouter", "cohere/north-mini-code:free"),
+        ("openrouter", "poolside/laguna-s-2.1:free"),
+    ]
+
+
+def test_una_tarea_puede_mezclar_proveedores(monkeypatch, tmp_path):
+    """Primero el gratuito; si se quedo sin cuota, el de pago. Es la forma de gastar solo
+    cuando de verdad hace falta."""
+    _config_falsa(monkeypatch, tmp_path, {"task_providers": {
+        "razonamiento": [
+            {"proveedor": "openrouter", "modelo": "z-ai/glm-5.2:free"},
+            {"proveedor": "deepseek", "modelo": "deepseek-chat"},
+        ],
+    }})
+    assert prov.destinos_de_tarea("razonamiento") == [
+        ("openrouter", "z-ai/glm-5.2:free"),
+        ("deepseek", "deepseek-chat"),
+    ]
+
+
+def test_las_formas_de_siempre_siguen_dando_un_destino(monkeypatch, tmp_path):
+    """Nadie tiene que reescribir su config: las dos formas viejas siguen valiendo."""
+    _config_falsa(monkeypatch, tmp_path, {"task_providers": {
+        "ligera": "ollama",
+        "resumen": {"proveedor": "openrouter", "modelo": "google/gemma-4-31b-it:free"},
+    }})
+    assert prov.destinos_de_tarea("ligera") == [("ollama", "")]
+    assert prov.destinos_de_tarea("resumen") == [("openrouter", "google/gemma-4-31b-it:free")]
+
+
+def test_un_destino_repetido_no_se_prueba_dos_veces(monkeypatch, tmp_path):
+    """Repetirlo solo gasta su timeout dos veces cuando esta caido."""
+    _config_falsa(monkeypatch, tmp_path, {"task_providers": {
+        "codigo": {"proveedor": "openrouter", "modelos": ["a:free", "a:free", "b:free"]},
+    }})
+    assert prov.destinos_de_tarea("codigo") == [("openrouter", "a:free"), ("openrouter", "b:free")]
+
+
+def test_una_opcion_sin_proveedor_se_ignora_sin_arrastrar_a_las_demas(monkeypatch, tmp_path):
+    _config_falsa(monkeypatch, tmp_path, {"task_providers": {
+        "codigo": [{"modelo": "sin-proveedor:free"}, {"proveedor": "openrouter", "modelo": "b:free"}],
+    }})
+    assert prov.destinos_de_tarea("codigo") == [("openrouter", "b:free")]
+
+
+def test_si_el_primer_modelo_se_queda_sin_cuota_se_usa_el_siguiente(monkeypatch):
+    """El corazon de la rotacion: dentro de la MISMA llamada, sin irse al proveedor de pago
+    ni abandonar la tarea."""
+    llamados = []
+
+    def _fake(proveedor, messages, system_prompt, image_path, model, tools=None):
+        llamados.append(model)
+        if model == "a:free":
+            raise RuntimeError("429 rate limit exceeded")
+        return "respondio el segundo"
+
+    monkeypatch.setattr(prov, "get_provider_config", _proveedores("deepseek"))
+    monkeypatch.setattr(prov, "destinos_de_tarea",
+                        lambda t: [("openrouter", "a:free"), ("openrouter", "b:free")])
+    monkeypatch.setattr(prov, "_cached_call", _fake)
+
+    resultado = prov.generate_response([], "sp", tarea="codigo")
+
+    assert resultado == "respondio el segundo"
+    assert llamados == ["a:free", "b:free"]
+
+
+def test_un_429_de_un_gratuito_no_aparta_a_los_demas_del_catalogo(monkeypatch):
+    """Lo que hacia inutil tener varios: el cooldown era por proveedor, asi que un 429 de
+    un modelo dejaba fuera a los otros veinte de OpenRouter que seguian funcionando."""
+    monkeypatch.setattr(prov, "get_provider_config", _proveedores("deepseek"))
+    monkeypatch.setattr(prov, "destinos_de_tarea",
+                        lambda t: [("openrouter", "a:free"), ("openrouter", "b:free")])
+    monkeypatch.setattr(
+        prov, "_cached_call",
+        lambda p, m, s, i, model, **k: (_ for _ in ()).throw(RuntimeError("429 rate limit"))
+        if model == "a:free" else "ok",
+    )
+
+    prov.generate_response([], "sp", tarea="codigo")
+
+    assert salud.en_cooldown("openrouter", "a:free")
+    assert not salud.en_cooldown("openrouter", "b:free")
+    assert not salud.en_cooldown("openrouter"), "el proveedor entero no puede quedar apartado"
+
+
+def test_el_modelo_apartado_se_prueba_ultimo(monkeypatch):
+    """Empezar por uno que acaba de contestar 429 cuesta su timeout en cada mensaje."""
+    salud.registrar_fallo("openrouter", "429 rate limit", "a:free")
+    llamados = []
+
+    monkeypatch.setattr(prov, "get_provider_config", _proveedores("deepseek"))
+    monkeypatch.setattr(prov, "destinos_de_tarea",
+                        lambda t: [("openrouter", "a:free"), ("openrouter", "b:free")])
+    monkeypatch.setattr(
+        prov, "_cached_call",
+        lambda p, m, s, i, model, **k: (llamados.append(model), "ok")[1],
+    )
+
+    prov.generate_response([], "sp", tarea="codigo")
+
+    assert llamados == ["b:free"], "el apartado no se prueba primero"
+
+
+def test_una_cuota_agotada_en_deepseek_si_aparta_al_proveedor(monkeypatch):
+    """Al reves que OpenRouter: en DeepSeek la cuota es de la CUENTA. Apartar solo un
+    modelo haria que el siguiente mensaje choque contra la misma pared."""
+    monkeypatch.setattr(prov, "get_provider_config", _proveedores("deepseek"))
+    monkeypatch.setattr(prov, "destinos_de_tarea", lambda t: [])
+    monkeypatch.setattr(
+        prov, "_cached_call",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("Insufficient Balance")),
+    )
+
+    prov.generate_response([], "sp")
+
+    assert salud.en_cooldown("deepseek")
+
+
+def test_si_todos_los_modelos_de_la_tarea_fallan_se_cae_al_respaldo(monkeypatch):
+    """La rotacion no reemplaza a la cadena de respaldo: la precede."""
+    llamados = []
+
+    def _fake(proveedor, messages, system_prompt, image_path, model, tools=None):
+        llamados.append((proveedor, model))
+        if proveedor == "openrouter":
+            raise RuntimeError("429 rate limit")
+        return "respondio el respaldo"
+
+    monkeypatch.setattr(prov, "get_provider_config",
+                        lambda: ("deepseek", "", "ollama", "deepseek-chat"))
+    monkeypatch.setattr(prov, "destinos_de_tarea",
+                        lambda t: [("openrouter", "a:free"), ("openrouter", "b:free")])
+    monkeypatch.setattr(prov, "_cached_call", _fake)
+    monkeypatch.setattr(prov, "_uncached_call", _fake)
+
+    resultado = prov.generate_response([], "sp", tarea="codigo")
+
+    assert resultado == "respondio el respaldo"
+    assert [p for p, _ in llamados] == ["openrouter", "openrouter", "ollama"]

@@ -49,14 +49,23 @@ def test_classify_command_unknown_falls_back(monkeypatch):
     assert intent == Intent.UNKNOWN
 
 
-def test_classify_then_resolve_desktop_executes_green_intent():
-    """CA-13: recorrido real classify_command() -> resolve() -> dispatch(), no solo
-    clasificación aislada. CALCULATE es GREEN, ejecuta igual en cualquier canal."""
+def test_classify_then_resolve_desktop_executes_green_intent(monkeypatch):
+    """CA-13: recorrido real hasta la ejecución, no solo clasificación aislada.
+
+    Cambió el camino, no el resultado: `resolve()` ya no clasifica —el modelo lee primero
+    (`RESOLVERS == [pending_dialog, claude]`)— y llega a `dispatch()` porque el modelo elige
+    la herramienta `dispatcher`, que es la que corre `classify_command()`. CALCULATE sigue
+    siendo GREEN y sigue ejecutándose en cualquier canal."""
     from core.resolution import resolve
+    from tests import modelo_falso
+
+    modelo_falso.registrar_tools()
+    modelo_falso.instalar(monkeypatch)
 
     result = resolve("suma 3 mas 4", ChannelType.DESKTOP)
-    assert result.matched_by == "intent:CALCULATE"
+    assert result.matched_by == "claude"
     assert not result.denied
+    assert "7" in result.text, result.text
 
 
 def run_tests():

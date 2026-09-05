@@ -158,6 +158,8 @@ class FileAnalysisSkill(BaseSkill):
         system_prompt = "Eres un asistente formal y profesional. Analiza el siguiente contenido de archivo y proporciona un resumen conciso y claro de sus puntos más importantes o su estructura general."
         messages = [{"role": "user", "content": f"Por favor, dame un resumen de este archivo:\n\n{content}"}]
 
-        response = generate_response(messages, system_prompt)
+        # `tarea="ligera"`: resumir un documento ya leido es trabajo mecanico, igual que
+        # resumir una pagina web o compactar el historial.
+        response = generate_response(messages, system_prompt, tarea="ligera")
         
         return f"Análisis del archivo '{os.path.basename(target_path)}':\n\n{response}"

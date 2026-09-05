@@ -6,6 +6,13 @@ CA-03, CA-04, CA-06, CA-07).
 
 Convenciones (.claude/rules/testing.md): sin red, sin mic/altavoces, `input()` siempre
 mockeado cuando aplica.
+
+Actualizado al invertir el orden de resolución (`RESOLVERS == [pending_dialog, claude]`).
+Lo que verifican las pruebas de CA-03/CA-04/CA-06 —misma traza y mismo gate en los cuatro
+canales— no cambió; lo que cambió es QUIÉN elige la herramienta: ya no un clasificador
+delante del modelo, sino el modelo. Por eso el `matched_by` uniforme ahora es "claude" y no
+"intent:<X>", y por eso el bucle se sustituye por `tests/modelo_falso.py` — sin él, estas
+pruebas llamarían a un proveedor real, que es justo lo que las convenciones prohíben.
 """
 
 import re
@@ -18,8 +25,21 @@ from agents.tool_registry import list_tool_names
 from core.resolution import resolve
 from core.security_manager import ChannelType, security_manager
 from intent.intentions import Intent
+from tests import modelo_falso
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+@pytest.fixture(autouse=True)
+def _modelo(monkeypatch):
+    """El modelo lee primero: sin un doble, cada `resolve()` acá llamaría al proveedor."""
+    modelo_falso.instalar(monkeypatch)
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _tools_registradas():
+    """El catálogo de herramientas que en producción arma `main.py` al arrancar."""
+    modelo_falso.registrar_tools()
 
 
 def test_resolve_es_el_unico_punto_de_entrada():
@@ -61,7 +81,7 @@ def test_traza_identica_por_canal():
     }
 
     matched_by_values = {r.matched_by for r in results.values()}
-    assert matched_by_values == {"intent:CALCULATE"}, matched_by_values
+    assert matched_by_values == {"claude"}, matched_by_values
     assert all(not r.denied for r in results.values())
 
 
@@ -90,7 +110,7 @@ def test_traza_identica_por_canal_categoria_amarilla(monkeypatch):
         results[channel] = (resolve(text, channel), len(input_calls))
 
     matched_by_values = {r.matched_by for r, _ in results.values()}
-    assert matched_by_values == {"intent:CLOSE_APP"}, matched_by_values
+    assert matched_by_values == {"claude"}, matched_by_values
     assert all(r.denied for r, _ in results.values()), results
 
     assert results[ChannelType.DESKTOP][1] == 1, "DESKTOP debe pedir confirmación"
@@ -230,8 +250,11 @@ def test_try_claude_sin_claude_fn_cae_en_reasoning_loop(monkeypatch):
         with patch("core.reasoning_loop.run", return_value="respuesta del loop") as mock_run:
             result = resolve("texto sin clasificar xyz789", ChannelType.DESKTOP, user_id="u1")
 
+    # `estado` es el dict que el bucle rellena si corta por una acción denegada: desde la
+    # inversión, la denegación llega por acá y no por el resolver que la ejecutaba, y
+    # `resolve()` necesita saberlo para no colgarle recordatorios a un aviso de seguridad.
     mock_run.assert_called_once_with(
-        "texto sin clasificar xyz789", ChannelType.DESKTOP, "u1"
+        "texto sin clasificar xyz789", ChannelType.DESKTOP, "u1", estado={},
     )
     assert result.matched_by == "claude"
     assert result.text == "respuesta del loop"
@@ -256,7 +279,7 @@ def test_bulk_complete_prioriza_sobre_list_trigger(monkeypatch):
     result = resolve("completa todas las tareas pendientes", ChannelType.DESKTOP, user_id="u1")
 
     assert calls == ["task_complete_all"], calls
-    assert result.matched_by == "task_tool"
+    assert result.matched_by == "claude"
 
 
 def test_bulk_complete_variantes_sin_palabra_tarea(monkeypatch):
@@ -308,7 +331,7 @@ def test_un_pendiente_sin_id_sin_cambios(monkeypatch):
 
     assert complete_calls == [(7, "u1")]
     assert "regar plantas" in result.text
-    assert result.matched_by == "task_tool"
+    assert result.matched_by == "claude"
 
 
 def test_cero_pendientes_sin_cambios(monkeypatch):
@@ -389,7 +412,7 @@ def test_mismo_texto_bulk_en_3_canales(monkeypatch):
         results[channel] = (result, list(completed_calls))
 
     matched_by_values = {r.matched_by for r, _ in results.values()}
-    assert matched_by_values == {"task_tool"}, matched_by_values
+    assert matched_by_values == {"claude"}, matched_by_values
 
     assert results[ChannelType.DESKTOP][1] == [(1, "default")]
     assert results[ChannelType.TELEGRAM][1] == [(2, "123")]
@@ -432,3 +455,97 @@ def test_try_claude_con_claude_fn_no_toca_reasoning_loop(monkeypatch):
     mock_run.assert_not_called()
     assert result.matched_by == "claude"
     assert result.text == "echo:texto sin clasificar xyz789"
+
+
+# ─────────────────────────────────────────────
+#  Sin conexión: el camino local como RED, no como filtro
+# ─────────────────────────────────────────────
+
+_JSON_DE_COSECHA = (
+    '[{"ini": 0, "fin": 12, "color": "#92D050", "label": "0 - 12 dias"},'
+    '{"ini": 13, "fin": 16, "color": "#ECEF12", "label": "13 - 16 dias"}] '
+    "este json con diferentes colores quiero que me ayudes a mejorar esta visualizacion "
+    "para que le asignes otra paleta de colores mejor, esto es para los ciclos de cosecha."
+)
+
+
+@pytest.fixture
+def sin_proveedor(monkeypatch):
+    """Simula que ningún proveedor de modelo responde (caída de red, o sin claves)."""
+    modelo_falso.instalar_sin_proveedor(monkeypatch)
+
+
+def test_sin_modelo_una_orden_se_resuelve_en_local(sin_proveedor, monkeypatch):
+    """Quedarse sin internet no puede dejar al agente sin poder subir el volumen: es una
+    orden que sabe ejecutar sola, sin consultarle nada a nadie."""
+    # Se mockea el volumen real: `.claude/rules/testing.md` prohíbe que un test toque el
+    # sistema, y esta acción es GREEN — se ejecutaría de verdad.
+    ejecutadas = []
+
+    def _subir():
+        ejecutadas.append("volume_up")
+        return "Volumen subido."
+
+    monkeypatch.setattr("os_integration.system_ctrl.volume_up", _subir)
+
+    result = resolve("sube el volumen", ChannelType.DESKTOP, user_id="u1")
+
+    assert result.matched_by == "intent:SYS_VOL_UP:sin_modelo", result.matched_by
+    assert ejecutadas == ["volume_up"], "la orden tenía que ejecutarse de verdad"
+    assert "Sin conexión con el modelo" in result.text
+    assert "Volumen subido." in result.text
+
+
+def test_sin_modelo_lo_que_no_es_una_orden_dice_la_verdad(sin_proveedor):
+    """La prueba que separa una RED de un FILTRO.
+
+    El JSON de colores es justamente lo que el camino local contestaba mal ("0 x 12 = 0").
+    Sin modelo no hay respuesta posible, y la honesta es decirlo — no dejar que una
+    heurística invente una multiplicación con los dos primeros números que encuentre.
+    """
+    import ai.llm_provider as prov
+
+    result = resolve(_JSON_DE_COSECHA, ChannelType.DESKTOP, user_id="u1")
+
+    assert result.matched_by == "claude", result.matched_by
+    assert result.text == prov.SIN_PROVEEDOR
+    assert "0 × 12" not in result.text and "0 x 12" not in result.text
+
+
+def test_con_modelo_disponible_el_camino_local_ni_se_toca(monkeypatch):
+    """El respaldo solo corre cuando el modelo NO contestó. Si corriera igual, volveríamos
+    a tener heurísticas decidiendo por delante, que es lo que la inversión eliminó."""
+    llamados = []
+
+    def _espiar(nombre, fn):
+        def _envuelto(text, channel, user_id):
+            llamados.append(nombre)
+            return fn(text, channel, user_id)
+        return (nombre, _envuelto)
+
+    import core.resolution as res
+
+    monkeypatch.setattr(
+        res, "RESOLVERS_RETIRADOS", [_espiar(n, f) for n, f in res.RESOLVERS_RETIRADOS]
+    )
+
+    result = resolve("sube el volumen", ChannelType.DESKTOP, user_id="u1")
+
+    assert result.matched_by == "claude"
+    assert llamados == [], f"el camino local corrió teniendo modelo: {llamados}"
+
+
+def test_sin_modelo_el_gate_sigue_mandando(sin_proveedor, monkeypatch):
+    """Sin conexión no se abre ninguna puerta: una acción YELLOW rechazada sigue denegada,
+    y por voz —donde YELLOW no está permitido— ni siquiera se pregunta."""
+    entradas = []
+    monkeypatch.setattr("builtins.input", lambda prompt="": entradas.append(prompt) or "no")
+
+    escritorio = resolve("cierra chrome", ChannelType.DESKTOP, user_id="u1")
+    assert escritorio.denied is True, escritorio
+    assert len(entradas) == 1, "DESKTOP debe pedir confirmación también sin modelo"
+
+    entradas.clear()
+    voz = resolve("cierra chrome", ChannelType.VOICE, user_id="u1")
+    assert voz.denied is True
+    assert entradas == [], "por VOICE no debe preguntarse, YELLOW no está permitido"

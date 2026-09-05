@@ -93,7 +93,36 @@ def dispatch_as_tool(params: dict) -> str:
 
     try:
         intent, intent_params = classifier(text)
+
+        # Segundo intento con lo que dijo el humano, tal cual.
+        #
+        # El modelo reformula: "Abre la calculadora" le llega al despachador como "abrir la
+        # calculadora de windows". Y el clasificador esta entrenado con imperativos, que es
+        # como habla la gente, asi que el infinitivo no lo reconoce — medido sobre el modelo
+        # entrenado, "abre la calculadora" puntua +0.66 con margen 1.10, y "abrir la
+        # calculadora" queda en -0.27. Con la reformulacion, la orden no se resolvia por
+        # aca, el modelo probaba una herramienta mas pesada, y abrir la calculadora acababa
+        # pidiendo confirmacion (logs/orion.log, 2026-09-04 22:15).
+        original = str(params.get("texto_original", "")).strip()
+        if intent == Intent.UNKNOWN and original and original != text:
+            intent_bis, params_bis = classifier(original)
+            if intent_bis != Intent.UNKNOWN:
+                logger.info(
+                    f"dispatcher: '{text[:40]}' no se reconocio; se usa lo que dijo el "
+                    f"usuario: '{original[:40]}' -> {intent_bis}"
+                )
+                intent, intent_params = intent_bis, params_bis
+
         intent_params["channel"] = params.get("channel")
         return dispatch(intent, intent_params)
+    except ActionDenied:
+        # Se deja subir a proposito. `core/reasoning_loop.py` tiene una rama propia para
+        # esto (CA-08): corta el bucle, no reintenta y avisa que fue denegada. Devolverla
+        # como texto la convertia en "un resultado mas": el modelo la leia, la interpretaba
+        # como un fallo tecnico y probaba otra herramienta para conseguir lo mismo. Con el
+        # modelo leyendo primero, este es el camino normal de CUALQUIER orden, asi que la
+        # diferencia dejo de ser teorica.
+        raise
     except Exception as e:
+        logger.warning(f"dispatch_as_tool fallo con '{text[:60]}': {e}")
         return f"Error en dispatch: {e}"

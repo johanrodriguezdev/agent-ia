@@ -42,6 +42,7 @@ from router.dispatcher import dispatch
 from skills.skill_manager import skill_manager
 from intent.classifier import classify_command
 from agents.skill_tools import register_dispatcher_tool, register_skill_tools
+from agents.user_defined_tools import register_user_defined_tools
 from core.address import vocative, vocative_start
 
 orchestrator.register_legacy_dispatcher(dispatch)
@@ -64,6 +65,9 @@ register_confirmation_adapter(ChannelType.DESKTOP, _desktop_confirm)
 # core/reasoning_loop.py, no por AgentOrchestrator.
 register_dispatcher_tool()
 register_skill_tools(skill_manager)
+# Rutinas, comandos aprendidos y Autopilot. Antes solo eran alcanzables como resolvers
+# delante del modelo; ahora que el modelo lee primero, son herramientas que elige el.
+register_user_defined_tools()
 
 # Servidores MCP declarados en config.json (`mcp_servers`). Va DESPUÉS de los tools
 # locales a propósito: así, si un servidor remoto intentara registrar un nombre que ya
@@ -308,8 +312,11 @@ def main(boot_mode=None, gui_active=False):
             try:
                 from ai.memory_manager import memory
                 memory.store(f"Pregunta: {command} | Respuesta: {result}", category="semantic")
-            except Exception:
-                pass
+            except Exception as e:
+                # El turno ya quedo guardado como interaccion; lo que se pierde aca es el
+                # vector semantico, o sea la posibilidad de recordar esto mas adelante. En
+                # silencio, la memoria deja de crecer y nadie lo nota.
+                logger.warning(f"no se pudo guardar el embedding del turno: {e}")
             
             # ✅ BUG CORREGIDO: eliminado el segundo display_output(result) que existía aquí
             # y que hacía que Glass hablara CADA respuesta DOS veces.

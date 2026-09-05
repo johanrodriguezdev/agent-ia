@@ -159,3 +159,10 @@ export function onAssignableItemsLoaded(cb) { _bridge.assignable_items_loaded.co
 export function onDragOverChanged(cb) { _bridge.drag_over_changed.connect(cb); }
 export function clearAttachment() { _bridge.clear_attachment(); }
 
+// ------------------------------------------------------------ modelo por tarea
+export function requestTaskModels() { _bridge.request_task_models(); }
+export function saveTaskModels(tarea, destinosJson) {
+  _bridge.save_task_models(tarea, destinosJson);
+}
+export function onTaskModelsLoaded(cb) { _bridge.task_models_loaded.connect(cb); }
+

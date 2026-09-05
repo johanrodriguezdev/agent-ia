@@ -208,10 +208,45 @@ def _report_tool_progress(nombre: str, params: dict) -> None:
 # ─────────────────────────────────────────────
 
 def _task_create_invoke(params: dict) -> str:
+    """Crea una tarea, o PREGUNTA si falta un dato en vez de inventarlo (REQ-021/CA-01).
+
+    El chequeo de slots vivia en `core/resolution.py::_try_task_tool()`, o sea en UN caller.
+    Mientras ese resolver era el unico camino a `task_create` alcanzaba; desde que el modelo
+    lee primero y llama las herramientas el, dejo de alcanzar: el modelo entraba por aca
+    directo y `create_from_natural()` volvia a inventar lo que faltara (titulo "Algo",
+    recordatorio a una hora). La guarda pertenece a la accion, no a uno de sus llamadores.
+
+    `scan_task_slots()` corre antes del gate y no lo mueve: es una funcion pura —ni ejecuta,
+    ni persiste, ni consulta red—, y para cuando esto se ejecuta `execute_tool()` ya
+    confirmo la accion.
+    """
     from tasks.task_manager import task_manager
+    from tasks.task_slots import scan_task_slots
+
+    texto = params.get("text", "")
+    scan = scan_task_slots(texto)
+    if scan.missing:
+        from core import dialog_state
+        from core.dialog_questions import ask_question
+        from core.security_manager import security_manager as _sm
+
+        # Por atributo del modulo, no `from ... import dialog_store`: asi apunta siempre al
+        # almacen vigente. Con el import directo, esta herramienta se quedaba con la
+        # referencia del arranque mientras el resto del sistema usaba otra.
+        dialog_store = dialog_state.dialog_store
+
+        pregunta = ask_question("task_create", scan.missing[0], scan.filled)
+        # El dialogo queda abierto con el canal y el usuario REALES de la invocacion, nunca
+        # con lo que venga en el texto (mismo invariante que el resto del sistema).
+        dialog_store.open(
+            params["user_id"], _sm.resolve_channel(params.get("channel")),
+            action="task_create", slots=scan.filled, missing=scan.missing,
+            question=pregunta,
+        )
+        return pregunta
 
     result = task_manager.create_from_natural(
-        params["text"], params["user_id"], params.get("channel", "telegram")
+        texto, params["user_id"], params.get("channel", "telegram")
     )
     if result:
         return task_manager.format_task_created(result)

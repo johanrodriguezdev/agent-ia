@@ -156,6 +156,9 @@ def _resolver_con_tools(history, system_prompt, image_path, channel, user_id):
                 system_prompt=system_prompt,
                 image_path=image_path or None,
                 tools=herramientas or None,
+                # Misma etiqueta que `core/reasoning_loop.py`: los dos son la respuesta al
+                # usuario, y separarlos obligaria a configurar dos veces lo mismo.
+                tarea="razonamiento",
             )
 
         if not isinstance(respuesta, LLMToolResponse):
@@ -226,21 +229,24 @@ def ask_claude(
         results = memory.search_semantic(user_message, user_id=user_id, threshold=0.65, top_k=3)
         if results:
             sem_context = "\n".join(m.text[:200] for m in results)
-    except Exception:
-        pass
+    except Exception as e:
+        # Sin esto, el agente contesta sin memoria semantica y desde afuera parece que "se
+        # olvido" de lo que se hablo. El turno sigue —una respuesta con menos contexto es
+        # mejor que ninguna— pero tiene que quedar dicho por que.
+        logger.warning(f"sin contexto semantico para este turno: {e}")
 
     profile_text = ""
     memory_text = ""
     try:
         from ai.profile_manager import profile_manager
         profile_text = profile_manager.get_profile_text(user_id)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"no se pudo leer el perfil del usuario: {e}")
     try:
         from ai.memory_manager import memory
         memory_text = memory.get_user_profile_text(user_id)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"no se pudo leer lo que recuerda del usuario: {e}")
 
     try:
         assistant_message = _resolver_con_tools(
@@ -279,14 +285,20 @@ def ask_claude(
                             importance=0.8,
                             source="claude_auto",
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        # Aca se pierde algo que el agente ACABA de aprender del usuario.
+                        # Callarlo es la forma mas facil de que la memoria deje de crecer
+                        # sin que nadie se entere.
+                        logger.error(f"no se pudo guardar lo aprendido del usuario: {e}")
                     parsed_something = True
 
                 if parsed_something:
                     assistant_message = re.sub(r'```json\s*\{.*?\}\s*```', '', assistant_message, flags=re.DOTALL).strip()
-            except Exception:
-                pass
+            except Exception as e:
+                # El bloque JSON con lo que el modelo pidio recordar salio mal formado o
+                # cambio de forma: el agente deja de aprender del usuario y, en silencio,
+                # nadie se entera de que la memoria dejo de crecer.
+                logger.warning(f"no se pudo interpretar lo que el modelo pidio recordar: {e}")
 
         history.append({"role": "assistant", "content": assistant_message})
         return assistant_message
