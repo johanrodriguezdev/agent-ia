@@ -94,8 +94,16 @@ def test_build_tool_list_expone_parameters_schema_sin_modificar():
 
 
 def test_build_tool_list_no_filtra_por_channel():
-    """CA-11: `_build_tool_list()` no recibe ni consulta `channel` — ofrece siempre el
-    catálogo completo, sin importar risk_level."""
+    """CA-11 revisado: el filtro por canal NO es el control de seguridad.
+
+    `_build_tool_list()` ahora acepta `channel` y omite lo que ese canal no podría
+    ejecutar. Es presentación: ofrecerle a Telegram `terminal_run_command` solo le hace
+    gastar una vuelta en pedir algo que le van a denegar. Lo que CA-11 protege —que el
+    filtro real viva en `execute_tool()` y no en la lista— sigue en pie, y lo fija
+    `test_el_filtro_de_la_lista_no_es_el_control_de_acceso`.
+
+    Sin `channel` el comportamiento es el de siempre: el catálogo entero.
+    """
     register_tool(ToolSpec(
         name="test_ca11_yellow",
         description="tool amarillo",
@@ -111,12 +119,47 @@ def test_build_tool_list_no_filtra_por_channel():
         invoke=lambda params: "ok",
     ))
 
-    import inspect
-    assert "channel" not in inspect.signature(reasoning_loop._build_tool_list).parameters
-
     names = {t["name"] for t in reasoning_loop._build_tool_list()}
     assert "test_ca11_yellow" in names
     assert "test_ca11_green" in names
+
+
+def test_la_lista_por_canal_omite_lo_que_ese_canal_no_puede():
+    """Por voz solo se permiten acciones verdes: una amarilla en la lista es una promesa
+    que el gate va a romper."""
+    from core.security_manager import ChannelType
+
+    register_tool(ToolSpec(
+        name="test_canal_yellow", description="amarillo",
+        parameters_schema={"type": "object", "properties": {}},
+        risk_level=RiskLevel.YELLOW, invoke=lambda params: "ok",
+    ))
+
+    por_voz = {t["name"] for t in reasoning_loop._build_tool_list(ChannelType.VOICE)}
+    en_escritorio = {t["name"] for t in reasoning_loop._build_tool_list(ChannelType.DESKTOP)}
+
+    assert "test_canal_yellow" in en_escritorio
+    assert "test_canal_yellow" not in por_voz
+
+
+def test_el_filtro_de_la_lista_no_es_el_control_de_acceso():
+    """Lo que de verdad protege CA-11: aunque una tool se cuele en la lista de un canal
+    que no puede ejecutarla, `execute_tool()` la deniega igual. El filtro ahorra vueltas;
+    el gate es el que manda."""
+    from agents.tool_registry import execute_tool
+    from core.security_manager import ActionDenied, ChannelType
+
+    register_tool(ToolSpec(
+        name="test_gate_manda", description="amarillo",
+        parameters_schema={"type": "object", "properties": {}},
+        risk_level=RiskLevel.YELLOW, invoke=lambda params: "se ejecuto",
+    ))
+
+    try:
+        execute_tool("test_gate_manda", {}, ChannelType.VOICE, "u1")
+        raise AssertionError("el gate dejó pasar una amarilla por voz")
+    except ActionDenied:
+        pass
 
 
 def test_ca06_reasoning_loop_nunca_llama_invoke_directo():

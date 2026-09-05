@@ -23,6 +23,23 @@ logging.basicConfig(
     format="%(asctime)s [Telegram] %(levelname)s: %(message)s",
     level=logging.INFO
 )
+
+# `httpx` registra cada peticion con la URL COMPLETA, y en la API de Telegram el token va
+# dentro de la URL:
+#
+#     HTTP Request: POST https://api.telegram.org/bot<ID>:<TOKEN>/getUpdates "200 OK"
+#
+# Son varias lineas por minuto, cada una con la credencial entera. Antes eso solo ensuciaba
+# una consola; desde que el canal corre en una pestaña de la terminal de la app, esa salida
+# la guarda `TerminalSession` en su scrollback — y `terminal_read_output` puede mandarsela
+# al proveedor del modelo. El gate de esa herramienta existe justamente porque "en una
+# terminal puede haber quedado impresa una clave" (.claude/rules/security-levels.md); no
+# hay por que ponersela delante.
+#
+# Se sube a WARNING: los fallos de red se siguen viendo, el trafico normal no.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
 GLASS_VOICE   = "es-ES-AlvaroNeural"

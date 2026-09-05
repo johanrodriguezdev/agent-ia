@@ -132,10 +132,12 @@ def registrar_tools() -> None:
     Sin esto, que `dispatcher` exista dependía de qué otro test hubiera corrido antes en la
     sesión, y una orden podía morir con "tool no registrado" según el orden de collection.
     """
-    from agents.skill_tools import register_dispatcher_tool, register_skill_tools
+    from agents.skill_tools import (register_dispatcher_tool, register_family_tools,
+                                    register_skill_tools)
     from agents.user_defined_tools import register_user_defined_tools
     from skills.skill_manager import skill_manager
 
     register_dispatcher_tool()
     register_skill_tools(skill_manager)
+    register_family_tools(skill_manager)
     register_user_defined_tools()

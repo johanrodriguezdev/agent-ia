@@ -40,6 +40,141 @@ def register_dispatcher_tool() -> None:
     ))
 
 
+#: Intents que el modelo ve como UNA herramienta en vez de como varias.
+#:
+#: El catalogo llego a 57 herramientas, y con esa lista delante un modelo mediano elige
+#: peor: para pausar YouTube se fue a `pc_key` —simular una tecla, amarilla, con
+#: confirmacion— teniendo opciones mas directas.
+#:
+#: Solo se agrupa lo que YA comparte nivel de riesgo. Juntar una verde con una amarilla
+#: obligaria a darle a todo el grupo el nivel mas alto, y listar tareas pasaria a pedir
+#: confirmacion: la granularidad del gate es por accion y eso no se negocia. Por eso
+#: `SYS_POWER_OFF` (amarilla) no entra con las de volumen, ni `CREATE_FLOW` (amarilla) con
+#: las de flujos.
+#:
+#: Cada intent conserva su nombre, su nivel y su gate: lo unico que cambia es cuantas
+#: entradas ve el modelo. Se siguen alcanzando por `dispatcher` y por el diccionario de
+#: abajo, que traduce la opcion elegida al intent real.
+_FAMILIAS: Dict[str, Dict[str, Any]] = {
+    "volumen": {
+        "descripcion": "Controla el volumen del sistema: subirlo, bajarlo o silenciarlo.",
+        "opciones": {
+            "subir": "SYS_VOL_UP",
+            "bajar": "SYS_VOL_DOWN",
+            "silenciar": "SYS_MUTE",
+        },
+    },
+    "info_del_sistema": {
+        "descripcion": (
+            "Consulta el estado del equipo: resumen general, procesador o memoria."
+        ),
+        "opciones": {
+            "general": "SYSTEM_INFO",
+            "procesador": "CPU_INFO",
+            "memoria": "RAM_INFO",
+        },
+    },
+    "flujo": {
+        "descripcion": (
+            "Trabaja con los flujos ya guardados: listarlos, ejecutar uno, reanudarlo o "
+            "cancelarlo. Para CREAR un flujo nuevo está `CREATE_FLOW`, aparte."
+        ),
+        "opciones": {
+            "listar": "LIST_FLOWS",
+            "ejecutar": "RUN_FLOW",
+            "reanudar": "RESUME_FLOW",
+            "cancelar": "CANCEL_FLOW",
+        },
+    },
+}
+
+#: Intents que la familia cubre. Se siguen REGISTRANDO igual —con su nombre, su nivel y
+#: su gate— y se siguen ejecutando por `execute_tool()`; lo unico que cambia es que no se
+#: le muestran sueltos al modelo. Ocultar en la presentacion y no en el registro es lo que
+#: mantiene intacto el modelo de seguridad: ninguna accion cambia de nivel ni de camino.
+_AGRUPADOS = {i for f in _FAMILIAS.values() for i in f["opciones"].values()}
+
+#: Duplicado exacto: `pc_screenshot` (os_integration) y `TAKE_SCREENSHOT` (skill) hacen lo
+#: mismo, y tener las dos delante solo obliga al modelo a elegir entre gemelas. Se deja
+#: visible la del sistema operativo, que es la que acompana a las demas de pantalla
+#: (`pc_look`, `pc_find`). El intent sigue registrado y alcanzable.
+_DUPLICADOS = {"TAKE_SCREENSHOT"}
+
+#: Lo que `core/reasoning_loop.py::_build_tool_list()` NO le ofrece al modelo. Se exporta
+#: desde aca para que la lista viva junto a las familias que la explican.
+INTENTS_OCULTOS = _AGRUPADOS | _DUPLICADOS
+
+
+def _make_family_invoke(manager: SkillManager, familia: str):
+    """Traduce la opcion elegida al intent real y ejecuta por el camino de siempre."""
+    opciones = _FAMILIAS[familia]["opciones"]
+
+    def _invoke(params: Dict[str, Any]) -> str:
+        opcion = str(params.get("opcion", "")).strip().lower()
+        intent = opciones.get(opcion)
+        if intent is None:
+            return (f"Opción no válida para {familia}: '{opcion}'. "
+                    f"Las que hay: {', '.join(opciones)}.")
+
+        from agents.tool_registry import execute_tool
+        from core.security_manager import security_manager as _sm
+
+        # Por `execute_tool()` y con el nombre del INTENT: asi el gate se evalua sobre la
+        # accion concreta, con su propio nivel, igual que si el modelo la hubiera llamado
+        # suelta. La familia es solo una puerta de entrada, no un permiso agrupado.
+        canal = _sm.resolve_channel(params.get("channel"))
+        return execute_tool(
+            intent,
+            {"text": params.get("text", ""), "channel": canal.value,
+             "user_id": params.get("user_id")},
+            canal, params.get("user_id", "default"),
+        )
+
+    return _invoke
+
+
+def register_family_tools(manager: SkillManager) -> None:
+    """Registra una herramienta por familia. Se llama despues de `register_skill_tools()`."""
+    for familia, datos in _FAMILIAS.items():
+        niveles = {
+            security_manager.classify_action(intent)
+            for intent in datos["opciones"].values()
+        }
+        niveles.discard(None)
+        if len(niveles) != 1:
+            # Fail-closed: una familia con niveles mezclados no se registra. Presentarla
+            # como una sola herramienta significaria un solo veredicto del gate para
+            # acciones que el sistema clasifico distinto.
+            logger.error(
+                f"familia '{familia}' con niveles de riesgo mezclados ({niveles}): "
+                f"no se agrupa, cada intent sigue suelto"
+            )
+            _AGRUPADOS.difference_update(datos["opciones"].values())
+            continue
+
+        register_tool(ToolSpec(
+            name=familia,
+            description=datos["descripcion"],
+            parameters_schema={
+                "type": "object",
+                "properties": {
+                    "opcion": {
+                        "type": "string",
+                        "enum": sorted(datos["opciones"]),
+                        "description": "Qué hacer.",
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "La frase del usuario, tal cual.",
+                    },
+                },
+                "required": ["opcion"],
+            },
+            risk_level=niveles.pop(),
+            invoke=_make_family_invoke(manager, familia),
+        ))
+
+
 def _make_skill_invoke(skill: BaseSkill, intent: str):
     def _invoke(params: Dict[str, Any]) -> str:
         # CA-16: sin auto-gate acá — execute_tool() ya confirmó antes de llegar a esto.

@@ -72,6 +72,22 @@ register_confirmation_adapter(ChannelType.DESKTOP, _desktop_confirm)
 
 
 @pytest.fixture(autouse=True)
+def _sin_canal_de_telegram(monkeypatch):
+    """La suite no levanta el canal de Telegram.
+
+    `MainWindow` lo abre al arrancar, así que cada test que construye la ventana lanzaba un
+    bot DE VERDAD: con el token real del usuario, hablando con la red, y peleándose por el
+    mismo token con el que el usuario tuviera abierto. Además de indeseable, hacía que los
+    tests de la terminal contaran una pestaña que no habían abierto ellos.
+
+    Se apaga por configuración, que es el mismo interruptor que tiene el usuario.
+    """
+    import config_manager
+
+    monkeypatch.setattr(config_manager, "get_telegram_autostart", lambda: False)
+
+
+@pytest.fixture(autouse=True)
 def _clear_dialog_store():
     """REQ-021 — el estado de diálogo pendiente (`core/dialog_state.py`) es un singleton de
     proceso. Sin esto, un diálogo abierto por un test cambiaría la resolución de los demás:

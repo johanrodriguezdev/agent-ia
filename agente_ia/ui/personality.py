@@ -1,12 +1,22 @@
 import random
 from datetime import datetime
 
-GREETINGS = [
-    "Buenos dias, Senor. Todos los sistemas estan operativos.",
-    "A su servicio, Senor. En que puedo asistirle?",
-    "Bienvenido, Senor. Sistemas en linea y listos.",
-    "Senor, siempre es un placer. Que necesita?",
-    "Sistemas verificados. Estoy a su disposicion, Senor."
+#: Coletillas del saludo inicial. La parte horaria YA NO vive acá.
+#:
+#: Antes esto eran cinco frases completas y `get_random_greeting()` elegía una al azar —
+#: la primera empezaba con "Buenos dias". A las once de la noche, la pantalla saludaba con
+#: "Buenas noches" (lo calcula de la hora local) y el agente contestaba "Buenos días" en la
+#: misma ventana. No era una diferencia de opinión: eran dos relojes, y uno no existía.
+#:
+#: Ahora la mitad horaria la pone `get_time_based_greeting()`, la MISMA función y las
+#: mismas franjas que usa `ui/webview/frontend/js/app.js`. Lo que varía es solo la
+#: coletilla, que es donde la variedad se nota sin poder equivocarse.
+GREETING_TAILS = [
+    "Todos los sistemas están operativos.",
+    "¿En qué puedo asistirle?",
+    "Sistemas en línea y listos.",
+    "Siempre es un placer. ¿Qué necesita?",
+    "Sistemas verificados. Estoy a su disposición.",
 ]
 
 ADDRESS = "Senor"
@@ -60,7 +70,7 @@ def format_response(text: str, is_error: bool = False) -> str:
     words = text.split()
     is_greeting = any(w in text.lower() for w in ["hola", "buen", "saludos", "buenos"])
     if len(words) < 4 and is_greeting:
-        return random.choice(GREETINGS)
+        return get_random_greeting()
 
     if is_error:
         prefix = random.choice(ERROR_MESSAGES)
@@ -89,7 +99,10 @@ def format_response(text: str, is_error: bool = False) -> str:
 
 
 def get_random_greeting():
-    return random.choice(GREETINGS)
+    """Return el saludo inicial: la franja horaria real, con una coletilla al azar."""
+    from core.address import vocative
+
+    return f"{get_time_based_greeting()}{vocative()}. {random.choice(GREETING_TAILS)}"
 
 
 def get_time_based_greeting(display_name: str = "") -> str:

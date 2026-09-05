@@ -101,3 +101,47 @@ def run_tests():
 
 if __name__ == "__main__":
     run_tests()
+
+def test_importar_el_clasificador_no_carga_sklearn():
+    """El arranque de la app no puede pagar por adelantado lo que quizá no use.
+
+    `intent/ai_classifier.py` arrastra scikit-learn: 8.6 de los 13 segundos que tardaba el
+    arranque, medidos con `python -X importtime`. `main.py` importa este módulo para
+    registrar `classify_command`, así que la ventana no aparecía hasta que sklearn
+    terminara de cargar.
+
+    Lo llamativo es que `core/warmup.py` ya existía justo para esto —carga el clasificador
+    en un hilo mientras el usuario abre la ventana— y no servía de nada: para cuando ese
+    hilo arrancaba, el import ya lo había pagado todo en el hilo principal. Un mecanismo
+    cuidadosamente diseñado, anulado en silencio por un import.
+
+    Se comprueba en un proceso aparte porque en el de la suite sklearn ya está cargado por
+    otros tests.
+    """
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    raiz = Path(__file__).resolve().parent.parent
+    codigo = (
+        "import sys; sys.path.insert(0, r'%s');"
+        "import intent.classifier;"
+        "print('sklearn' in sys.modules)" % raiz
+    )
+    salida = subprocess.run(
+        [sys.executable, "-c", codigo], capture_output=True, text=True, timeout=180,
+    )
+
+    assert salida.stdout.strip().endswith("False"), (
+        f"importar intent.classifier volvió a cargar sklearn: {salida.stdout!r}"
+    )
+
+
+def test_el_clasificador_se_carga_al_usarlo():
+    """La otra mitad: perezoso no puede significar roto."""
+    from intent.classifier import classify_command
+    from intent.intentions import Intent
+
+    intent, _ = classify_command("abre la calculadora")
+
+    assert intent == Intent.OPEN_APP or str(intent) == "OPEN_APP"

@@ -54,6 +54,22 @@ mantiene la conversación abierta unos segundos sin repetirlo.
 de voz. Se puede editar desde la pantalla de Configuración de la aplicación; no hace falta tocarlo
 a mano.
 
+### El canal de Telegram
+
+Arranca **junto con la aplicación de escritorio**, en su propia ventana de terminal, donde se
+ve lo que recibe y lo que responde. Antes había que lanzarlo a mano en otra consola, así que
+en la práctica el agente casi nunca estaba disponible desde el teléfono.
+
+No arranca si no hay `TELEGRAM_BOT_TOKEN`, si ya hay otro bot corriendo (Telegram solo admite
+un cliente por token: el segundo se queda inútil), o si se apaga con `telegram_autostart` en
+`false` dentro de `config.json`. Y muere con la aplicación: nunca queda un canal vivo,
+hablando con quien sea, sin nada que lo muestre.
+
+Va en un proceso aparte y no dentro de la app por tres motivos, en orden de peso: la terminal
+embebida es 🟡 amarilla y exige confirmación humana —arrancar algo ahí solo saltaría ese
+gate—, `run_polling()` monta su propio bucle de eventos y sus manejadores de señales, y si el
+bot se cae la app no tiene por qué caerse con él.
+
 `security_overrides.json` es un archivo aparte, a propósito: guarda las subidas de nivel de
 seguridad que hayas hecho, y vive separado para que una configuración corrupta nunca pueda
 rebajar la seguridad del sistema.

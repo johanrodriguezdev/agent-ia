@@ -104,7 +104,11 @@ RECUERDOS RELEVANTES DE CONVERSACIONES PASADAS (Memoria Semántica):
     # usuario, recuerdos y el historial completo de la conversacion— se recalculaba cada 60
     # segundos. Mismo criterio que OpenClaw: "keep that metadata at the request tail to
     # preserve their cached prefix".
-    base_prompt += f"\nFecha y hora actual: {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+    # Con la zona horaria: decir "22:30" sin decir de dónde deja al modelo adivinando si el
+    # usuario está de noche, que es justo lo que necesita para saludar bien.
+    from core.address import momento_actual
+
+    base_prompt += f"\nFecha y hora actual: {momento_actual()}"
     return base_prompt
 
 
@@ -128,21 +132,17 @@ def _resolver_con_tools(history, system_prompt, image_path, channel, user_id):
     SIEMPRE por `execute_tool()`, el mismo punto de gate de seguridad, con el canal real
     del caller y nunca uno deducido del texto.
     """
-    from agents.tool_registry import execute_tool, get_tool, list_tool_names
+    from agents.tool_registry import catalogo_para_modelo, execute_tool
     from ai.llm_provider import LLMToolResponse, generate_response
     from core.security_manager import ActionDenied, security_manager
 
     canal = security_manager.resolve_channel(channel)
 
-    herramientas = []
-    for nombre in list_tool_names():
-        spec = get_tool(nombre)
-        if spec is not None:
-            herramientas.append({
-                "name": spec.name,
-                "description": spec.description,
-                "parameters_schema": spec.parameters_schema,
-            })
+    # Mismo catalogo que el escritorio, y filtrado por ESTE canal. Antes esta lista se
+    # armaba aparte, asi que por Telegram seguian apareciendo las herramientas agrupadas y
+    # las amarillas que este canal nunca puede ejecutar: el modelo las pedia y el gate se
+    # las denegaba, gastando una vuelta cada vez.
+    herramientas = catalogo_para_modelo(canal)
 
     mensajes = list(history)
     for ronda in range(1, MAX_TOOL_ROUNDS + 1):
