@@ -1,10 +1,60 @@
+import logging
 import re
+import threading
+
 from intent.intentions import Intent
-from intent.ai_classifier import IntentClassifierSystem
 from nlp.parser import clean_text, normalize_numbers, extract_numbers
 
-# Instancia global del sistema de IA predictivo
-ai_system = IntentClassifierSystem()
+logger = logging.getLogger(__name__)
+
+#: El clasificador se construye la PRIMERA VEZ que hace falta, no al importar el modulo.
+#:
+#: `intent/ai_classifier.py` arrastra scikit-learn, y eso son 8.6 de los 13 segundos que
+#: tardaba el arranque medidos con `python -X importtime`. `main.py` importa este modulo
+#: para registrar `classify_command` en el orquestador, asi que la ventana no aparecia
+#: hasta que sklearn terminara de cargar.
+#:
+#: Lo mas absurdo es que `core/warmup.py` ya existia precisamente para esto —carga el
+#: clasificador en un hilo mientras el usuario abre la ventana y lee el saludo— y no servia
+#: de nada: para cuando ese hilo arrancaba, el import de `main.py` ya lo habia pagado todo
+#: por adelantado y en el hilo principal.
+#:
+#: Y desde que el modelo lee primero (`core/resolution.py::RESOLVERS`), el clasificador ya
+#: ni siquiera esta en el camino de cada mensaje: solo lo usan la herramienta `dispatcher`
+#: y el respaldo sin conexion. Cargarlo antes de mostrar la ventana era pagar por
+#: adelantado algo que muchas sesiones no llegan a usar.
+_ai_system = None
+
+#: Protege la construccion. `core/warmup.py` lo carga desde un hilo de fondo mientras el
+#: usuario abre la ventana; si justo entonces el usuario dicta algo, dos hilos entrarian a
+#: la vez y cada uno leeria el pickle por su cuenta. No corrompe nada, pero es trabajo
+#: duplicado en el peor momento — el arranque.
+_carga_lock = threading.Lock()
+
+
+def _sistema():
+    """Return el clasificador, construyendolo la primera vez."""
+    global _ai_system
+    if _ai_system is None:
+        with _carga_lock:
+            if _ai_system is None:      # otro hilo pudo construirlo mientras se esperaba
+                from intent.ai_classifier import IntentClassifierSystem
+
+                _ai_system = IntentClassifierSystem()
+    return _ai_system
+
+
+def __getattr__(name):
+    """Deja que `intent.classifier.ai_system` siga existiendo desde fuera.
+
+    Es lo que usan las pruebas para sustituir `predict()`. Al hacerlo, `monkeypatch` fija
+    el atributo de verdad en el modulo, que a partir de ahi tapa a este `__getattr__` — y
+    `_sistema()` devuelve la MISMA instancia que se parcheo, porque es la que se construyo
+    aca dentro.
+    """
+    if name == "ai_system":
+        return _sistema()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 #: Operadores tal como sobreviven a `clean_text()`, que borra TODA la puntuacion:
 #: "5 * 3" llega como "5 3" y "0 - 12 dias" como "0 12 dias". Por eso solo se buscan las
@@ -52,7 +102,7 @@ def classify_command(text: str) -> tuple[Intent, dict]:
     clean_n = normalize_numbers(clean)   # aplica conversión de letras a números
     
     # 1. Clasificación ML con texto normalizado
-    intent = ai_system.predict(clean_n)
+    intent = _sistema().predict(clean_n)
     params = {}
     
     # 2. Intentar extracción con Plugins Dinámicos (Skills)

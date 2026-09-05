@@ -97,11 +97,16 @@ class WebViewConfirmationAdapter:
         y con la ventana de micrófono abierta cualquiera podría provocar ese modal contando
         con un clic distraído. Sin manos libres, el modal sigue siendo lo correcto.
         """
+        # La coletilla se quita ANTES de elegir camino. Por voz también sobra —de hecho
+        # más: pronunciada dice "escribe sí para confirmar" a alguien que está hablando, y
+        # el micrófono la oía y la tomaba como respuesta ("o cualquier otra cosa para
+        # cancelar", logs/orion.log 2026-09-04 22:20:48).
+        message = _sin_coletilla_de_consola(message)
+
         if self._manos_libres_activo():
             return self._confirmar_hablando(action_name, message)
 
         request_id = uuid.uuid4().hex
-        message = _sin_coletilla_de_consola(message)
         event = threading.Event()
         with self._lock:
             self._pending[request_id] = event

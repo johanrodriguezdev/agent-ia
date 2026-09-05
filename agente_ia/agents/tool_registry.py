@@ -65,6 +65,54 @@ class ToolSpec:
 _REGISTRY: Dict[str, ToolSpec] = {}
 
 
+def catalogo_para_modelo(channel=None) -> list:
+    """Return lo que se le OFRECE al modelo: {name, description, parameters_schema}.
+
+    Un solo sitio decide qué ve el modelo, porque hay dos motores que se lo muestran
+    —`core/reasoning_loop.py` (escritorio y voz) y `ai/claude_brain.py` (Telegram y
+    Discord)— y cada uno armaba su lista por su cuenta. El resultado era que la reduccion
+    del catalogo aplicaba en un canal y no en el otro: por Telegram seguian apareciendo las
+    herramientas agrupadas y las amarillas que ese canal nunca puede ejecutar.
+
+    Se omiten dos cosas, y ninguna es un control de seguridad —el gate real vive en
+    `execute_tool()`, que es el que manda—:
+
+    - Lo que el canal no podria ejecutar. Ofrecerle a Telegram `terminal_run_command` solo
+      le hace gastar una vuelta en pedir algo que le van a denegar.
+    - Lo que ya cubre una herramienta agrupada (`agents/skill_tools.py::INTENTS_OCULTOS`),
+      que sigue registrado y ejecutandose igual.
+    """
+    permitidos = None
+    if channel is not None:
+        try:
+            permitidos = set(security_manager.get_allowed_levels(channel))
+        except Exception as e:
+            # Sin poder resolver los niveles se ofrece todo, como antes: el gate sigue ahi.
+            logger.debug(f"No se pudieron leer los niveles de {channel}: {e}")
+
+    try:
+        from agents.skill_tools import INTENTS_OCULTOS
+
+        ocultos = frozenset(INTENTS_OCULTOS)
+    except Exception as e:
+        logger.debug(f"No se pudo leer la lista de intents ocultos: {e}")
+        ocultos = frozenset()
+
+    catalogo = []
+    for name in list_tool_names():
+        spec = get_tool(name)
+        if spec is None or name in ocultos:
+            continue
+        if permitidos is not None and spec.risk_level not in permitidos:
+            continue
+        catalogo.append({
+            "name": spec.name,
+            "description": spec.description,
+            "parameters_schema": spec.parameters_schema,
+        })
+    return catalogo
+
+
 def register_tool(spec: ToolSpec) -> bool:
     """Registra el tool y, en el mismo paso, su nivel de riesgo en `security_manager`.
 
@@ -207,6 +255,24 @@ def _report_tool_progress(nombre: str, params: dict) -> None:
 #  channels/gateway.py::_try_create_task/_try_list_tasks/_try_complete_task)
 # ─────────────────────────────────────────────
 
+def _cerrar_dialogo_de_tarea(params: dict) -> None:
+    """Cierra la pregunta pendiente de `task_create`, si quedaba alguna abierta.
+
+    Nunca lanza: la tarea ya se va a crear, y no poder cerrar una pregunta no puede impedirlo.
+    """
+    try:
+        from core import dialog_state
+        from core.security_manager import security_manager as _sm
+
+        canal = _sm.resolve_channel(params.get("channel"))
+        almacen = dialog_state.dialog_store
+        if almacen.get(params.get("user_id", "default"), canal) is not None:
+            almacen.cancel(params.get("user_id", "default"), canal)
+            logger.info("dialogo de task_create cerrado: la tarea quedo creada")
+    except Exception as e:
+        logger.debug(f"no se pudo cerrar el dialogo de task_create: {e}")
+
+
 def _task_create_invoke(params: dict) -> str:
     """Crea una tarea, o PREGUNTA si falta un dato en vez de inventarlo (REQ-021/CA-01).
 
@@ -244,6 +310,13 @@ def _task_create_invoke(params: dict) -> str:
             question=pregunta,
         )
         return pregunta
+
+    # Si habia una pregunta abierta por esta misma accion, ya no tiene sentido: la tarea
+    # quedo creada. Sin esto seguia viva y `_append_pending_question()` la colgaba de cada
+    # respuesta posterior — "tarea registrada... por cierto, para cuando?" por algo que
+    # acababa de quedar agendado. Pasa cuando el modelo llama dos veces: la primera con la
+    # frase incompleta (que abre el dialogo) y la segunda ya completa.
+    _cerrar_dialogo_de_tarea(params)
 
     result = task_manager.create_from_natural(
         texto, params["user_id"], params.get("channel", "telegram")

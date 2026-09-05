@@ -18,8 +18,10 @@ import logging
 import os
 
 from PyQt6.QtCore import QEvent, Qt, QTimer, QUrl
-from PyQt6.QtGui import QColor, QIcon, QPixmap
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QApplication, QMainWindow, QMenu, QSystemTrayIcon
+
+from ui.webview.app_icon import app_icon
 from PyQt6.QtWebChannel import QWebChannel
 from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineScript, QWebEngineSettings
 from PyQt6.QtWebEngineWidgets import QWebEngineView
@@ -61,6 +63,14 @@ class MainWindow(QMainWindow):
         self._wake_worker_ref_owner = None  # ver Bridge — el worker vive en el Bridge
 
         self.setWindowTitle(f"{self._agent_name} — Panel de control")
+        # En la ventana Y en la aplicación. Sin lo segundo, la barra de tareas de Windows
+        # sigue mostrando el icono de Python: agrupa por proceso, no por ventana, y quien
+        # abrió su asistente no tiene por qué ver el logo del lenguaje en que está escrito.
+        icono = app_icon()
+        self.setWindowIcon(icono)
+        app = QApplication.instance()
+        if app is not None:
+            app.setWindowIcon(icono)
         # CA-01: sin barra de título nativa — los 3 controles (min/max/cerrar) se dibujan
         # enteramente en CSS/HTML dentro del WebView.
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
@@ -209,9 +219,9 @@ class MainWindow(QMainWindow):
         """Portado casi textual desde `JarvisMainWindow._setup_tray_icon()` (REQ-008/009,
         eliminado) — independiente del tipo de `centralWidget()` (CA-43)."""
         self.tray_icon = QSystemTrayIcon(self)
-        pixmap = QPixmap(16, 16)
-        pixmap.fill(QColor(0, 100, 255))
-        self.tray_icon.setIcon(QIcon(pixmap))
+        # Antes era un cuadrado azul liso de 16x16: entre los iconos ocultos de Windows,
+        # indistinguible de cualquier otra cosa. Ver `ui/webview/app_icon.py`.
+        self.tray_icon.setIcon(app_icon())
         self.tray_icon.setToolTip(f"{self._agent_name} — Panel de control")
 
         menu = QMenu()
@@ -279,6 +289,14 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------ ciclo de vida del WebView (§5.4)
     def _on_load_finished(self, ok: bool) -> None:
         if ok:
+            # El canal de Telegram, en una pestaña de la terminal, RECIÉN AHORA.
+            #
+            # Estaba en `__init__` y crear ahí el PTY reventaba con un access violation
+            # nativo dentro de `winpty.spawn()`: se levantaba una consola antes de que
+            # existiera el bucle de eventos. Y aunque no reventara, tampoco servía — la
+            # página aún no había cargado, así que la pestaña se emitía hacia un frontend
+            # que todavía no estaba escuchando y no aparecía por ningún lado.
+            self.bridge.abrir_canal_telegram()
             return
         logger.error("Fallo al cargar index.html en el WebView — cargando error.html")
         self.web_view.load(QUrl.fromLocalFile(_ERROR_HTML))

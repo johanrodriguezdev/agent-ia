@@ -199,5 +199,7 @@ def mensaje_hablado(action_name: str, mensaje: str) -> str:
     Incluye SIEMPRE qué se va a hacer: una confirmación a ciegas ("¿confirma?") no es una
     confirmación. Es el equivalente hablado de ligar el permiso a la acción concreta.
     """
-    detalle = (mensaje or "").strip() or f"ejecutar la acción {action_name}"
+    from core.acciones_legibles import pregunta
+
+    detalle = (mensaje or "").strip() or pregunta(action_name)
     return f"{detalle}. Si está de acuerdo, diga: confirmo."

@@ -32,6 +32,20 @@ _barge_in = False
 SPEECH_TRUNCATE_THRESHOLD: int = 400   # umbral de DECISIÓN (idéntico al de ui/cli.py:49)
 SPEECH_TRUNCATE_AT: int = 380          # punto de corte (idéntico al de ui/cli.py:50)
 
+#: Los mismos dos numeros cuando la VOZ es el unico canal (manos libres).
+#:
+#: El corte en 400 esta bien pensado para el chat: la respuesta entera queda en pantalla y
+#: la coletilla "la informacion completa esta en su pantalla" es cierta. Con manos libres
+#: es al reves — el usuario no esta mirando, pidio que le contaran algo, y se le corta a
+#: mitad remitiendolo a una pantalla que no esta usando. Un analisis del precio del dolar
+#: cabia entero y se quedo por la mitad.
+#:
+#: 1200 caracteres son alrededor de minuto y medio hablando. No es "sin limite" a
+#: proposito: un muro de texto leido en voz alta tampoco sirve, y a partir de ahi el corte
+#: con "el resto esta en pantalla" vuelve a ser lo honesto.
+SPEECH_TRUNCATE_THRESHOLD_VOZ: int = 1200
+SPEECH_TRUNCATE_AT_VOZ: int = 1150
+
 # Los marcadores de encabezado y de lista se anclan a principio de línea, así que el
 # barrido de marcado corre ANTES del aplanado de saltos de línea.
 _MD_FENCE_RE = re.compile(r"```[A-Za-z0-9_+\-]*\n?")
@@ -62,13 +76,16 @@ _INLINE_SPACES_RE = re.compile(r"[ \t]{2,}")
 _LINE_EDGE_SPACES_RE = re.compile(r"(?m)^[ \t]+|[ \t]+$")
 
 
-def prepare_for_speech(text: str) -> str:
+def prepare_for_speech(text: str, solo_voz: bool = False) -> str:
     """Return `text` listo para `speak()`: sin markdown, sin HTML, sin emojis, en una
     línea y truncado (CA-24, CA-27).
 
-    El aplanado (`"\\n"` -> `". "`), el umbral de 400, el corte en 380 al último punto y
-    la coletilla con `vocative()` son idénticos a los que tenía `ui/cli.py` antes de
-    REQ-021 — lo único que cambia en la consola es que ahora suena limpia.
+    El aplanado (`"\\n"` -> `". "`), el corte al último punto y la coletilla con
+    `vocative()` son los que tenía `ui/cli.py` antes de REQ-021.
+
+    `solo_voz=True` cuando la voz es el ÚNICO canal —manos libres—, y ahí el corte es
+    mucho más largo: remitir a la pantalla a alguien que no la está mirando es no
+    responder. Por defecto `False`, así que quien no lo pase se comporta como antes.
     """
     if not text:
         return ""
@@ -97,9 +114,11 @@ def prepare_for_speech(text: str) -> str:
     spoken = clean.replace("\n", ". ").strip()
 
     # 7. Truncado — mismo umbral, mismo corte y misma coletilla que la consola de hoy.
-    if len(spoken) > SPEECH_TRUNCATE_THRESHOLD:
+    umbral = SPEECH_TRUNCATE_THRESHOLD_VOZ if solo_voz else SPEECH_TRUNCATE_THRESHOLD
+    corte = SPEECH_TRUNCATE_AT_VOZ if solo_voz else SPEECH_TRUNCATE_AT
+    if len(spoken) > umbral:
         spoken = (
-            spoken[:SPEECH_TRUNCATE_AT].rsplit(".", 1)[0]
+            spoken[:corte].rsplit(".", 1)[0]
             + f"... La información completa está en su pantalla{vocative()}."
         )
     return spoken

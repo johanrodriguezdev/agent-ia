@@ -445,7 +445,10 @@ class Bridge(QObject):
         from ui.tts_engine import prepare_for_speech, speak
 
         # CA-24: sobre el texto CRUDO, nunca sobre el HTML de `render_markdown()`.
-        speech_text = prepare_for_speech(raw_text)
+        # `solo_voz=True`: si se llega aca es porque el manos libres esta activo, y
+        # entonces la voz es el canal por el que el usuario esta esperando la respuesta —
+        # no un extra sobre lo que ya lee en pantalla.
+        speech_text = prepare_for_speech(raw_text, solo_voz=True)
         if not speech_text:
             self._open_conversation_window()
             return
@@ -1172,6 +1175,46 @@ class Bridge(QObject):
         self.assignable_items_loaded.emit(json.dumps(_build_assignable_payload()))
 
     # ------------------------------------------------------------ terminal embebida
+    def abrir_canal_telegram(self) -> None:
+        """Levanta el canal de Telegram en una pestaña de la terminal, al arrancar.
+
+        NO es un `@pyqtSlot`, a proposito: lo llama `MainWindow` una vez al iniciar, y
+        ningun script de la pagina puede invocarlo. Un slot alcanzable desde JS que abre
+        pestañas de terminal seria otra superficie que gatear.
+
+        La pestaña es de SOLO LECTURA y corre un comando fijo, asi que no pasa por la
+        confirmacion de `terminal_open` (🟡 amarilla) y no la elude: lo que esa confirmacion
+        protege es la shell —la capacidad de ejecutar cualquier cosa— y aca no hay ninguna.
+        Ver `channels/telegram_launcher.py`.
+        """
+        from channels.telegram_launcher import (comando, motivo_para_no_arrancar,
+                                                raiz_del_proyecto)
+        from core.terminal_session import TerminalUnavailable, terminal_manager
+
+        motivo = motivo_para_no_arrancar()
+        if motivo:
+            logger.info(f"Telegram: no se arranca — {motivo}")
+            return
+
+        try:
+            sesion = terminal_manager.crear_proceso(
+                comando(), titulo="Telegram", cwd=raiz_del_proyecto(),
+            )
+        except TerminalUnavailable as e:
+            # Sin terminal embebida no hay donde mostrarlo. No es motivo para dejar al
+            # usuario sin canal: se cae a la consola aparte, que es lo que habia antes.
+            logger.warning(f"Telegram: sin terminal embebida ({e}); se abre aparte")
+            from channels.telegram_launcher import arrancar_si_procede
+
+            arrancar_si_procede()
+            return
+        except Exception as e:
+            logger.error(f"Telegram: no se pudo abrir la pestaña del canal: {e}")
+            return
+
+        logger.info(f"Telegram: canal corriendo en la pestaña '{sesion.id}'")
+        self._emit_terminal_tabs()
+
     @pyqtSlot()
     def terminal_open(self) -> None:
         """Abre el panel de terminal: se engancha a las sesiones vivas, o crea la primera.
@@ -1191,8 +1234,12 @@ class Bridge(QObject):
         run_async(self._terminal_new_flow, None, self._on_terminal_error)
 
     def _terminal_open_flow(self) -> None:
+        # Solo cuentan las sesiones INTERACTIVAS. Las de solo lectura que abre la app por su
+        # cuenta —el canal de Telegram— no valen como "ya hay una terminal abierta": si
+        # valieran, su sola existencia saltaria la confirmacion y el usuario acabaria con un
+        # shell que nunca autorizo, abierto por una pestaña que puso el sistema.
         activa = terminal_manager.active()
-        if activa is not None:
+        if terminal_manager.hay_interactiva() and activa is not None:
             self._emit_terminal_tabs()
             self.terminal_state.emit(activa.id, "abierta", activa.cwd)
             return

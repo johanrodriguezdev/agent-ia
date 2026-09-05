@@ -906,3 +906,30 @@ def test_ca29_la_frase_que_interrumpe_la_locucion_avanza_el_dialogo(
     )
     assert dialog_store.get("u1", ChannelType.DESKTOP).slots["que"] == "llamar al contador"
     assert spy_execute_tool.creadas == []
+
+def test_crear_la_tarea_cierra_la_pregunta_que_quedaba_abierta(preguntas, spy_execute_tool):
+    """El caso reportado: "registró la tarea y todo bien, pero al finalizar siempre me
+    preguntaba que para cuándo, y ya le había indicado que hoy".
+
+    Pasa cuando el modelo llama a `task_create` dos veces: la primera con la frase
+    incompleta —que abre el diálogo y devuelve la pregunta— y la segunda ya completa, que
+    crea la tarea. Nada cerraba el diálogo de la primera, así que seguía vivo y
+    `_append_pending_question()` lo colgaba de cada respuesta posterior: una pregunta por
+    un dato que el usuario acababa de dar.
+    """
+    from agents.tool_registry import execute_tool
+    from core import dialog_state
+
+    _abrir_dialogo(preguntas, spy_execute_tool)
+    assert dialog_state.dialog_store.get("u1", ChannelType.DESKTOP) is not None
+
+    execute_tool(
+        "task_create",
+        {"text": "recuérdame llamar al contador mañana a las 9", "user_id": "u1",
+         "channel": "desktop"},
+        ChannelType.DESKTOP, "u1",
+    )
+
+    assert dialog_state.dialog_store.get("u1", ChannelType.DESKTOP) is None, (
+        "la tarea quedó creada y la pregunta seguía en pie"
+    )

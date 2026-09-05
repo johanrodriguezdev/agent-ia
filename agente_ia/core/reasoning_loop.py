@@ -10,14 +10,14 @@ presupuesto duro de 5 llamadas totales (CONFIRMADO 2) y ejecución de tools EXCL
 import logging
 from typing import Optional
 
-from agents.tool_registry import execute_tool, get_tool, list_tool_names
+from agents.tool_registry import execute_tool
 from core import streaming
 from core.cancelacion import abortar_si_cancelado
 from ai.llm_provider import LLMToolResponse, es_respuesta_de_fallo, generate_response
 from config_manager import get_agent_name, get_display_name, get_user_title
 from core.agent_context import agent_context_manager
 from core.security_manager import ActionDenied, security_manager
-from core.address import vocative, vocative_start
+from core.address import momento_actual, vocative, vocative_start
 from core.progress import report as progress_report
 from core.identity import build_identity_block
 
@@ -100,35 +100,42 @@ def _build_system_prompt() -> str:
         "denegada, no la reintentes ni intentes una alternativa — infórmalo y detente."
     ) + _bloque_de_lo_definido_por_el_usuario()
 
+    # La fecha y hora va AL FINAL, nunca en el cuerpo — mismo criterio que
+    # `ai/claude_brain.py`: los proveedores con caché de prefijo solo reutilizan lo que no
+    # cambia desde el principio, y con la hora al minuto en medio se recalcularía todo lo
+    # que viene detrás cada 60 segundos.
+    #
+    # Sin esta línea el modelo no sabe qué hora es y lo resuelve como puede: a las 23:30
+    # saludaba con "buenos días" mientras la pantalla —que sí mira el reloj— decía "buenas
+    # noches". `claude_brain` ya se lo decía a Telegram; el escritorio y la voz, que son
+    # los canales más usados, eran justo los que no.
+    momento = f"\n\nFecha y hora actual: {momento_actual()}"
+
     if identity_block:
         return (
             f"Eres el núcleo de razonamiento de {agent_name}{_addressing_clause()}."
-            f"{identity_block}\n\n{operating_rules}"
+            f"{identity_block}\n\n{operating_rules}{momento}"
         )
 
     # Sin documentos de identidad, el prompt queda igual que antes de este cambio.
     return (
         f"Eres el núcleo de razonamiento de {agent_name}, un asistente con "
         f"personalidad estilo JARVIS: educado, directo{_addressing_clause()}. "
-        f"{operating_rules}"
+        f"{operating_rules}{momento}"
     )
 
 
-def _build_tool_list() -> list[dict]:
-    """CA-02: convierte el catálogo de `tool_registry` a un formato genérico
-    {name, description, parameters_schema}, sin filtrar por canal (CA-11) — el filtro real
-    ocurre después, dentro de `execute_tool()`."""
-    tools = []
-    for name in list_tool_names():
-        spec = get_tool(name)
-        if spec is None:
-            continue
-        tools.append({
-            "name": spec.name,
-            "description": spec.description,
-            "parameters_schema": spec.parameters_schema,
-        })
-    return tools
+def _build_tool_list(channel=None) -> list[dict]:
+    """CA-02 — lo que se le ofrece al modelo, ya filtrado por canal.
+
+    La lista la arma `agents/tool_registry.py::catalogo_para_modelo()`, que es de donde la
+    lee tambien `ai/claude_brain.py`: con una copia por motor, la reduccion del catalogo
+    aplicaba en escritorio y no en Telegram. El filtro NO es el control de seguridad — ese
+    sigue dentro de `execute_tool()` (CA-11).
+    """
+    from agents.tool_registry import catalogo_para_modelo
+
+    return catalogo_para_modelo(channel)
 
 
 def _load_prior_turns(agent_name: str, user_id: str) -> list[dict]:
@@ -216,7 +223,7 @@ def run(task: str, channel, user_id: str = "default", agent_name: str = "reasoni
     propusiera) se descartan siempre a favor de estos dos parámetros.
     """
     resolved_channel = security_manager.resolve_channel(channel)
-    tools = _build_tool_list()
+    tools = _build_tool_list(resolved_channel)
 
     history: list[dict] = []
     final_text: Optional[str] = None

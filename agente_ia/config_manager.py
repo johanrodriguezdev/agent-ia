@@ -191,6 +191,27 @@ def get_agent_pronunciation() -> str:
     return config.get("agent_pronunciation", get_agent_name())
 
 
+def get_telegram_autostart() -> bool:
+    """Return si el canal de Telegram arranca junto con la app de escritorio.
+
+    Encendido por defecto: tener el bot configurado y que no atienda porque nadie lo lanzo
+    a mano es justo lo que se venia perdiendo. Se apaga poniendo `telegram_autostart` en
+    `false` dentro de config.json.
+
+    Ante un valor raro, ENCENDIDO: es el comportamiento util, y el canal ya esta acotado
+    por su cuenta —Telegram solo puede ejecutar acciones verdes (`CHANNEL_ALLOWED_LEVELS`)—
+    asi que arrancarlo de mas no abre ninguna puerta que no estuviera ya abierta.
+    """
+    valor = load_config().get("telegram_autostart", True)
+    return valor is not False
+
+
+def set_telegram_autostart(activo: bool) -> None:
+    config = load_config()
+    config["telegram_autostart"] = bool(activo)
+    save_config(config)
+
+
 def get_telegram_token() -> str:
     return _get_config_value("telegram_token")
 

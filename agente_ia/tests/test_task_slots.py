@@ -16,7 +16,8 @@ import datetime
 
 import pytest
 
-from tasks.task_manager import parse_natural_task
+from tasks.task_manager import _parse_natural_date, parse_natural_task
+from tasks.task_slots import SLOT_WHEN, scan_task_slots
 
 
 def _manana_a_las(hour: int) -> datetime.datetime:
@@ -210,3 +211,98 @@ def test_has_content_tokens():
     assert has_content_tokens("una cosa") is False
     assert has_content_tokens("") is False
     assert has_content_tokens("   ") is False
+
+
+# ─────────────────────────────────────────────
+#  Decir el día tiene que contar como decir cuándo
+# ─────────────────────────────────────────────
+
+@pytest.mark.parametrize("frase", [
+    "recuerdame llamar al banco hoy",
+    "recuérdame llamar al banco hoy",
+    "recuerdame llamar al banco manana",
+    "recuerdame llamar al banco mañana",
+    "recuerdame llamar al banco pasado manana",
+    "recuerdame llamar al banco el lunes",
+    "recuerdame llamar al banco hoy a las 5",
+    "recuerdame llamar al banco en 2 horas",
+])
+def test_una_fecha_dentro_de_la_frase_cuenta_como_cuando(frase):
+    """El caso que lo destapó.
+
+    `scan_task_slots()` decide si hay que preguntar "¿para cuándo?", y consultaba a
+    `_parse_natural_date()`, cuya rama de "hoy" solo devolvía algo si además había una
+    hora: entraba en el `if`, no encontraba hora, y se caía sin retornar. Decir "hoy"
+    equivalía a no decir nada — la tarea se creaba igual (con la fecha inventada por
+    `parse_natural_task()`) y el agente seguía preguntando por una fecha que ya le habían
+    dado.
+    """
+    scan = scan_task_slots(frase)
+
+    assert SLOT_WHEN not in scan.missing, f"'{frase}' dice cuándo y no se reconoció"
+    assert scan.filled.get(SLOT_WHEN)
+
+
+@pytest.mark.parametrize("frase", [
+    "recuerdame comprar pan",
+    "recuerdame revisar el informe trimestral",
+    "recuerdame llamar al contador",
+])
+def test_sin_fecha_se_sigue_preguntando(frase):
+    """La otra mitad: aflojar la detección no puede hacer que se invente una fecha. Que
+    `parse_natural_task()` tape la ausencia con `now()+1h` es justo lo que este chequeo
+    existe para impedir."""
+    assert SLOT_WHEN in scan_task_slots(frase).missing
+
+
+# ─────────────────────────────────────────────
+#  Y tiene que caer en el día correcto
+# ─────────────────────────────────────────────
+
+def test_hoy_cae_hoy():
+    """Decía "hoy" y el recordatorio quedaba para MAÑANA.
+
+    `dateparser` devuelve el instante actual para "hoy"; al compararlo ya quedaba unos
+    microsegundos en el pasado, y la corrección "si ya pasó, muévelo al día siguiente" lo
+    empujaba un día entero.
+    """
+    fecha = _parse_natural_date("recuerdame llamar al banco hoy")
+
+    assert fecha is not None
+    assert fecha.date() == datetime.date.today()
+
+
+def test_manana_cae_manana_con_o_sin_ene():
+    """El reconocedor de voz pierde la eñe a menudo, y mucha gente escribe sin acentos.
+    "manana" no era ninguna fecha: ni la rama de mañana la reconocía."""
+    hoy = datetime.date.today()
+    esperado = hoy + datetime.timedelta(days=1)
+
+    assert _parse_natural_date("recuerdame llamar al banco mañana").date() == esperado
+    assert _parse_natural_date("recuerdame llamar al banco manana").date() == esperado
+
+
+def test_pasado_manana_no_cae_en_manana():
+    """"pasado mañana" contiene "mañana", y la rama de mañana estaba PRIMERO: se lo llevaba
+    siempre, y la de pasado mañana era inalcanzable."""
+    esperado = datetime.date.today() + datetime.timedelta(days=2)
+
+    assert _parse_natural_date("recuerdame llamar al banco pasado mañana").date() == esperado
+    assert _parse_natural_date("recuerdame llamar al banco pasado manana").date() == esperado
+
+
+def test_la_hora_dicha_se_respeta():
+    """Decir el día no puede borrar la hora."""
+    fecha = _parse_natural_date("recuerdame llamar al banco hoy a las 5")
+
+    assert fecha.date() == datetime.date.today()
+    assert fecha.hour == 17, "las 5 de la tarde"
+
+
+def test_manana_a_las_9_es_manana_y_no_hoy():
+    """Con "manana" sin eñe sin reconocer, esta frase caía en la rama genérica de la hora y
+    programaba el recordatorio para HOY a las 9 — el día equivocado."""
+    fecha = _parse_natural_date("recuerdame llamar al banco manana a las 9")
+
+    assert fecha.date() == datetime.date.today() + datetime.timedelta(days=1)
+    assert fecha.hour == 9

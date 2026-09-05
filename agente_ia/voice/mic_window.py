@@ -88,13 +88,17 @@ class ConversationWindow:
         tiene que haber empezado DESPUÉS de abrirse. Un chunk que se empezó a capturar
         mientras el agente hablaba se descarta aunque termine después — casi con seguridad
         contiene la voz del propio agente.
+
+        Todo se juzga por cuándo EMPEZÓ la captura, nunca por cuándo terminó. Antes el
+        vencimiento se medía contra el reloj del momento de preguntar, que es cuando la
+        frase ya está transcrita: quien empezaba a hablar dentro de la ventana pero hablaba
+        largo perdía la frase por llegar tarde. La ventana promete "durante estos segundos
+        puedes hablar sin decir mi nombre"; terminar la frase es parte de hablar.
         """
         with self._lock:
             if self._deadline is None or self._opened_at is None:
                 return False
-            if self._clock() >= self._deadline:
-                return False
-            return listen_started_at >= self._opened_at
+            return self._opened_at <= listen_started_at < self._deadline
 
     def consume(self) -> None:
         """Cierra la ventana tras aceptar una frase: UNA frase por ventana.

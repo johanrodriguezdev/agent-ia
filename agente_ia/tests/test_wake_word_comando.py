@@ -712,3 +712,29 @@ def test_mientras_el_agente_habla_la_captura_es_corta():
 
     assert rapido < largo, (rapido, largo)
     assert rapido <= 6, "una interrupción no puede tardar tanto en llegar"
+
+
+def test_con_manos_libres_la_respuesta_no_se_corta_a_los_400():
+    """Con manos libres la voz es el ÚNICO canal: cortar en 400 y decir "la información
+    completa está en su pantalla" es remitir a una pantalla que el usuario no está
+    mirando. Un análisis del precio del dólar cabía entero y se quedaba por la mitad."""
+    from ui.tts_engine import prepare_for_speech
+
+    largo = "El precio del dolar mostro una tendencia al alza. " * 20   # 1000 caracteres
+
+    en_chat = prepare_for_speech(largo)
+    en_voz = prepare_for_speech(largo, solo_voz=True)
+
+    assert "en su pantalla" in en_chat, "en el chat sí se corta: la respuesta está a la vista"
+    assert "en su pantalla" not in en_voz, "por voz no hay pantalla a la que remitir"
+    assert len(en_voz) > len(en_chat) * 2
+
+
+def test_por_voz_tambien_hay_un_limite():
+    """No es "sin límite": un muro de texto leído en voz alta tampoco sirve, y a partir de
+    ahí remitir a la pantalla vuelve a ser lo honesto."""
+    from ui.tts_engine import prepare_for_speech
+
+    kilometrico = "Una frase larga sobre cualquier cosa. " * 100   # 3700 caracteres
+
+    assert "en su pantalla" in prepare_for_speech(kilometrico, solo_voz=True)

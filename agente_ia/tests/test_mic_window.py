@@ -370,3 +370,33 @@ def test_ca29_sin_locucion_en_curso_el_bucle_no_senala_barge_in(perfil):
         _escuchar_una_frase("llamar al contador", None)
 
     assert not senal.called, "señaló un barge-in sin nadie hablando"
+
+def test_una_frase_larga_que_empezo_a_tiempo_no_se_pierde():
+    """El caso que aparece al permitir dictar frases largas.
+
+    Se empieza a hablar en el segundo 10 de una ventana de 15 y se habla 10 segundos: la
+    frase se transcribe en el segundo 20. Antes el vencimiento se medía contra el reloj de
+    ese momento, así que se descartaba — y desde fuera se vive como que el agente ignoró
+    una instrucción que se dictó a tiempo. La ventana promete "durante estos segundos
+    puedes hablar sin decir mi nombre"; terminar la frase es parte de hablar.
+    """
+    reloj = FakeClock()
+    ventana = ConversationWindow(duration_s=15.0, clock=reloj)
+    ventana.open()
+
+    empezo_a_hablar = reloj.now + 10
+    reloj.advance(20)          # la frase duró 10 s: se pregunta en el segundo 20
+
+    assert ventana.accepts(empezo_a_hablar) is True
+
+
+def test_una_frase_que_empezo_despues_de_vencer_no_entra():
+    """La otra mitad: juzgar por el inicio no puede volver la ventana eterna."""
+    reloj = FakeClock()
+    ventana = ConversationWindow(duration_s=15.0, clock=reloj)
+    ventana.open()
+
+    empezo_tarde = reloj.now + 16
+    reloj.advance(20)
+
+    assert ventana.accepts(empezo_tarde) is False

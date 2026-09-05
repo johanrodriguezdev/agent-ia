@@ -259,6 +259,8 @@ class TerminalSession:
         on_exit: Optional[Callable[[], None]] = None,
         session_id: Optional[str] = None,
         titulo: str = "",
+        argv: Optional[List[str]] = None,
+        solo_lectura: bool = False,
     ):
         self.id = session_id or f"t{next(_contador_ids)}"
         self.titulo = titulo or f"Terminal {self.id[1:]}"
@@ -267,6 +269,19 @@ class TerminalSession:
         self.rows = rows
         self.on_output = on_output
         self.on_exit = on_exit
+
+        #: Qué se lanza. `None` = el shell del usuario, que es el caso normal. Con un `argv`
+        #: propio, la pestaña ejecuta ESE comando y nada más.
+        self.argv = list(argv) if argv else None
+
+        #: Una pestaña de solo lectura muestra la salida y descarta el teclado.
+        #:
+        #: Es lo que permite abrir una pestaña sin pasar por la confirmación de
+        #: `terminal_open` (🟡 amarilla) sin romper lo que esa confirmación protege. El gate
+        #: existe porque una shell interactiva puede ejecutar cualquier cosa; una vista que
+        #: solo mira la salida de un proceso fijo no es esa capacidad. Si además aceptara
+        #: teclado, sí lo sería: se estaría regalando la shell por la puerta de atrás.
+        self.solo_lectura = bool(solo_lectura)
 
         self._proc = None
         self._reader: Optional[threading.Thread] = None
@@ -293,8 +308,8 @@ class TerminalSession:
 
     # ------------------------------------------------------------------ ciclo de vida
     def start(self) -> None:
-        """Levanta el shell. Lanza `TerminalUnavailable` si no se puede."""
-        argv = shell_por_defecto()
+        """Levanta el shell —o el comando fijo—. Lanza `TerminalUnavailable` si no puede."""
+        argv = self.argv or shell_por_defecto()
         try:
             self._proc = _spawn_pty(argv, self.cwd, self.rows, self.cols)
         except TerminalUnavailable:
@@ -333,6 +348,12 @@ class TerminalSession:
     def write(self, data: str) -> None:
         """Escribe en la terminal tal cual (teclas incluidas: Tab, Ctrl+C, flechas)."""
         if not data or self._proc is None:
+            return
+        if self.solo_lectura:
+            # No es un fallo: esta pestaña se abrió sin la confirmación de `terminal_open`
+            # justamente porque no acepta teclado. Aceptarlo ahora sería una shell libre
+            # concedida por la puerta de atrás.
+            logger.debug(f"terminal {self.id} es de solo lectura: se descarta la entrada")
             return
         self._audit_lines(data)
         with self._write_lock:
@@ -610,6 +631,21 @@ class TerminalManager:
                 return None
             return self.get(self._activa)
 
+    def hay_interactiva(self) -> bool:
+        """Return True si hay alguna sesión que el usuario pueda usar como shell.
+
+        Las de solo lectura —las que abre la app sola, como el canal de Telegram— no
+        cuentan. Es lo que impide que su mera existencia haga de llave: `terminal_open` no
+        vuelve a pedir confirmación cuando ya hay una terminal corriendo, y sin esta
+        distinción una pestaña que la aplicación abrió por su cuenta le estaría abriendo la
+        puerta a una shell que nadie autorizó.
+        """
+        with self._lock:
+            return any(
+                not self._sessions[sid].solo_lectura
+                for sid in self.ids()
+            )
+
     def ids(self) -> List[str]:
         with self._lock:
             return [i for i in self._orden if self.get(i) is not None]
@@ -640,6 +676,31 @@ class TerminalManager:
             self._sessions[sesion.id] = sesion
             self._orden.append(sesion.id)
             self._activa = sesion.id
+
+        self._emit_state(sesion.id, "abierta", sesion.cwd)
+        return sesion
+
+    def crear_proceso(self, argv: List[str], titulo: str,
+                      cwd: Optional[str] = None) -> TerminalSession:
+        """Abre una pestaña que corre `argv` y NO acepta teclado.
+
+        Para procesos que la app levanta sola —el canal de Telegram— y que el usuario
+        quiere poder mirar. Al ser de solo lectura no concede una shell, que es lo que la
+        confirmación de `terminal_open` protege.
+
+        No se deja activa: quien la abre es la aplicación al arrancar, no el usuario, y
+        robarle el foco a la pestaña en la que está trabajando sería una grosería.
+        """
+        with self._lock:
+            sesion = TerminalSession(cwd=cwd, argv=argv, titulo=titulo, solo_lectura=True)
+            sesion.on_output = lambda chunk, sid=sesion.id: self._emit_output(sid, chunk)
+            sesion.on_exit = lambda sid=sesion.id: self._on_session_exit(sid)
+            sesion.start()
+
+            self._sessions[sesion.id] = sesion
+            self._orden.append(sesion.id)
+            if self._activa is None:
+                self._activa = sesion.id
 
         self._emit_state(sesion.id, "abierta", sesion.cwd)
         return sesion

@@ -98,8 +98,16 @@ class TaskExecutor:
 
         return "\n".join(lines)
 
-    def execute_single(self, action_name: str, params: dict = {}, channel=None) -> str:
-        """Ejecuta una sola acción del registro directamente."""
+    def execute_single(self, action_name: str, params: dict = None, channel=None) -> str:
+        """Ejecuta una sola acción del registro directamente.
+
+        `params=None` y no `params={}`: un diccionario como valor por defecto se crea UNA
+        vez, al definir la función, y queda compartido por todas las llamadas. Hoy nadie lo
+        muta, así que no rompe nada — pero el día que alguien le agregue una clave dentro,
+        esa clave viaja a la siguiente invocación de otra acción distinta. En un ejecutor de
+        acciones del sistema, eso es un parámetro filtrándose de una orden a otra.
+        """
+        params = dict(params or {})
         action_info = get_action(action_name)
         if not action_info:
             return f"La acción '{action_name}' no existe en el registro."

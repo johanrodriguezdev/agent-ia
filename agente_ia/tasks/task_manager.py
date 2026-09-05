@@ -70,13 +70,7 @@ def _parse_natural_date(text: str) -> Optional[datetime.datetime]:
         }
         parsed = dateparser.parse(text, languages=['es'], settings=settings)
         if parsed:
-            # Si la fecha parseada es pasada, ajustar al futuro
-            now = datetime.datetime.now()
-            if parsed < now:
-                # Si solo falta la hora (mismo día), mover al día siguiente
-                if parsed.date() == now.date():
-                    parsed += datetime.timedelta(days=1)
-            return parsed
+            return _al_futuro(parsed)
     except ImportError:
         pass
 
@@ -84,26 +78,49 @@ def _parse_natural_date(text: str) -> Optional[datetime.datetime]:
     return _fallback_date_parse(text)
 
 
+#: Cuanto tiene que quedar una fecha en el pasado para considerarla "ya paso".
+#:
+#: Sin margen, "hoy" acababa siendo MANANA: `dateparser` devuelve el instante actual, que
+#: para cuando se compara ya quedo unos microsegundos atras, y la correccion al futuro lo
+#: empujaba un dia entero. Un minuto es de sobra para absorber eso y sigue corrigiendo lo
+#: que de verdad paso — "a las 5" dicho a las seis de la tarde.
+_MARGEN_PASADO = datetime.timedelta(minutes=1)
+
+
+def _al_futuro(parsed: datetime.datetime) -> datetime.datetime:
+    """Mueve al dia siguiente una hora de HOY que ya paso. El resto se devuelve tal cual."""
+    now = datetime.datetime.now()
+    if parsed < now - _MARGEN_PASADO and parsed.date() == now.date():
+        return parsed + datetime.timedelta(days=1)
+    return parsed
+
+
+#: Hora a la que cae un recordatorio cuando se da el dia pero no la hora.
+_HORA_POR_DEFECTO = 9
+
+
 def _fallback_date_parse(text: str) -> Optional[datetime.datetime]:
     """Parseo básico con regex para cuando dateparser no está disponible."""
     now = datetime.datetime.now()
     text_lower = text.lower().strip()
 
-    # "mañana" / "mañana a las X"
-    if "mañana" in text_lower:
-        base = now + datetime.timedelta(days=1)
+    def _ese_dia(dias_adelante: int) -> datetime.datetime:
+        base = now + datetime.timedelta(days=dias_adelante)
         hour = _extract_hour(text_lower)
-        if hour is not None:
-            return base.replace(hour=hour, minute=0, second=0, microsecond=0)
-        return base.replace(hour=9, minute=0, second=0, microsecond=0)
+        return base.replace(hour=hour if hour is not None else _HORA_POR_DEFECTO,
+                            minute=0, second=0, microsecond=0)
 
-    # "pasado mañana"
-    if "pasado mañana" in text_lower:
-        base = now + datetime.timedelta(days=2)
-        hour = _extract_hour(text_lower)
-        if hour is not None:
-            return base.replace(hour=hour, minute=0, second=0, microsecond=0)
-        return base.replace(hour=9, minute=0, second=0, microsecond=0)
+    # "pasado mañana" va PRIMERO: contiene "mañana", así que con el orden inverso —el que
+    # había— la rama de mañana se lo llevaba siempre y "pasado mañana" caía en mañana. La
+    # rama de abajo era inalcanzable.
+    #
+    # Todas aceptan la forma sin eñe: el reconocedor de voz la pierde a menudo y mucha gente
+    # escribe sin acentos. Hasta ahora "manana" no era ninguna fecha.
+    if "pasado mañana" in text_lower or "pasado manana" in text_lower:
+        return _ese_dia(2)
+
+    if "mañana" in text_lower or "manana" in text_lower:
+        return _ese_dia(1)
 
     # "en X horas"
     match = re.search(r'en\s+(\d+)\s+hora', text_lower)
@@ -117,7 +134,7 @@ def _fallback_date_parse(text: str) -> Optional[datetime.datetime]:
         minutes = int(match.group(1))
         return now + datetime.timedelta(minutes=minutes)
 
-    # "hoy a las X"
+    # "hoy", con hora o sin ella
     if "hoy" in text_lower:
         hour = _extract_hour(text_lower)
         if hour is not None:
@@ -125,6 +142,16 @@ def _fallback_date_parse(text: str) -> Optional[datetime.datetime]:
             if target <= now:
                 target += datetime.timedelta(days=1)
             return target
+        # Sin hora, esta rama no devolvia NADA: coincidia con "hoy", entraba, y se caia sin
+        # retornar. Y `dateparser` tampoco entiende la frase entera ("recuerdame llamar al
+        # banco hoy" -> None), asi que decir "hoy" equivalia a no decir cuando: la tarea se
+        # creaba y el agente seguia preguntando "para cuando" por una fecha que el usuario
+        # ya habia dado.
+        #
+        # A las 9, que es la misma hora por defecto que usa "manana". Si ya pasaron, dentro
+        # de una hora: un recordatorio para hoy tiene que caer hoy, no manana.
+        target = now.replace(hour=_HORA_POR_DEFECTO, minute=0, second=0, microsecond=0)
+        return target if target > now else now + datetime.timedelta(hours=1)
 
     # Días de la semana
     dias = {

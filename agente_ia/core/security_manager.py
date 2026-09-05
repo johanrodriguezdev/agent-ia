@@ -484,9 +484,13 @@ class SecurityManager:
                 logger.warning(f"Acción '{action_name}' no permitida en canal {channel.value}")
                 self._log_audit(action_name, channel, "bloqueada_canal", user_id, details)
                 return False
-            msg = f"¿Estás seguro de que quieres ejecutar '{action_name}'?"
-            if details:
-                msg += f" ({details})"
+            # En español llano, no con el nombre interno de la función. Pedirle permiso a
+            # alguien en un idioma que no habla no es pedirle permiso: o dice que sí a
+            # ciegas, o dice que no por las dudas. El DETALLE concreto sigue yendo —es lo
+            # que liga el permiso a la acción puntual—, solo cambia cómo se nombra.
+            from core.acciones_legibles import pregunta as _pregunta_legible
+
+            msg = _pregunta_legible(action_name, details)
             from core.confirmation import get_confirmation_adapter
             adapter = get_confirmation_adapter(channel)
             if adapter is None:
@@ -509,11 +513,20 @@ class SecurityManager:
             self._log_audit(action_name, channel, "intento_rojo", user_id, details)
             logger.warning(f"Intento de acción roja '{action_name}' desde {channel.value}")
             if channel == ChannelType.DESKTOP and self.has_pin():
-                if self.require_pin(f"⛔ Acción ROJO '{action_name}'. {details}\nIngrese su PIN maestro para autorizar: "):
+                from core.acciones_legibles import pregunta as _pregunta_roja
+
+                if self.require_pin(
+                    f"⛔ {_pregunta_roja(action_name, details)}\n"
+                    f"Es una acción de alto riesgo. Ingrese su PIN maestro para "
+                    f"autorizarla: "
+                ):
                     self._log_audit(action_name, channel, "autorizada_rojo", user_id, details)
                     logger.info(f"Acción roja '{action_name}' autorizada por PIN maestro")
                     return True
-            msg = f"⛔ Acción '{action_name}' clasificada como ROJO. No autorizada."
+            from core.acciones_legibles import describir as _describir_roja
+
+            msg = (f"⛔ No puedo {_describir_roja(action_name)}: es una acción de alto "
+                   f"riesgo y no está autorizada.")
             print(msg)
             return False
         return True

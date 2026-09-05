@@ -192,3 +192,139 @@ def test_el_texto_original_lo_pone_el_bucle_no_el_modelo():
 
     fuente = inspect.getsource(reasoning_loop.run)
     assert 'params["texto_original"] = task' in fuente
+
+
+# ─────────────────────────────────────────────
+#  Menos herramientas delante del modelo, mismos permisos detrás
+# ─────────────────────────────────────────────
+
+def _catalogo_completo():
+    from agents.skill_tools import (register_dispatcher_tool, register_family_tools,
+                                    register_skill_tools)
+    from agents.user_defined_tools import register_user_defined_tools
+    from skills.skill_manager import skill_manager
+
+    register_dispatcher_tool()
+    register_skill_tools(skill_manager)
+    register_family_tools(skill_manager)
+    register_user_defined_tools()
+
+
+def test_lo_agrupado_sigue_registrado_con_su_propio_nivel():
+    """La propiedad que no se puede perder: agrupar es PRESENTACIÓN, no permisos.
+
+    Cada intent conserva su nombre, su nivel y su gate; lo único que cambia es que el
+    modelo ve una entrada en vez de tres. Si agrupar borrara el registro, el gate dejaría
+    de poder clasificar la acción concreta y `execute_tool()` la denegaría por
+    "tool no registrado" — o peor, la familia entera pasaría a compartir un solo veredicto.
+    """
+    from agents.skill_tools import INTENTS_OCULTOS
+    from agents.tool_registry import get_tool
+
+    _catalogo_completo()
+
+    for intent in INTENTS_OCULTOS:
+        spec = get_tool(intent)
+        assert spec is not None, f"'{intent}' dejó de estar registrado al agruparlo"
+        assert spec.risk_level is not None
+
+
+def test_una_familia_nunca_mezcla_niveles_de_riesgo():
+    """Juntar una verde con una amarilla obligaría a darle a todo el grupo el nivel más
+    alto: listar tareas pediría confirmación. La granularidad del gate es por acción."""
+    from agents.skill_tools import _FAMILIAS
+    from core.security_manager import security_manager
+
+    _catalogo_completo()
+
+    for familia, datos in _FAMILIAS.items():
+        niveles = {security_manager.classify_action(i) for i in datos["opciones"].values()}
+        assert len(niveles) == 1, f"la familia '{familia}' mezcla niveles: {niveles}"
+
+
+def test_las_acciones_amarillas_no_se_esconden_dentro_de_una_familia():
+    """`SYS_POWER_OFF` y `CREATE_FLOW` son amarillas y quedan FUERA de sus familias
+    (volumen y flujos, verdes). Apagar el computador no puede entrar por la misma puerta
+    que subir el volumen."""
+    from agents.skill_tools import INTENTS_OCULTOS
+
+    assert "SYS_POWER_OFF" not in INTENTS_OCULTOS
+    assert "CREATE_FLOW" not in INTENTS_OCULTOS
+
+
+def test_la_familia_ejecuta_la_accion_concreta_por_el_gate():
+    from unittest.mock import patch as _patch
+
+    from agents.tool_registry import execute_tool
+    from core.security_manager import ChannelType
+
+    _catalogo_completo()
+    ejecutado = []
+
+    with _patch("os_integration.system_ctrl.volume_up",
+                lambda: ejecutado.append("volume_up") or "Volumen subido."):
+        resultado = execute_tool(
+            "volumen",
+            {"opcion": "subir", "text": "sube el volumen", "channel": "desktop",
+             "user_id": "owner"},
+            ChannelType.DESKTOP, "owner",
+        )
+
+    assert ejecutado == ["volume_up"], resultado
+
+
+def test_una_opcion_inventada_no_ejecuta_nada():
+    from agents.tool_registry import execute_tool
+    from core.security_manager import ChannelType
+
+    _catalogo_completo()
+    resultado = execute_tool(
+        "volumen", {"opcion": "formatear el disco", "channel": "desktop", "user_id": "owner"},
+        ChannelType.DESKTOP, "owner",
+    )
+
+    assert "no válida" in resultado
+
+
+def test_un_canal_no_ve_lo_que_no_podria_ejecutar():
+    """Ofrecerle a Telegram `terminal_run_command` solo le hace gastar una vuelta en
+    descubrir que le van a decir que no. No es control de acceso —ese sigue en
+    `execute_tool()`—, es no prometer lo que no se va a cumplir."""
+    from core.reasoning_loop import _build_tool_list
+    from core.security_manager import ChannelType
+
+    _catalogo_completo()
+    escritorio = {t["name"] for t in _build_tool_list(ChannelType.DESKTOP)}
+    telegram = {t["name"] for t in _build_tool_list(ChannelType.TELEGRAM)}
+
+    assert telegram < escritorio, "Telegram debería ver menos que el escritorio"
+    assert "terminal_run_command" in escritorio
+    assert "terminal_run_command" not in telegram
+
+def test_los_dos_motores_ofrecen_el_mismo_catalogo():
+    """Hay dos sitios que le muestran herramientas al modelo —`core/reasoning_loop.py`
+    (escritorio y voz) y `ai/claude_brain.py` (Telegram y Discord)— y cada uno armaba su
+    lista por su cuenta. El resultado era que la reducción del catálogo aplicaba en un
+    canal y no en el otro: por Telegram seguían apareciendo las agrupadas y las amarillas
+    que ese canal nunca puede ejecutar. Ahora los dos leen `catalogo_para_modelo()`.
+    """
+    from pathlib import Path
+
+    raiz = Path(__file__).resolve().parent.parent
+    for modulo in ("core/reasoning_loop.py", "ai/claude_brain.py"):
+        fuente = (raiz / modulo).read_text(encoding="utf-8")
+        assert "catalogo_para_modelo" in fuente, f"{modulo} arma su lista por su cuenta"
+
+
+def test_el_catalogo_del_modelo_se_reduce_por_canal():
+    from agents.tool_registry import catalogo_para_modelo, list_tool_names
+    from core.security_manager import ChannelType
+
+    _catalogo_completo()
+
+    registradas = len(list_tool_names())
+    escritorio = len(catalogo_para_modelo(ChannelType.DESKTOP))
+    telegram = len(catalogo_para_modelo(ChannelType.TELEGRAM))
+
+    # Registradas > ofrecidas: lo agrupado y lo que el canal no puede sigue existiendo.
+    assert telegram < escritorio < registradas, (registradas, escritorio, telegram)

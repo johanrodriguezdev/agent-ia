@@ -43,7 +43,11 @@ def test_desktop_adapter_llamado_correctamente(monkeypatch):
         result = security_manager.require_confirmation("close_app", ChannelType.DESKTOP)
         assert result is True
         assert calls and calls[0][0] == "close_app"
-        assert "close_app" in calls[0][1]
+        # El nombre de la acción sigue llegando como PRIMER argumento —es lo que identifica
+        # qué se autoriza— pero ya no aparece dentro del texto: ahí va la descripción en
+        # español, porque es lo que el humano tiene que entender para decidir.
+        assert "cierre una aplicación" in calls[0][1]
+        assert "close_app" not in calls[0][1]
     finally:
         # Restaurar el adaptador real de test (el de conftest.py) para no filtrar
         # este fake a otros tests del mismo proceso.

@@ -41,7 +41,8 @@ from core.resolution import resolve
 from router.dispatcher import dispatch
 from skills.skill_manager import skill_manager
 from intent.classifier import classify_command
-from agents.skill_tools import register_dispatcher_tool, register_skill_tools
+from agents.skill_tools import (register_dispatcher_tool, register_family_tools,
+                                register_skill_tools)
 from agents.user_defined_tools import register_user_defined_tools
 from core.address import vocative, vocative_start
 
@@ -65,6 +66,8 @@ register_confirmation_adapter(ChannelType.DESKTOP, _desktop_confirm)
 # core/reasoning_loop.py, no por AgentOrchestrator.
 register_dispatcher_tool()
 register_skill_tools(skill_manager)
+# Familias: volumen, info del sistema y flujos se presentan como UNA herramienta cada una.
+register_family_tools(skill_manager)
 # Rutinas, comandos aprendidos y Autopilot. Antes solo eran alcanzables como resolvers
 # delante del modelo; ahora que el modelo lee primero, son herramientas que elige el.
 register_user_defined_tools()
@@ -346,12 +349,44 @@ if __name__ == "__main__":
 
     start_dreaming()
 
+    # El canal de Telegram, en su propia terminal. Hasta ahora habia que lanzarlo a mano en
+    # otra consola, asi que en la practica el agente casi nunca estaba disponible desde el
+    # telefono: la app se abria y el canal se quedaba apagado. No arranca si no hay token,
+    # si ya hay uno corriendo, o si se apago en config.json.
+    from channels.telegram_launcher import detener as detener_telegram
+
+    # Muere con la aplicacion, mismo criterio que la terminal embebida: nunca queda un canal
+    # vivo, hablando con quien sea, sin nada que lo muestre. `atexit` cubre tambien el modo
+    # headless y la salida por Ctrl+C.
+    import atexit
+
+    atexit.register(detener_telegram)
+
+    # Sin ventana no hay pestaña donde mostrarlo, asi que ahi si va en una consola aparte.
+    # Con ventana lo abre `MainWindow` en la terminal embebida, que es donde se ve.
+    if headless:
+        from channels.telegram_launcher import arrancar_si_procede
+
+        arrancar_si_procede()
+
     if not headless:
         try:
             from PyQt6.QtWidgets import QApplication
+            from ui.webview.app_icon import fijar_identidad_en_windows
             from ui.webview.main_window import MainWindow
+
+            # ANTES de crear la QApplication: la barra de tareas de Windows agrupa por
+            # AppUserModelID, y si el proceso no declara uno propio hereda el de
+            # `python.exe`. Por eso seguía saliendo el logo de Python en la barra aunque la
+            # ventana ya tuviera su icono — `setWindowIcon()` no alcanza, son dos cosas
+            # distintas: una pinta la ventana, la otra le dice a Windows qué aplicación es.
+            fijar_identidad_en_windows()
+
             app = QApplication(sys.argv)
             window = MainWindow()
+            # Cerrar la ventana tambien cierra el canal: `atexit` no siempre corre cuando Qt
+            # termina el proceso, y un bot huerfano seguiria atendiendo mensajes.
+            app.aboutToQuit.connect(detener_telegram)
             if not tray_mode:
                 window.show()
             # REQ-015: tamaño/posición ya resueltos por `fit_size_to_screen()` dentro del
