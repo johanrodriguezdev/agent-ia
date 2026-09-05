@@ -30,6 +30,7 @@ petición, el otro deja una respuesta, y el primero espera sobre un `Event` con 
 
 import logging
 import threading
+import time
 import unicodedata
 from dataclasses import dataclass
 from typing import Optional
@@ -80,6 +81,9 @@ class _Peticion:
     action_name: str
     evento: threading.Event
     respuesta: Optional[str] = None
+    #: Cuándo se abrió la escucha, en reloj monótono. Una captura que EMPEZÓ antes no puede
+    #: ser la respuesta: contiene la pregunta que el agente estaba pronunciando.
+    abierta_en: float = 0.0
 
 
 class VoiceConfirmation:
@@ -107,7 +111,10 @@ class VoiceConfirmation:
                     f"Ya hay una confirmación hablada en curso; se deniega '{action_name}'"
                 )
                 return False
-            peticion = _Peticion(action_name=action_name, evento=threading.Event())
+            peticion = _Peticion(
+                action_name=action_name, evento=threading.Event(),
+                abierta_en=time.monotonic(),
+            )
             self._peticion = peticion
 
         try:
@@ -142,6 +149,21 @@ class VoiceConfirmation:
         """Return True si el bucle de escucha debe entregar lo próximo que oiga."""
         with self._lock:
             return self._peticion is not None
+
+    def acepta(self, listen_started_at: float) -> bool:
+        """Return True si una captura iniciada en `listen_started_at` puede ser la respuesta.
+
+        Segundo candado, independiente del contenido. `_confirmar_hablando()` ya pronuncia la
+        pregunta ANTES de abrir la escucha justamente para no oírse a sí mismo, pero el
+        micrófono captura de forma continua: el trozo que EMPEZÓ mientras el agente hablaba
+        termina después, se transcribe después, y llegaba como la respuesta del usuario
+        (logs/orion.log, 2026-09-04 22:18:47). Mismo criterio que
+        `ConversationWindow.accepts()`, y por el mismo motivo.
+        """
+        with self._lock:
+            if self._peticion is None:
+                return False
+            return listen_started_at >= self._peticion.abierta_en
 
     def accion_pendiente(self) -> str:
         with self._lock:

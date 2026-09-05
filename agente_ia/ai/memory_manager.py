@@ -331,6 +331,20 @@ class UnifiedMemory:
         Una sola query agregada (sin N+1 ni tabla espejo). `conversation_id IS NOT NULL`
         deja fuera las filas legacy y las de `main.py` (CA-12): siguen intactas en la DB
         y visibles para `get_recent()`/semantica, pero no aparecen como conversaciones.
+
+        El `HAVING` extiende esa misma idea a lo que trajo `ai/memory_migration.py`. La
+        migracion le puso un `conversation_id` sintetico (`ai_memory#39`) a cada par
+        pregunta/respuesta de las bases viejas, asi que cada recuerdo importado se colaba
+        en la barra lateral como si fuera un chat de dos turnos — 46 de ellos en la
+        instalacion del dueno, contra UNA conversacion real, varios con el mismo titulo
+        ("abre la calculadora" tres veces). Borrarlos no ayudaba: como la barra pagina de
+        a 30, al reabrir entraban otros desde el fondo y parecia que los borrados volvian.
+
+        Se excluye la conversacion cuyas filas son TODAS de la migracion; basta una fila
+        propia para que se muestre, asi que una conversacion real nunca se oculta por
+        arrastrar algun recuerdo importado. Y solo se ocultan del listado: siguen intactas
+        para `get_recent()` y la busqueda semantica, que es lo que el agente usa para
+        recordar. Para volver a verlas alcanza con quitar este HAVING.
         """
         try:
             with sqlite3.connect(DB_PATH) as conn:
@@ -349,6 +363,9 @@ class UnifiedMemory:
                        WHERE m.user_id = ? AND m.archived = 0
                              AND m.conversation_id IS NOT NULL
                        GROUP BY m.conversation_id
+                      HAVING SUM(CASE WHEN m.source IS NULL
+                                        OR m.source NOT LIKE 'migracion:%'
+                                      THEN 1 ELSE 0 END) > 0
                        ORDER BY last_activity DESC
                        LIMIT ? OFFSET ?""",
                     (user_id, limit, offset)

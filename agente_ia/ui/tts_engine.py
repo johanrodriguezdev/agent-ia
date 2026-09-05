@@ -153,8 +153,10 @@ async def _speak_edge(text: str) -> bool:
         if mp3_path and os.path.exists(mp3_path):
             try:
                 os.unlink(mp3_path)
-            except Exception:
-                pass
+            except Exception as e:
+                # Esperable (el archivo puede seguir abierto), pero no mudo: si los
+                # temporales empiezan a acumularse, este es el unico rastro.
+                logger.debug(f"no se pudo borrar el temporal: {e}")
 
 
 def _play_mp3_windows(mp3_path: str):
@@ -177,8 +179,10 @@ def _play_mp3_windows(mp3_path: str):
     if proc.poll() is None:
         try:
             proc.kill()
-        except Exception:
-            pass
+        except Exception as e:
+            # Carrera esperable: el reproductor pudo terminar entre el `poll()` y el
+            # `kill()`. Se deja en debug por si alguna vez quedan procesos colgados.
+            logger.debug(f"no se pudo cerrar el reproductor: {e}")
 
 
 def speak(text: str):

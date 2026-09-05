@@ -27,6 +27,7 @@
 import {
   requestSecurityOverrides, saveSecurityOverride, requestProfile, saveProfile,
   requestEmailCapabilities, saveEmailCapability,
+  requestTaskModels, saveTaskModels,
 } from "./bridge_client.js";
 import { icon } from "./icons.js";
 
@@ -65,6 +66,7 @@ const PROFILE_FIELDS = [
 
 const SECTIONS = [
   { id: "perfil", label: "Perfil" },
+  { id: "modelos", label: "Modelos" },
   { id: "seguridad", label: "Seguridad" },
 ];
 
@@ -169,6 +171,9 @@ function renderActiveSection() {
   if (_activeSection === "perfil") {
     content.appendChild(buildProfileCard());
     requestProfile();          // carga perezosa: solo al entrar en la sección
+  } else if (_activeSection === "modelos") {
+    content.appendChild(buildModelsCard(null));
+    requestTaskModels();       // mismo criterio: solo al entrar en la sección
   } else {
     content.appendChild(buildSecurityCard());
     content.appendChild(buildEmailCapabilitiesCard());
@@ -456,4 +461,152 @@ export function handleEmailCapabilityRejected(capId) {
   if (check) check.disabled = false;
   requestEmailCapabilities();   // re-sincroniza con la verdad del backend
   showSettingsBanner("No se pudo aplicar ese cambio.", true);
+}
+
+// ---------------------------------------------------------------- sección "Modelos"
+//
+// Qué modelo atiende cada tipo de trabajo. La gracia está en poder poner VARIOS por
+// tarea: los catálogos gratuitos se quedan sin cuota todo el tiempo, y con una lista el
+// agente pasa al siguiente en vez de abandonar la tarea o irse al modelo de pago.
+
+let _catalogoModelos = [];
+
+function buildModelsCard(payload) {
+  const card = document.createElement("div");
+  card.className = "settings-card";
+
+  const title = document.createElement("div");
+  title.className = "settings-card-title";
+  title.textContent = "Modelo por tipo de trabajo";
+  card.appendChild(title);
+
+  const ayuda = document.createElement("p");
+  ayuda.className = "settings-help";
+  ayuda.textContent = payload
+    ? `Sin nada elegido, cada tarea usa el modelo general (${payload.general}). `
+      + "Puedes poner varios: si el primero se queda sin cuota, se prueba el siguiente."
+    : "Cargando…";
+  card.appendChild(ayuda);
+
+  if (!payload) return card;
+
+  for (const aviso of payload.avisos || []) {
+    const linea = document.createElement("p");
+    linea.className = "settings-help settings-help-warn";
+    linea.textContent = aviso;               // §10.1 — viene de Python, nunca innerHTML
+    card.appendChild(linea);
+  }
+
+  for (const tarea of payload.tareas) {
+    card.appendChild(buildTaskRow(tarea));
+  }
+  return card;
+}
+
+function buildTaskRow(tarea) {
+  const fila = document.createElement("div");
+  fila.className = "settings-row settings-row-block";
+
+  const info = document.createElement("div");
+  info.className = "settings-row-info";
+  const nombre = document.createElement("span");
+  nombre.className = "settings-row-label";
+  nombre.textContent = tarea.label;          // §10.1 — nunca innerHTML
+  const desc = document.createElement("span");
+  desc.className = "settings-row-desc";
+  desc.textContent = tarea.descripcion;
+  info.append(nombre, desc);
+  fila.appendChild(info);
+
+  const lista = document.createElement("div");
+  lista.className = "model-chain";
+
+  if (tarea.destinos.length === 0) {
+    const vacio = document.createElement("span");
+    vacio.className = "settings-row-desc";
+    vacio.textContent = "Usa el modelo general.";
+    lista.appendChild(vacio);
+  }
+
+  tarea.destinos.forEach((destino, indice) => {
+    lista.appendChild(buildDestinoChip(tarea, destino, indice));
+  });
+
+  // Agregar: un `<select>` con todo el catálogo. Elegir agrega al final de la cadena.
+  const agregar = document.createElement("select");
+  agregar.className = "model-add";
+  agregar.setAttribute("aria-label", `Agregar un modelo a ${tarea.label}`);
+
+  const inicial = document.createElement("option");
+  inicial.value = "";
+  inicial.textContent = "+ Agregar modelo…";
+  agregar.appendChild(inicial);
+
+  for (const modelo of _catalogoModelos) {
+    const ya = tarea.destinos.some(
+      (d) => d.proveedor === modelo.proveedor && d.modelo === modelo.modelo,
+    );
+    if (ya) continue;
+    const opcion = document.createElement("option");
+    opcion.value = `${modelo.proveedor}|${modelo.modelo}`;
+    // El "gratis" va en el texto y no en un color: el `<option>` nativo no se estiliza.
+    opcion.textContent = modelo.gratis ? `${modelo.label} — gratis` : modelo.label;
+    agregar.appendChild(opcion);
+  }
+
+  agregar.addEventListener("change", () => {
+    if (!agregar.value) return;
+    const [proveedor, modelo] = agregar.value.split("|");
+    guardarCadena(tarea, [...tarea.destinos, { proveedor, modelo }]);
+  });
+
+  lista.appendChild(agregar);
+  fila.appendChild(lista);
+  return fila;
+}
+
+function buildDestinoChip(tarea, destino, indice) {
+  const chip = document.createElement("span");
+  chip.className = "model-chip" + (destino.gratis ? " model-chip-gratis" : "");
+
+  const orden = document.createElement("span");
+  orden.className = "model-chip-orden";
+  orden.textContent = `${indice + 1}`;
+  chip.appendChild(orden);
+
+  const nombre = document.createElement("span");
+  nombre.textContent = destino.label;        // §10.1
+  chip.appendChild(nombre);
+
+  const quitar = document.createElement("button");
+  quitar.type = "button";
+  quitar.className = "model-chip-quitar";
+  quitar.setAttribute("aria-label", `Quitar ${destino.label}`);
+  quitar.appendChild(icon("close", "ic-sm"));
+  quitar.addEventListener("click", () => {
+    guardarCadena(tarea, tarea.destinos.filter((_, i) => i !== indice));
+  });
+  chip.appendChild(quitar);
+
+  return chip;
+}
+
+function guardarCadena(tarea, destinos) {
+  saveTaskModels(
+    tarea.id,
+    JSON.stringify(destinos.map((d) => ({ proveedor: d.proveedor, modelo: d.modelo }))),
+  );
+}
+
+/** Llega de `task_models_loaded`: repinta la sección entera con lo que hay guardado. */
+export function renderTaskModels(payload) {
+  _catalogoModelos = payload.catalogo || [];
+  if (_activeSection !== "modelos") return;
+  const content = document.getElementById("settings-content");
+  if (!content) return;
+
+  const anterior = content.querySelector(".settings-card");
+  const nueva = buildModelsCard(payload);
+  if (anterior) anterior.replaceWith(nueva);
+  else content.appendChild(nueva);
 }

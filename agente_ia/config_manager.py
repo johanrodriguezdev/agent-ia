@@ -30,6 +30,17 @@ _ENV_KEY_MAP = {
     "anthropic_api_key": "ANTHROPIC_API_KEY",
     "openai_api_key": "OPENAI_API_KEY",
     "gemini_api_key": "GEMINI_API_KEY",
+    "openrouter_api_key": "OPENROUTER_API_KEY",
+}
+
+#: Que clave le corresponde a cada proveedor de modelo. Ollama no aparece: es local y no
+#: lleva credencial.
+_PROVEEDOR_A_CLAVE = {
+    "anthropic": "anthropic_api_key",
+    "openai": "openai_api_key",
+    "gemini": "gemini_api_key",
+    "openrouter": "openrouter_api_key",
+    "deepseek": "deepseek_api_key",
 }
 
 
@@ -184,6 +195,29 @@ def get_telegram_token() -> str:
     return _get_config_value("telegram_token")
 
 
+def get_api_key(proveedor: str) -> str:
+    """Return la API key de un proveedor: variable de entorno y, si no, `config.json`.
+
+    Un unico punto para todos. Antes cada `_ask_*()` de `ai/llm_provider.py` la leia por su
+    cuenta, y dos de ellas usaban `cfg.get("openai_api_key", la_del_entorno)`: con la clave
+    presente pero VACIA en config.json —el estado de una instalacion recien clonada— esa
+    forma pisa una variable de entorno que si sirve, y el proveedor se queda sin credencial
+    sin que nada lo explique. `anthropic`, por el contrario, solo miraba el entorno e
+    ignoraba lo que hubiera en config.json.
+
+    Un proveedor desconocido (u `ollama`, que es local) devuelve cadena vacia.
+    """
+    clave = _PROVEEDOR_A_CLAVE.get(str(proveedor or "").strip().lower())
+    return _get_config_value(clave).strip() if clave else ""
+
+
+def env_var_de_proveedor(proveedor: str) -> str:
+    """Return el nombre de la variable de entorno de un proveedor, para poder nombrarla en
+    un mensaje al humano ("configura OPENROUTER_API_KEY"). Vacio si no lleva credencial."""
+    clave = _PROVEEDOR_A_CLAVE.get(str(proveedor or "").strip().lower())
+    return _ENV_KEY_MAP.get(clave, "") if clave else ""
+
+
 def get_deepseek_api_key() -> str:
     return _get_config_value("deepseek_api_key")
 
@@ -316,3 +350,31 @@ def set_ai_provider_and_model(provider: str, model: str = "") -> None:
     config["ai_model"] = (model or "").strip()
     save_config(config)
     logger.info(f"proveedor de IA cambiado a {provider} ({config['ai_model'] or 'modelo por defecto'})")
+
+
+# --------------------------------------------------------------------- enrutado por tarea
+
+def get_task_providers() -> dict:
+    """Return el mapeo `task_providers` de config.json, o `{}`.
+
+    La lectura autoritativa para el modelo la hace `ai/llm_provider.py`; esta existe para
+    la pantalla de configuracion, que necesita mostrar lo que hay hoy.
+    """
+    mapeo = load_config().get("task_providers")
+    return mapeo if isinstance(mapeo, dict) else {}
+
+
+def set_task_providers(mapeo: dict) -> None:
+    """Escribe el mapeo completo. Un mapeo vacio borra la clave.
+
+    Se escribe entero y no clave por clave a proposito: la pantalla siempre manda el estado
+    completo, y asi no quedan tareas huerfanas de una edicion a medias.
+    """
+    config = load_config()
+    if mapeo:
+        config["task_providers"] = mapeo
+    else:
+        config.pop("task_providers", None)
+    save_config(config)
+    logger.info(f"enrutado por tarea actualizado: {sorted(mapeo)}")
+

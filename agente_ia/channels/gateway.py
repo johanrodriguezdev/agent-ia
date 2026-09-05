@@ -80,11 +80,12 @@ class GlassGateway:
                 # Captura de pantalla → enviar como imagen al chat (se preclasifica solo
                 # para detectar este caso especial, igual que TEACH_COMMAND en main.py;
                 # resolve() no conoce este feature de adjuntar imagen al chat de
-                # Telegram/Discord). El resto del texto —incluido lo que antes hubiera
-                # clasificado como UNKNOWN— pasa por `resolve()` completo: CA-03 exige el
-                # mismo orden de resolución (routine → autopilot → learned → task_tool →
-                # capability → intent → claude) que main.py, así que ya no se salta
-                # directo a Claude solo porque el intent legacy sea UNKNOWN.
+                # Telegram/Discord). El resto del texto pasa por `resolve()` completo,
+                # que desde la inversión es `pending_dialog → claude`: el mismo camino que
+                # main.py (CA-03 sigue exigiendo que los tres canales resuelvan igual).
+                # `classify_command()` sobrevive acá SOLO como preclasificación para este
+                # caso especial — no decide la resolución, decide si la respuesta se manda
+                # como imagen.
                 pre_intent, _pre_params = classify_command(text)
                 if pre_intent == Intent.TAKE_SCREENSHOT:
                     return self._handle_screenshot(session, text)

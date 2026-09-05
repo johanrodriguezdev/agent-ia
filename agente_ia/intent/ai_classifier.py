@@ -32,6 +32,39 @@ logger = logging.getLogger(__name__)
 #: errores se ejecuten a ciegas.
 MIN_DECISION_MARGIN = 0.25
 
+#: Piso ABSOLUTO: cuanto tiene que valer la clase ganadora por si misma.
+#:
+#: `MIN_DECISION_MARGIN` mide la distancia entre la primera clase y la segunda, que
+#: responde "cual de las dos", no "es alguna de ellas". Un texto que no se parece a NADA
+#: —todas las clases con puntaje negativo, o sea del lado equivocado de su hiperplano—
+#: puede quedar igual un poco mas cerca de una que de otra y colarse con margen de sobra.
+#:
+#: El caso que lo destapo: un JSON de rangos de colores para ciclos de cosecha, pidiendo
+#: mejorar la paleta. `clean_text()` le quita la puntuacion y queda "ini 0 fin 12 color
+#: 92d050 label 0 12 dias ..." — una sopa de numeros. El SVM lo mando a CALCULATE con la
+#: ganadora en -0.245 y margen 0.29 (pasaba el umbral relativo), y el usuario recibio
+#: "0 x 12 = 0" en vez de una respuesta: el modelo nunca vio el mensaje.
+#:
+#: Sobre el modelo entrenado la separacion es limpia — ordenes reales bien positivas,
+#: conversacion y analisis por debajo de cero:
+#:
+#:     que hora es                               +0.85
+#:     suma 3 mas 4                              +0.79
+#:     abre la calculadora                       +0.66
+#:     apaga el computador                       +0.42
+#:     cuentame un chiste                        -0.24   (iba a CREATE_FILE)
+#:     el JSON de arriba                         -0.39   (iba a CALCULATE)
+#:     que opinas de esta paleta de colores       -0.49   (iba a RECALL_MEMORY)
+#:     como interpretas estos datos              -0.66   (iba a SEARCH_FILES)
+#:
+#: Los cuatro de abajo NO son ordenes: son cosas que se le piden a un asistente para que
+#: piense, y estaban creando archivos, recorriendo el disco o buscando en la memoria.
+#:
+#: Lo que no alcanza el piso va al LLM, que ademas tiene las herramientas para ejecutar si
+#: de verdad era una orden. Perder una orden ahi cuesta una llamada al modelo; ejecutar la
+#: equivocada cuesta un archivo creado o un disco recorrido.
+MIN_DECISION_SCORE = 0.0
+
 class IntentClassifierSystem:
     def __init__(self):
         self.model_path = os.path.join(os.path.dirname(__file__), 'saved_model.pkl')
@@ -275,6 +308,22 @@ class IntentClassifierSystem:
             ("cuanto es 500 dividido 25", Intent.CALCULATE.value),
             ("suma estos numeros 33 y 67", Intent.CALCULATE.value),
             ("cuantos es cien entre cuatro", Intent.CALCULATE.value),
+            # Digitos de UNA cifra. El vectorizador trata cada numero como una palabra
+            # mas, asi que la misma orden puntuaba distinto segun que digitos llevara:
+            # "suma 15 mas 27" daba +0.67 y "suma 3 mas 4" daba -0.15, solo porque 15 y 27
+            # estaban en los ejemplos y 3 y 4 no. Con estos, las dos formas puntuan igual.
+            ("suma 3 mas 4", Intent.CALCULATE.value),
+            ("suma 8 mas 6", Intent.CALCULATE.value),
+            ("resta 9 menos 2", Intent.CALCULATE.value),
+            ("resta 7 menos 5", Intent.CALCULATE.value),
+            ("multiplica 3 por 4", Intent.CALCULATE.value),
+            ("multiplica 6 por 8", Intent.CALCULATE.value),
+            ("divide 9 entre 3", Intent.CALCULATE.value),
+            ("divide 8 entre 2", Intent.CALCULATE.value),
+            ("cuanto es 4 mas 5", Intent.CALCULATE.value),
+            ("cuanto es 6 menos 1", Intent.CALCULATE.value),
+            ("cuanto es 2 por 3", Intent.CALCULATE.value),
+            ("cuanto es 8 entre 4", Intent.CALCULATE.value),
 
             # ── SEARCH_FILES (NUEVO) ──────────────────────────────────────────
             ("busca el archivo reporte", Intent.SEARCH_FILES.value),
@@ -409,7 +458,32 @@ class IntentClassifierSystem:
             )
             return Intent.UNKNOWN.value
 
+        puntaje = self._decision_score(clean)
+        if puntaje is not None and puntaje <= MIN_DECISION_SCORE:
+            logger.info(
+                f"Intent '{prediction}' descartado por no parecerse a ninguna clase "
+                f"(puntaje {puntaje:.2f} <= {MIN_DECISION_SCORE}): '{text[:60]}'"
+            )
+            return Intent.UNKNOWN.value
+
         return str(prediction)
+
+    def _decision_score(self, clean_text_value: str) -> Optional[float]:
+        """Return el puntaje de la clase ganadora, o `None` si no se puede medir.
+
+        A diferencia de `_decision_margin()`, no compara con la segunda: dice cuanto se
+        parece el texto a la clase que gano. Negativo = no se parece a ninguna.
+        """
+        try:
+            scores = self.pipeline.decision_function([clean_text_value])[0]
+        except (AttributeError, ValueError, IndexError) as e:
+            logger.debug(f"No se pudo medir el puntaje del clasificador: {e}")
+            return None
+
+        try:
+            return float(max(scores))
+        except TypeError:
+            return None    # clasificacion binaria: `decision_function` da un escalar
 
     def _decision_margin(self, clean_text_value: str) -> Optional[float]:
         """Return la distancia entre la clase ganadora y la siguiente, o `None`.

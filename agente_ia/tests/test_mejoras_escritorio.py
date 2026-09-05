@@ -798,3 +798,252 @@ def test_si_no_esta_en_cache_se_descarga_igual(monkeypatch):
     engine.get_model()
 
     assert llamadas == [True, False]
+
+
+# --------------------------------------------------------------------------- modelo por tarea
+
+@pytest.fixture
+def bridge_modelos(monkeypatch, tmp_path):
+    """Bridge minimo + un config.json temporal: nunca se toca el real."""
+    from unittest.mock import MagicMock
+
+    import config_manager
+    from ui.webview.bridge import Bridge
+
+    monkeypatch.setattr(config_manager, "CONFIG_FILE", str(tmp_path / "config.json"))
+
+    bridge = Bridge.__new__(Bridge)
+    bridge.notice_shown = MagicMock()
+    bridge.task_models_loaded = MagicMock()
+    return bridge
+
+
+def _guardado(bridge):
+    """El JSON que el bridge le mando a la pantalla en la ultima emision."""
+    return json.loads(bridge.task_models_loaded.emit.call_args[0][0])
+
+
+def test_el_catalogo_ofrece_modelos_gratuitos_con_herramientas():
+    """Los `:free` de OpenRouter son la razon de ser de todo esto, y el agente necesita
+    tool-calling: un catalogo sin gratuitos no serviria para lo que se pidio."""
+    import ui.webview.bridge as bridge_module
+
+    catalogo = bridge_module._build_task_models_payload()["catalogo"]
+    gratuitos = [m for m in catalogo if m["gratis"]]
+
+    assert len(gratuitos) >= 10
+    assert all(m["modelo"].endswith(":free") for m in gratuitos)
+    assert any(m["proveedor"] == "openrouter" for m in gratuitos)
+
+
+def test_las_tareas_ofrecidas_son_las_que_el_codigo_etiqueta():
+    """Ofrecer una tarea que ningun `generate_response()` nombra seria una perilla que no
+    hace nada: se configura, se guarda, y no cambia el comportamiento."""
+    from pathlib import Path
+
+    import ui.webview.bridge as bridge_module
+
+    raiz = Path(__file__).resolve().parent.parent
+    fuentes = "\n".join(
+        p.read_text(encoding="utf-8")
+        for p in raiz.rglob("*.py")
+        if "openclaw-main" not in p.parts and "tests" not in p.parts
+    )
+    for tarea in bridge_module._TAREAS_ENRUTABLES:
+        assert f'tarea="{tarea["id"]}"' in fuentes, (
+            f"la tarea '{tarea['id']}' se ofrece en la pantalla pero ningun "
+            f"generate_response() la usa"
+        )
+
+
+def test_elegir_un_modelo_para_una_tarea_lo_deja_escrito(bridge_modelos):
+    import config_manager
+    from ui.webview.bridge import Bridge
+
+    Bridge.save_task_models(
+        bridge_modelos, "codigo",
+        json.dumps([{"proveedor": "openrouter", "modelo": "cohere/north-mini-code:free"}]),
+    )
+
+    assert config_manager.get_task_providers()["codigo"] == {
+        "proveedor": "openrouter", "modelo": "cohere/north-mini-code:free",
+    }
+
+
+def test_varios_modelos_se_guardan_en_orden(bridge_modelos):
+    """El orden ES la configuracion: es el que se prueba cuando el anterior se queda sin
+    cuota."""
+    import config_manager
+    from ui.webview.bridge import Bridge
+
+    Bridge.save_task_models(bridge_modelos, "ligera", json.dumps([
+        {"proveedor": "openrouter", "modelo": "google/gemma-4-31b-it:free"},
+        {"proveedor": "openrouter", "modelo": "z-ai/glm-5.2:free"},
+    ]))
+
+    guardado = config_manager.get_task_providers()["ligera"]
+    assert [d["modelo"] for d in guardado] == [
+        "google/gemma-4-31b-it:free", "z-ai/glm-5.2:free",
+    ]
+
+
+def test_una_lista_vacia_devuelve_la_tarea_al_modelo_general(bridge_modelos):
+    import config_manager
+    from ui.webview.bridge import Bridge
+
+    Bridge.save_task_models(bridge_modelos, "codigo", json.dumps(
+        [{"proveedor": "openrouter", "modelo": "z-ai/glm-5.2:free"}]))
+    Bridge.save_task_models(bridge_modelos, "codigo", "[]")
+
+    assert "codigo" not in config_manager.get_task_providers()
+
+
+def test_un_modelo_fuera_del_catalogo_no_se_escribe(bridge_modelos):
+    """Los slots del bridge son invocables desde cualquier script de la pagina: lo que
+    llega NO decide que se escribe en config.json."""
+    import config_manager
+    from ui.webview.bridge import Bridge
+
+    Bridge.save_task_models(bridge_modelos, "codigo", json.dumps(
+        [{"proveedor": "openrouter", "modelo": "modelo/inventado:free"}]))
+
+    assert config_manager.get_task_providers() == {}
+    bridge_modelos.notice_shown.emit.assert_called()
+
+
+def test_una_tarea_inventada_no_se_escribe(bridge_modelos):
+    import config_manager
+    from ui.webview.bridge import Bridge
+
+    Bridge.save_task_models(bridge_modelos, "loquesea", json.dumps(
+        [{"proveedor": "openrouter", "modelo": "z-ai/glm-5.2:free"}]))
+
+    assert config_manager.get_task_providers() == {}
+
+
+def test_un_json_roto_no_rompe_nada(bridge_modelos):
+    import config_manager
+    from ui.webview.bridge import Bridge
+
+    Bridge.save_task_models(bridge_modelos, "codigo", "{esto no es json")
+
+    assert config_manager.get_task_providers() == {}
+    bridge_modelos.notice_shown.emit.assert_called()
+
+
+def test_un_modelo_repetido_se_guarda_una_sola_vez(bridge_modelos):
+    import config_manager
+    from ui.webview.bridge import Bridge
+
+    Bridge.save_task_models(bridge_modelos, "ligera", json.dumps([
+        {"proveedor": "openrouter", "modelo": "z-ai/glm-5.2:free"},
+        {"proveedor": "openrouter", "modelo": "z-ai/glm-5.2:free"},
+    ]))
+
+    guardado = config_manager.get_task_providers()["ligera"]
+    assert guardado == {"proveedor": "openrouter", "modelo": "z-ai/glm-5.2:free"}
+
+
+def test_lo_guardado_vuelve_a_la_pantalla(bridge_modelos):
+    """Lo que se guarda tiene que verse reflejado sin recargar nada."""
+    from ui.webview.bridge import Bridge
+
+    Bridge.save_task_models(bridge_modelos, "codigo", json.dumps(
+        [{"proveedor": "openrouter", "modelo": "poolside/laguna-s-2.1:free"}]))
+
+    payload = _guardado(bridge_modelos)
+    codigo = next(t for t in payload["tareas"] if t["id"] == "codigo")
+    assert [d["modelo"] for d in codigo["destinos"]] == ["poolside/laguna-s-2.1:free"]
+    assert codigo["destinos"][0]["gratis"] is True
+
+
+def test_un_modelo_que_salio_del_catalogo_se_puede_quitar(bridge_modelos):
+    """Los IDs `:free` de OpenRouter entran y salen del catalogo. Si uno guardado deja de
+    figurar, la tarea NO puede quedar congelada: hay que poder sacarlo y reordenar lo que
+    queda, o la pantalla rechaza cada intento por culpa del modelo que se quiere sacar."""
+    import config_manager
+    from ui.webview.bridge import Bridge
+
+    # Estado previo escrito a mano, con un modelo que el catalogo de hoy no conoce.
+    config_manager.set_task_providers({"ligera": [
+        {"proveedor": "openrouter", "modelo": "modelo/retirado:free"},
+        {"proveedor": "openrouter", "modelo": "z-ai/glm-5.2:free"},
+    ]})
+
+    # Quitar el retirado: el que queda tampoco esta en el catalogo... pero ya estaba escrito.
+    Bridge.save_task_models(bridge_modelos, "ligera", json.dumps(
+        [{"proveedor": "openrouter", "modelo": "modelo/retirado:free"}]))
+    assert config_manager.get_task_providers()["ligera"] == {
+        "proveedor": "openrouter", "modelo": "modelo/retirado:free",
+    }
+
+    # Y sigue sin poder inventarse uno nuevo fuera del catalogo.
+    Bridge.save_task_models(bridge_modelos, "ligera", json.dumps(
+        [{"proveedor": "openrouter", "modelo": "modelo/jamas-visto:free"}]))
+    assert config_manager.get_task_providers()["ligera"] == {
+        "proveedor": "openrouter", "modelo": "modelo/retirado:free",
+    }
+
+
+def test_una_clave_vacia_en_config_no_pisa_la_del_entorno(monkeypatch, tmp_path):
+    """El estado de una instalacion recien clonada: config.json trae la clave presente
+    pero vacia. Si eso pisa la variable de entorno, el proveedor se queda sin credencial y
+    el error que se ve ("no esta configurada") contradice lo que el humano si configuro."""
+    import config_manager
+
+    ruta = tmp_path / "config.json"
+    ruta.write_text(json.dumps({"openai_api_key": "", "gemini_api_key": ""}), encoding="utf-8")
+    monkeypatch.setattr(config_manager, "CONFIG_FILE", str(ruta))
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-del-entorno")
+    monkeypatch.setenv("GEMINI_API_KEY", "gm-del-entorno")
+
+    assert config_manager.get_api_key("openai") == "sk-del-entorno"
+    assert config_manager.get_api_key("gemini") == "gm-del-entorno"
+
+    # Y lo que si esta escrito en config.json manda cuando no hay variable de entorno.
+    ruta.write_text(json.dumps({"openrouter_api_key": "sk-or-de-config"}), encoding="utf-8")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    assert config_manager.get_api_key("openrouter") == "sk-or-de-config"
+
+    # Ollama es local: no lleva credencial y no debe inventarse ninguna.
+    assert config_manager.get_api_key("ollama") == ""
+
+
+def test_elegir_un_modelo_sin_clave_lo_avisa_en_la_pantalla(bridge_modelos, monkeypatch):
+    """Sin esto, configurar OpenRouter sin clave se ve como un cambio exitoso y el error
+    aparece mucho despues, en medio de una respuesta, sin relacion visible con lo tocado."""
+    import config_manager
+    from ui.webview.bridge import Bridge
+
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    Bridge.save_task_models(bridge_modelos, "ligera", json.dumps(
+        [{"proveedor": "openrouter", "modelo": "z-ai/glm-5.2:free"}]))
+
+    avisos = _guardado(bridge_modelos)["avisos"]
+    assert any("OPENROUTER_API_KEY" in a for a in avisos), avisos
+
+    # Con la clave puesta, el aviso desaparece: no se le insiste al humano por algo hecho.
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-de-prueba")
+    Bridge.request_task_models(bridge_modelos)
+    assert _guardado(bridge_modelos)["avisos"] == []
+
+
+def test_lo_que_se_guarda_es_lo_que_el_proveedor_lee(bridge_modelos):
+    """La prueba que cierra el circulo: lo escrito por la pantalla tiene que ser
+    exactamente lo que `ai/llm_provider.py` entiende como destinos de esa tarea."""
+    import ai.llm_provider as prov
+    import config_manager
+    from ui.webview.bridge import Bridge
+
+    Bridge.save_task_models(bridge_modelos, "ligera", json.dumps([
+        {"proveedor": "openrouter", "modelo": "google/gemma-4-31b-it:free"},
+        {"proveedor": "openrouter", "modelo": "z-ai/glm-5.2:free"},
+    ]))
+
+    # Sin trucos: la pantalla escribe y el proveedor lee el MISMO archivo, el que dice
+    # `config_manager.CONFIG_FILE` (aqui, el temporal del fixture).
+    assert config_manager.get_task_providers()["ligera"]
+    assert prov.destinos_de_tarea("ligera") == [
+        ("openrouter", "google/gemma-4-31b-it:free"),
+        ("openrouter", "z-ai/glm-5.2:free"),
+    ]

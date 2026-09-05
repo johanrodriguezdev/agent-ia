@@ -7,6 +7,11 @@ Reemplaza los tres motores de resolución divergentes que existían antes de est
 sola función, `resolve()`, que camina una lista fija de resolvers — mismo orden para
 cualquier canal (desktop, voz, Telegram, Discord, API futura).
 
+Esa lista es hoy `[pending_dialog, claude]`: el modelo lee primero y decide él qué
+herramienta usar. Antes había siete heurísticas por delante y cualquiera podía quedarse con
+el mensaje sin que el modelo llegara a verlo — ver el comentario de `RESOLVERS` para el
+caso que lo decidió y para dónde quedó cada una de las siete.
+
 Todo lo que puede ejecutar algo pasa, en última instancia, por exactamente dos puntos de
 gate: `router/dispatcher.py:dispatch()` y `agents/tool_registry.py:execute_tool()`, ambos
 llamando a `security_manager.require_confirmation()`. `routine`/`autopilot`/`capability`
@@ -34,9 +39,11 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class ResolutionResult:
     text: str                    # respuesta final para el usuario
-    matched_by: str              # "pending_dialog" | "routine" | "autopilot" | "learned"
-                                  # | "capability" | "task_tool" | "intent:<NOMBRE>"
-                                  # | "claude"
+    matched_by: str              # "pending_dialog" | "pending_dialog:cancel" | "claude"
+                                  # Tras la inversión solo quedan esos: lo que antes
+                                  # llegaba como "intent:<X>" o "task_tool" ahora llega
+                                  # como "claude", porque lo resolvió el modelo llamando
+                                  # a la herramienta correspondiente.
     channel: "ChannelType"
     denied: bool = False         # True si un resolver intentó y el gate denegó
     expects_reply: bool = False  # REQ-021: quedó una pregunta en el aire
@@ -63,8 +70,13 @@ def _denied_message(exc: ActionDenied) -> str:
 #  REQ-021 — diálogo pendiente (resolver en posición 0 de RESOLVERS)
 #
 #  Con un diálogo abierto, la frase entrante se lee como la RESPUESTA al dato que faltaba,
-#  no como un comando nuevo. Con el estado vacío este resolver retorna `None` en su primera
-#  línea, así que el orden de resolución de los otros 7 no cambia para nadie (CA-09).
+#  no como un comando nuevo. Con el estado vacío retorna `None` en su primera línea, así
+#  que en un turno normal no cuesta nada.
+#
+#  Es el ÚNICO resolver que quedó delante del modelo tras la inversión, y no por
+#  rendimiento: cuando el agente acaba de preguntar "¿a quién le envío el correo?", la
+#  respuesta "a Juan" es el dato que falta, no un mensaje nuevo. Mandarla al modelo
+#  rompería todos los diálogos de varios turnos.
 # ─────────────────────────────────────────────
 
 _MATCHED_BY_DIALOG = "pending_dialog"
@@ -284,6 +296,15 @@ def _append_pending_question(
     if dialog is None or not dialog.question:
         return result
 
+    # El turno que ABRE el diálogo ya no se distingue por su etiqueta: desde que el modelo
+    # lee primero, la pregunta puede venir de `task_create` llamada por él, y el resultado
+    # sale etiquetado "claude" como cualquier otro. Sin este chequeo la pregunta se colgaba
+    # de sí misma — "¿Qué desea que le recuerde? / Por cierto, ¿qué desea que le
+    # recuerde?". Se mira el TEXTO, que es lo que de verdad separa "esta respuesta ES la
+    # pregunta" de "esta respuesta es otra cosa y la pregunta sigue viva".
+    if dialog.question.strip() and dialog.question.strip() in result.text:
+        return replace(result, expects_reply=True)
+
     return replace(
         result,
         text=f"{result.text}\n\nPor cierto, {_as_inline_question(dialog.question)}",
@@ -443,26 +464,21 @@ def _try_task_tool(text: str, channel: "ChannelType", user_id: str) -> Optional[
             # `scan_task_slots()` corre fuera del gate a propósito: es una función pura (ni
             # ejecuta, ni persiste, ni consulta red), así que el gate sigue exactamente donde
             # estaba, dentro de `execute_tool()`.
+            # El chequeo de slots se mudo DENTRO de `task_create` (REQ-021/CA-01 vive
+            # ahora en `agents/tool_registry.py::_task_create_invoke`), para que valga
+            # tambien cuando quien llama es el modelo y no este resolver.
             from tasks.task_slots import scan_task_slots
 
-            scan = scan_task_slots(text)
-            if scan.missing:
-                from core.dialog_questions import ask_question
-
-                question = ask_question("task_create", scan.missing[0], scan.filled)
-                dialog_store.open(
-                    user_id, channel, action="task_create", slots=scan.filled,
-                    missing=scan.missing, question=question,
-                )
-                return ResolutionResult(
-                    text=question, matched_by=_MATCHED_BY_DIALOG_OPEN, channel=channel,
-                    expects_reply=True,
-                )
-
+            faltaba = bool(scan_task_slots(text).missing)
             result = execute_tool(
                 "task_create", {"text": text, "user_id": user_id, "channel": channel.value},
                 channel, user_id,
             )
+            if faltaba:
+                return ResolutionResult(
+                    text=result, matched_by=_MATCHED_BY_DIALOG_OPEN, channel=channel,
+                    expects_reply=True,
+                )
             return ResolutionResult(text=result, matched_by="task_tool", channel=channel)
 
         # REQ-017 (CA-01, CA-02, CA-05, CA-06 desambiguación) — evaluado ANTES de
@@ -650,20 +666,129 @@ def _try_claude(
     resolución (CA-03) es idéntico en los tres canales, solo el detalle de implementación
     de este último paso puede variar por canal, igual que ya variaba antes de este REQ.
     """
+    from ai.llm_provider import es_respuesta_de_fallo
+
     if claude_fn is not None:
         result = claude_fn(text)
+        if es_respuesta_de_fallo(result):
+            local = _resolver_sin_modelo(text, channel, user_id)
+            if local is not None:
+                return local
         return ResolutionResult(text=result, matched_by="claude", channel=channel)
 
     from core.reasoning_loop import run as reasoning_run
 
-    result = reasoning_run(text, channel, user_id)
-    return ResolutionResult(text=result, matched_by="claude", channel=channel)
+    estado: dict = {}
+    result = reasoning_run(text, channel, user_id, estado=estado)
+
+    if estado.get("sin_modelo"):
+        local = _resolver_sin_modelo(text, channel, user_id)
+        if local is not None:
+            return local
+
+    return ResolutionResult(
+        text=result, matched_by="claude", channel=channel,
+        denied=bool(estado.get("denied")),
+    )
 
 
+#: Lo que se antepone a una respuesta resuelta en local por falta de modelo. Corto a
+#: proposito: por voz se escucha entero, y lo importante es que el usuario sepa POR QUE la
+#: respuesta es mas seca de lo habitual, no recibir una disculpa larga.
+_AVISO_SIN_MODELO = "Sin conexión con el modelo, pero esto sí puedo hacerlo."
+
+
+def _resolver_sin_modelo(
+    text: str, channel: "ChannelType", user_id: str,
+) -> Optional[ResolutionResult]:
+    """Intenta resolver en LOCAL cuando no se pudo hablar con ningun proveedor.
+
+    Recorre los resolvers retirados en su orden de siempre. No reintroduce el problema que
+    la inversion vino a resolver, y la diferencia es toda de ORDEN: estas heuristicas ya no
+    pueden quedarse con un mensaje que el modelo habria contestado, porque solo corren
+    cuando el modelo NO contesto. Lo que antes era un filtro delante, ahora es una red
+    debajo.
+
+    Sin esto, quedarse sin internet dejaba al agente sin poder ni subir el volumen — una
+    orden que sabe ejecutar sola, sin consultarle nada a nadie. Contestar "no consigo
+    comunicarme con ningun proveedor" a "sube el volumen" es peor que intentarlo.
+
+    Return `None` si ninguno reconoce la frase: ahi la respuesta honesta es el fallo del
+    proveedor, no una accion inventada.
+    """
+    for nombre, fn in RESOLVERS_RETIRADOS:
+        abortar_si_cancelado(f"resolve sin modelo, antes de '{nombre}'")
+        try:
+            resultado = fn(text, channel, user_id)
+        except ActionDenied as e:
+            return ResolutionResult(
+                text=_denied_message(e), matched_by=f"{nombre}:sin_modelo",
+                channel=channel, denied=True,
+            )
+        except Exception as e:
+            # Un resolver roto no puede tumbar el turno: ya se venia de un fallo.
+            logger.warning(f"el resolver '{nombre}' falló en el camino sin modelo: {e}")
+            continue
+
+        if resultado is not None:
+            logger.info(f"sin modelo: '{nombre}' resolvió el turno en local")
+            return replace(
+                resultado,
+                text=f"{_AVISO_SIN_MODELO}\n\n{resultado.text}",
+                matched_by=f"{resultado.matched_by}:sin_modelo",
+            )
+    return None
+
+
+#: El modelo lee PRIMERO. Antes de él solo queda el diálogo pendiente.
+#:
+#: Hasta ahora había siete heurísticas por delante, y cada una podía quedarse con el
+#: mensaje sin que el modelo llegara a verlo nunca. El caso que lo decidió: un JSON de
+#: rangos de colores para ciclos de cosecha, pidiendo mejorar la paleta, se contestó con
+#: "0 x 12 = 0" — `classify_command()` lo leyó como CALCULATE y un extractor tomó los dos
+#: primeros números que encontró. No era un fallo del modelo: el modelo nunca vio el
+#: mensaje.
+#:
+#: Se midió con 20 pedidos de análisis reales (mejorar un JSON, resumir una reunión,
+#: comparar alternativas, revisar código). Antes de invertir, 5 de los 20 se resolvían sin
+#: llegar al modelo, y el peor no era el clasificador sino `_try_autopilot`, que disparaba
+#: por subcadena — "redacta", "crea un", "haz un"— sin ninguna medida de confianza:
+#: "haz un resumen de esta reunión" se iba al planificador de tareas.
+#:
+#: Ninguna capacidad se pierde, porque ninguna de las siete se borró: todas siguen
+#: alcanzables como herramientas, y ahora es el modelo el que elige cuál usar.
+#:
+#:     routine        -> `routine_run` / `routine_list`      (agents/user_defined_tools.py)
+#:     autopilot      -> `autopilot_run`                     (idem)
+#:     learned        -> `learned_command_run` / `_list`     (idem)
+#:     capability     -> `capability_run`, solo si hay capacidades declaradas (idem)
+#:     standing_intent-> `intent_create` / `intent_list` / `intent_cancel`
+#:     task_tool      -> `task_create` / `task_list` / `task_complete`
+#:     intent         -> `dispatcher`, y además un tool por cada intent de cada skill
+#:
+#: Además, `core/reasoning_loop.py::_bloque_de_lo_definido_por_el_usuario()` le nombra al
+#: modelo las rutinas y los comandos aprendidos que existan, para que "modo trabajo" se
+#: resuelva en la primera llamada y no gaste una vuelta en descubrirlos.
+#:
+#: COSTE, asumido a conciencia: una orden simple ("sube el volumen") pasa de resolverse en
+#: local en milisegundos a costar una llamada al modelo, y sin conexión el agente deja de
+#: poder ejecutarla. Se eligió igual, en todos los canales: una heurística que responde
+#: rápido lo que no le preguntaron es peor que una respuesta que tarda un segundo.
+#:
+#: `pending_dialog` es la ÚNICA excepción, y no por rendimiento: cuando el agente acaba de
+#: preguntar "¿a quién le envío el correo?", la respuesta "a Juan" es el dato que falta, no
+#: un mensaje nuevo. Mandarla al modelo rompería todos los diálogos de varios turnos. Con
+#: el estado de diálogo vacío retorna `None` en su primera línea, así que en un turno
+#: normal no cuesta nada.
 RESOLVERS = [
-    # REQ-021: PRIMERO. Con el estado de diálogo vacío retorna `None` en su primera línea,
-    # así que el orden relativo de los 7 resolvers de siempre no cambia (CA-09).
     ("pending_dialog", _try_pending_dialog),
+    ("claude", _try_claude),
+]
+
+#: Los resolvers que dejaron de estar en el camino automático. No se borran: siguen siendo
+#: el cuerpo de las herramientas de arriba, y `tests/test_resolution.py` verifica que cada
+#: uno tenga su tool, para que nadie los pierda de vista.
+RESOLVERS_RETIRADOS = [
     ("routine", _try_routine),
     ("autopilot", _try_autopilot),
     ("learned", _try_learned),
@@ -671,8 +796,31 @@ RESOLVERS = [
     ("task_tool", _try_task_tool),
     ("capability", _try_capability),
     ("intent", _try_intent),
-    ("claude", _try_claude),
 ]
+
+
+def _marcar_si_quedo_pregunta(
+    result: ResolutionResult, user_id: str, channel: "ChannelType",
+) -> ResolutionResult:
+    """Marca `expects_reply` si el turno dejo un dialogo abierto.
+
+    Antes lo ponia el resolver que abria el dialogo, porque era el mismo que respondia.
+    Ahora el dialogo lo puede abrir la herramienta `task_create` desde dentro del bucle del
+    modelo, varias vueltas antes de la respuesta final: quien contesta ya no es quien
+    pregunto. Sin esto, la voz cerraria el microfono justo despues de preguntar "para
+    cuando?" y el usuario hablaria solo.
+    """
+    if result.expects_reply or result.denied:
+        return result
+    try:
+        from core.dialog_state import dialog_store
+
+        if dialog_store.get(user_id, channel) is None:
+            return result
+    except Exception as e:
+        logger.debug(f"No se pudo consultar el dialogo pendiente: {e}")
+        return result
+    return replace(result, expects_reply=True)
 
 
 def resolve(
@@ -723,6 +871,7 @@ def resolve(
             # resolver concreto. Va DESPUÉS de la repregunta para que el recordatorio quede
             # al final, que es donde se lee.
             result = _append_standing_intents(result, text, user_id)
+            result = _marcar_si_quedo_pregunta(result, user_id, resolved_channel)
             logger.info(f"resolve() resuelto por '{result.matched_by}'")
             return result
 

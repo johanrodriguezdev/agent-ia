@@ -13,7 +13,7 @@ from typing import Optional
 from agents.tool_registry import execute_tool, get_tool, list_tool_names
 from core import streaming
 from core.cancelacion import abortar_si_cancelado
-from ai.llm_provider import LLMToolResponse, generate_response
+from ai.llm_provider import LLMToolResponse, es_respuesta_de_fallo, generate_response
 from config_manager import get_agent_name, get_display_name, get_user_title
 from core.agent_context import agent_context_manager
 from core.security_manager import ActionDenied, security_manager
@@ -42,6 +42,40 @@ def _addressing_clause() -> str:
     return f", {', '.join(parts)}" if parts else ""
 
 
+def _bloque_de_lo_definido_por_el_usuario() -> str:
+    """Rutinas y comandos aprendidos, nombrados en el prompt de sistema.
+
+    Sin esto, el modelo tendria que adivinar que existen o gastar una vuelta entera en
+    `routine_list`/`learned_command_list` antes de poder usarlos. Nombrarlos cuesta unas
+    pocas decenas de tokens y hace que "modo trabajo" se resuelva en la PRIMERA llamada.
+
+    Se arma en cada turno, no una vez al importar: una rutina creada hace un minuto tiene
+    que estar disponible en el turno siguiente, sin reiniciar.
+    """
+    partes = []
+    try:
+        from learning.routines_engine import list_routine_names
+
+        nombres = [n for n in list_routine_names() if n][:20]
+        if nombres:
+            partes.append("Rutinas que el usuario definio: " + ", ".join(nombres)
+                          + ". Para ejecutar una, usa `routine_run`.")
+    except Exception as e:
+        logger.debug(f"No se pudieron leer las rutinas para el prompt: {e}")
+
+    try:
+        from learning.command_learning import get_custom_commands
+
+        frases = [f for f in get_custom_commands() if f][:20]
+        if frases:
+            partes.append("Comandos que el usuario enseño: " + ", ".join(frases)
+                          + ". Para ejecutar uno, usa `learned_command_run`.")
+    except Exception as e:
+        logger.debug(f"No se pudieron leer los comandos aprendidos para el prompt: {e}")
+
+    return ("\n\n" + "\n".join(partes)) if partes else ""
+
+
 def _build_system_prompt() -> str:
     """Arma el prompt de sistema con el nombre configurado del agente.
 
@@ -64,7 +98,7 @@ def _build_system_prompt() -> str:
         "responder directamente con lo que ya sabes, hazlo sin llamar a ninguna "
         "herramienta. Si el resultado de una herramienta indica que la acción fue "
         "denegada, no la reintentes ni intentes una alternativa — infórmalo y detente."
-    )
+    ) + _bloque_de_lo_definido_por_el_usuario()
 
     if identity_block:
         return (
@@ -163,8 +197,17 @@ def _append_history_lines(lines: list[str], history: list[dict]) -> None:
     )
 
 
-def run(task: str, channel, user_id: str = "default", agent_name: str = "reasoning_loop") -> str:
+def run(task: str, channel, user_id: str = "default", agent_name: str = "reasoning_loop",
+        estado: Optional[dict] = None) -> str:
     """Punto de entrada del bucle de razonamiento.
+
+    `estado`, si se pasa, es un dict que el bucle RELLENA: `{"denied": True}` cuando corto
+    por una accion denegada, y `{"sin_modelo": True}` cuando no consiguio hablar con ningun
+    proveedor. Lo que retorna sigue siendo el texto de siempre
+    (CA-08), asi que ningun caller existente cambia; existe porque desde que el modelo lee
+    primero, una denegacion llega por aca y no por el resolver que la ejecutaba, y
+    `core/resolution.py` necesita saberlo para no colgarle recordatorios ni repreguntas a
+    un mensaje de denegacion.
 
     INVARIANTE DE SEGURIDAD: `channel`/`user_id` son SIEMPRE los que pasa el caller
     confiable (nunca argumentos que el LLM decidió) — mismo invariante que
@@ -196,7 +239,12 @@ def run(task: str, channel, user_id: str = "default", agent_name: str = "reasoni
         # tiene que aparecer en la burbuja del chat: quedan fuera del bloque.
         with streaming.permitido():
             response = generate_response(
-                [{"role": "user", "content": prompt}], _build_system_prompt(), tools=tools
+                [{"role": "user", "content": prompt}], _build_system_prompt(), tools=tools,
+                # `tarea="razonamiento"`: es LA respuesta al usuario, con herramientas y
+                # varias vueltas. Quien quiera mandarla a un modelo distinto del general
+                # —uno gratuito con tool-calling, por ejemplo— lo configura en
+                # `task_providers` sin tocar el resto del sistema.
+                tarea="razonamiento",
             )
 
         if not isinstance(response, LLMToolResponse):
@@ -219,6 +267,11 @@ def run(task: str, channel, user_id: str = "default", agent_name: str = "reasoni
         params = dict(call.arguments or {})
         params["channel"] = resolved_channel.value
         params["user_id"] = user_id
+        # Lo que dijo el humano, TAL CUAL. Igual que `channel` y `user_id`, lo pone el
+        # caller y no el modelo: es un dato de la invocacion, no un argumento negociable.
+        # `dispatcher` lo usa como segundo intento cuando el modelo reformula la orden y la
+        # reformulacion no la reconoce el clasificador — ver `router/dispatcher.py`.
+        params["texto_original"] = task
 
         try:
             result = execute_tool(call.name, params, resolved_channel, user_id)
@@ -226,6 +279,8 @@ def run(task: str, channel, user_id: str = "default", agent_name: str = "reasoni
             # CA-08: corta de inmediato. No reintenta, no prueba otra tool, no llama de
             # nuevo al LLM.
             final_text = f"⛔ No puedo ejecutar esa acción{vocative()}: {e.reason or 'denegada'}."
+            if estado is not None:
+                estado["denied"] = True
             break
         except Exception as e:
             # CA-13: tool call malformado / invoke interno falla — no crashea, se informa
@@ -241,6 +296,12 @@ def run(task: str, channel, user_id: str = "default", agent_name: str = "reasoni
             f"No pude completar la tarea en el número de intentos disponibles{vocative()}. "
             "¿Quiere que lo intente de otra forma?"
         )
+
+    # Sin proveedor no hubo razonamiento, hubo un error de red o de configuración. Se
+    # avisa para que `core/resolution.py` pueda intentar el camino local: sin conexión,
+    # "sube el volumen" tiene que seguir funcionando.
+    if estado is not None and es_respuesta_de_fallo(final_text):
+        estado["sin_modelo"] = True
 
     # CA-10: un solo par user/assistant por invocación completa del loop, sin importar
     # cuántas iteraciones internas hubo.

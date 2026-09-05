@@ -74,7 +74,9 @@ class CodeExecutionSkill(BaseSkill):
         for attempt in range(max_retries):
             try:
                 # 1. Le pedimos a la IA que escriba o corrija el código
-                response = generate_response(messages, system_prompt)
+                # `tarea="codigo"`: escribir un script es lo que mejor distingue a un
+                # modelo de otro, y hay gratuitos especializados que lo hacen bien.
+                response = generate_response(messages, system_prompt, tarea="codigo")
                 
                 code_match = re.search(r'```python\s*(.*?)\s*```', response, re.DOTALL)
                 if code_match:
@@ -121,8 +123,10 @@ class CodeExecutionSkill(BaseSkill):
                 finally:
                     try:
                         os.unlink(tmp_path)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        # Esperable (el archivo puede seguir abierto), pero no mudo: si los
+                        # temporales empiezan a acumularse, este es el unico rastro.
+                        logger.debug(f"no se pudo borrar el temporal: {e}")
                         
             except Exception as api_err:
                 return f"Hubo un problema de conexión al intentar generar el código: {api_err}"

@@ -129,3 +129,66 @@ def test_de_deriva_conteo_intents_vs_tools_migrados():
 
     assert expected_intents <= registered_names, expected_intents - registered_names
     assert len(skill_manager.get_agent_tools()) == len(expected_intents)
+
+
+# ─────────────────────────────────────────────
+#  El modelo reformula; el clasificador no lo perdona
+# ─────────────────────────────────────────────
+
+def test_el_despachador_reintenta_con_las_palabras_del_usuario(monkeypatch):
+    """El usuario dijo "Abre la calculadora" y al despachador le llegó "abrir la
+    calculadora de windows": el modelo pasa la orden a infinitivo, y el clasificador está
+    entrenado con imperativos ("abre la calculadora" puntúa +0.66 con margen 1.10; "abrir
+    la calculadora", -0.27). La orden no se reconocía, el modelo probaba una herramienta
+    más pesada, y abrir la calculadora acababa pidiendo confirmación
+    (logs/orion.log, 2026-09-04 22:15).
+    """
+    import router.dispatcher as dispatcher_module
+
+    recibido = []
+    monkeypatch.setattr(
+        dispatcher_module, "dispatch",
+        lambda intent, params: recibido.append((str(intent), dict(params))) or "ok",
+    )
+
+    dispatcher_module.dispatch_as_tool({
+        "task": "abrir la calculadora de windows",
+        "texto_original": "Abre la calculadora",
+        "channel": "desktop",
+    })
+
+    intent, params = recibido[-1]
+    assert intent == "OPEN_APP", recibido
+    assert params.get("app_name") == "calculadora", params
+
+
+def test_lo_que_el_modelo_pide_manda_si_se_reconoce(monkeypatch):
+    """El reintento es una red, no un secuestro: si lo que pidió el modelo se entiende, se
+    ejecuta eso y no lo que el usuario dijo hace tres turnos."""
+    import router.dispatcher as dispatcher_module
+
+    recibido = []
+    monkeypatch.setattr(
+        dispatcher_module, "dispatch",
+        lambda intent, params: recibido.append((str(intent), dict(params))) or "ok",
+    )
+
+    dispatcher_module.dispatch_as_tool({
+        "task": "sube el volumen",
+        "texto_original": "Abre la calculadora",
+        "channel": "desktop",
+    })
+
+    assert recibido[-1][0] == "SYS_VOL_UP", recibido
+
+
+def test_el_texto_original_lo_pone_el_bucle_no_el_modelo():
+    """Mismo invariante que `channel` y `user_id`: es un dato de la invocación, y el modelo
+    no puede proponerlo. Si pudiera, podría hacer pasar por "lo que dijo el usuario" algo
+    que el usuario nunca dijo."""
+    import inspect
+
+    from core import reasoning_loop
+
+    fuente = inspect.getsource(reasoning_loop.run)
+    assert 'params["texto_original"] = task' in fuente

@@ -214,3 +214,110 @@
   opacity: 0.55;
   cursor: default;
 }
+
+/* -------------------------------------------------------------- seccion "Modelos" */
+
+/* Una fila por tarea: la descripcion arriba, la cadena de modelos debajo. En una sola
+   linea no entra —los IDs de OpenRouter son largos— y partirlos con puntos suspensivos
+   deja al usuario eligiendo a ciegas. */
+.settings-row-block {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.settings-row-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.settings-help {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin-bottom: 12px;
+}
+
+.model-chain {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.model-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 4px 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background-color: var(--bg-primary);
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+/* El orden importa y se ve: es el que se prueba primero cuando el anterior se queda sin
+   cuota. */
+.model-chip-orden {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background-color: var(--bg-hover);
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.model-chip-gratis {
+  border-color: var(--success);
+}
+
+.model-chip-gratis .model-chip-orden {
+  background-color: var(--success);
+  color: var(--bg-primary);
+}
+
+.model-chip-quitar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 50%;
+}
+
+.model-chip-quitar:hover {
+  background-color: var(--danger);
+  color: #ffffff;
+}
+
+.model-add {
+  border: 1px dashed var(--border);
+  background-color: transparent;
+  color: var(--text-secondary);
+  border-radius: var(--radius-pill);
+  padding: 4px 10px;
+  font-size: 12px;
+  max-width: 220px;
+}
+
+.model-add:hover {
+  border-color: var(--text-accent);
+  color: var(--text-primary);
+}
+
+
+/* Aviso dentro de una tarjeta: falta la credencial del proveedor que se acaba de elegir.
+   Borde y no fondo lleno: es informacion util, no un error que haya que resolver ya. */
+.settings-help-warn {
+  border-left: 2px solid var(--warning);
+  padding-left: 10px;
+  color: var(--text-primary);
+}

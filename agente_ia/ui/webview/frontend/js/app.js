@@ -20,7 +20,7 @@ import {
   onProfileLoaded, onProfileSaved,
   onTerminalOutput, onTerminalState, onTerminalTabs,
   onNoticeShown, onMessageChunk, onConversationSearchResults, onModelsLoaded,
-  onProjectItemsLoaded, onAssignableItemsLoaded, onDragOverChanged,
+  onProjectItemsLoaded, onAssignableItemsLoaded, onDragOverChanged, onTaskModelsLoaded,
   requestModels, newConversation,
 } from "./bridge_client.js";
 import {
@@ -53,6 +53,7 @@ import {
   openSettingsPanel, renderSecurityOverrides, handleSecurityOverrideSaved,
   handleSecurityOverrideRejected, renderProfile, handleProfileSaved,
   renderEmailCapabilities, handleEmailCapabilitySaved, handleEmailCapabilityRejected,
+  renderTaskModels,
 } from "./settings_panel.js";
 
 const GREETINGS_BY_HOUR = [
@@ -145,6 +146,7 @@ async function bootstrap() {
 
   onConversationSearchResults((json) => renderSearchResults(JSON.parse(json)));
   onModelsLoaded((json) => renderModels(JSON.parse(json)));
+  onTaskModelsLoaded((json) => renderTaskModels(JSON.parse(json)));
   onDragOverChanged((activo) => {
     const capa = document.getElementById("drop-overlay");
     if (capa) capa.hidden = !activo;

@@ -11,13 +11,17 @@ Cada usuario tiene:
 Esto es lo que separa un proyecto personal de un producto real.
 """
 
-import os
-import json
-import sqlite3
 import datetime
+import json
+import logging
+import os
+import sqlite3
 from pathlib import Path
 from typing import Optional
+
 from core.address import vocative, vocative_start
+
+logger = logging.getLogger(__name__)
 
 # Directorio base donde se guardan los datos de cada usuario
 USERS_DIR = Path(__file__).parent.parent / "users_data"
@@ -117,8 +121,8 @@ class UserSession:
             results = memory.search_keyword(query, user_id=self.user_id, limit=1)
             if results:
                 return results[0].text
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"no se pudo buscar en la memoria del usuario: {e}")
         return ""
 
     def get_recent_memories(self, limit: int = 5) -> list[dict]:
@@ -163,8 +167,11 @@ class UserSession:
             if self.prefs_file.exists():
                 prefs = json.loads(self.prefs_file.read_text(encoding="utf-8"))
                 return prefs.get(key, default)
-        except Exception:
-            pass
+        except Exception as e:
+            # Un archivo de preferencias corrupto devolvia el default PARA SIEMPRE y en
+            # silencio: el usuario cambia una preferencia, no pasa nada, y no hay manera
+            # de enterarse de que el archivo esta roto.
+            logger.warning(f"no se pudo leer '{key}' de las preferencias: {e}")
         return default
 
     def set_preference(self, key: str, value):

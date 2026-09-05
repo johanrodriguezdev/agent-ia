@@ -6,6 +6,41 @@ from nlp.parser import clean_text, normalize_numbers, extract_numbers
 # Instancia global del sistema de IA predictivo
 ai_system = IntentClassifierSystem()
 
+#: Operadores tal como sobreviven a `clean_text()`, que borra TODA la puntuacion:
+#: "5 * 3" llega como "5 3" y "0 - 12 dias" como "0 12 dias". Por eso solo se buscan las
+#: palabras — los `\\*`, `\\+` y `/` que tenian los patrones viejos no podian coincidir
+#: nunca. Las alternativas van de la mas larga a la mas corta: "dividido entre" tiene que
+#: probarse antes que "entre", y "multiplicado por" antes que "por".
+_OPERADORES_CALCULO = (
+    ("divide",   r"dividido entre|dividida entre|dividido por|divididos entre|entre"),
+    ("multiply", r"multiplicado por|multiplicada por|por|x"),
+    ("add",      r"sumado a|mas"),
+    ("subtract", r"restado de|menos"),
+)
+
+
+def _extraer_calculo(clean: str) -> dict:
+    """Return `{operation, a, b}` si el texto tiene una operacion de verdad, o `{}`.
+
+    Se busca la forma `numero OPERADOR numero`, que es como se dice una cuenta en voz
+    alta, en vez de exigir que el verbo venga primero. Los patrones viejos pedian
+    `(divid).*?numero.*?entre.*?numero`, asi que "cuanto es 100 dividido entre 4" —con el
+    numero ANTES del verbo— no coincidia y caia en el fallback, que respondia 400.
+    """
+    for operacion, operadores in _OPERADORES_CALCULO:
+        m = re.search(rf"([\d.,]+)\s+(?:{operadores})\s+([\d.,]+)", clean)
+        if m:
+            try:
+                return {
+                    "operation": operacion,
+                    "a": float(m.group(1).replace(",", ".")),
+                    "b": float(m.group(2).replace(",", ".")),
+                }
+            except ValueError:
+                continue    # "1.2.3" y companiia: no es un numero, se prueba el siguiente
+    return {}
+
+
 def classify_command(text: str) -> tuple[Intent, dict]:
     """
     Motor de IA para interpretar comandos.
@@ -119,37 +154,19 @@ def classify_command(text: str) -> tuple[Intent, dict]:
             params["filename"] = "documento_nuevo.txt"
 
     elif intent == Intent.CALCULATE:
-        # Extraer operandos y operación: "multiplica 40 por 60", "suma 5 más 3"
-        m = re.search(r'(multiplic|mul).*?([\d,.]+).*?(?:por|x|\*).*?([\d,.]+)', clean)
-        if m:
-            params["operation"] = "multiply"
-            params["a"] = float(m.group(2).replace(',', '.'))
-            params["b"] = float(m.group(3).replace(',', '.'))
-        else:
-            m = re.search(r'(sum|add).*?([\d,.]+).*?(?:mas|más|\+).*?([\d,.]+)', clean)
-            if m:
-                params["operation"] = "add"
-                params["a"] = float(m.group(2).replace(',', '.'))
-                params["b"] = float(m.group(3).replace(',', '.'))
-            else:
-                m = re.search(r'(rest|subtract).*?([\d,.]+).*?(?:menos|-).*?([\d,.]+)', clean)
-                if m:
-                    params["operation"] = "subtract"
-                    params["a"] = float(m.group(2).replace(',', '.'))
-                    params["b"] = float(m.group(3).replace(',', '.'))
-                else:
-                    m = re.search(r'(divid).*?([\d,.]+).*?(?:entre|/).*?([\d,.]+)', clean)
-                    if m:
-                        params["operation"] = "divide"
-                        params["a"] = float(m.group(2).replace(',', '.'))
-                        params["b"] = float(m.group(3).replace(',', '.'))
-                    else:
-                        # Fallback: buscar dos números y asumir multiplicación
-                        nums = re.findall(r'[\d,.]+', clean)
-                        if len(nums) >= 2:
-                            params["operation"] = "multiply"
-                            params["a"] = float(nums[0].replace(',', '.'))
-                            params["b"] = float(nums[1].replace(',', '.'))
+        calculo = _extraer_calculo(clean)
+        if not calculo:
+            # Ninguna operacion reconocible: no hay cuenta que hacer. UNKNOWN hace que
+            # `core/resolution.py::_try_intent()` deje pasar la frase al LLM, el unico que
+            # puede decidir si eso era una cuenta o una consulta.
+            #
+            # Antes habia aca un fallback que tomaba dos numeros CUALESQUIERA del texto y
+            # asumia una multiplicacion. Un JSON de colores para ciclos de cosecha
+            # ("ini": 0, "fin": 12, ...) se contestaba con "0 x 12 = 0": inventaba la
+            # operacion, inventaba los operandos, y el mensaje nunca llegaba al modelo.
+            # Adivinar era peor que no entender.
+            return Intent.UNKNOWN, {}
+        params.update(calculo)
 
     elif intent == Intent.SEARCH_FILES:
         # "busca archivos llamados reporte en documentos"

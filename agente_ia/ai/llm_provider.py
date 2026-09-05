@@ -4,8 +4,7 @@ import json
 import logging
 from collections import OrderedDict
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Optional
+from typing import List, Optional, Tuple
 
 from ai import provider_health
 from core import streaming
@@ -69,8 +68,8 @@ def _uncached_call(prov_name, messages, system_prompt, image_path, model_name, t
 
 def get_provider_config():
     try:
-        config_path = Path(__file__).parent.parent / "config.json"
-        with open(config_path, "r", encoding="utf-8") as f:
+        import config_manager
+        with open(config_manager.CONFIG_FILE, "r", encoding="utf-8") as f:
             config = json.load(f)
         
         provider = config.get("ai_provider", "anthropic").lower()
@@ -86,47 +85,91 @@ def get_provider_config():
 def get_proveedor_de_tarea(tarea):
     """Return `(proveedor, modelo)` para `tarea`, o `("", "")` si no hay mapeo.
 
-    `task_providers` de config.json acepta dos formas por entrada::
+    Envoltorio de `destinos_de_tarea()` que devuelve solo el primero. Sigue existiendo
+    porque es la forma en que se lee "a donde va esta tarea" cuando no interesa la
+    rotacion: la config, las formas aceptadas y el fail-safe son los de alli.
+    """
+    destinos = destinos_de_tarea(tarea)
+    return destinos[0] if destinos else ("", "")
 
-        "task_providers": {
-            "ligera": "ollama",
-            "razonamiento": {"proveedor": "openrouter", "modelo": "qwen/qwen3-32b:free"}
-        }
 
-    La forma con diccionario hace falta sobre todo para OpenRouter, donde lo que decide si
-    una llamada es gratis no es el proveedor sino el modelo (el sufijo `:free`).
+def destinos_de_tarea(tarea) -> List[Tuple[str, str]]:
+    """Return TODOS los `(proveedor, modelo)` configurados para `tarea`, en orden.
 
-    Cualquier problema —archivo ilegible, clave ausente, valor con forma rara— devuelve
-    `("", "")`, es decir "usá el proveedor de siempre". Nunca lanza: enrutar mal una tarea
-    interna no puede tumbar la conversación.
+    Es la version en plural de `get_proveedor_de_tarea()`, y existe por los catalogos
+    gratuitos: en OpenRouter conviene tener varios modelos para la misma tarea porque se
+    quedan sin cuota todo el tiempo. Con una lista, cuando el primero contesta 429 se pasa
+    al siguiente en vez de abandonar la tarea o irse al proveedor de pago.
+
+    Formas aceptadas en `task_providers` (todas conviven)::
+
+        "ligera": "ollama"
+        "resumen": {"proveedor": "openrouter", "modelo": "google/gemma-4-31b-it:free"}
+        "codigo":  {"proveedor": "openrouter", "modelos": ["a:free", "b:free"]}
+        "razonamiento": [
+            {"proveedor": "openrouter", "modelo": "z-ai/glm-5.2:free"},
+            {"proveedor": "deepseek",   "modelo": "deepseek-chat"}
+        ]
+
+    Cualquier problema —archivo ilegible, forma rara— devuelve lista vacia, es decir "usa
+    el proveedor de siempre". Nunca lanza: enrutar mal una tarea interna no puede tumbar
+    la conversacion.
     """
     if not tarea or tarea == "general":
-        return "", ""
+        return []
     try:
-        config_path = Path(__file__).parent.parent / "config.json"
-        with open(config_path, "r", encoding="utf-8") as f:
+        # La ruta la resuelve `config_manager`, la misma que usa la pantalla de
+        # configuracion: si la pantalla escribe en un archivo y esto lee de otro, lo que
+        # el humano elige no tiene efecto. Se lee a mano y NO con `load_config()` porque
+        # esa funcion reescribe config.json con los valores por defecto cuando no puede
+        # parsearlo — consultar el modelo de una tarea no puede borrar la configuracion.
+        import config_manager
+        with open(config_manager.CONFIG_FILE, "r", encoding="utf-8") as f:
             mapeo = json.load(f).get("task_providers", {})
     except Exception as e:
         logger.debug(f"No se pudo leer task_providers de config.json: {e}")
-        return "", ""
-
+        return []
     if not isinstance(mapeo, dict):
-        logger.warning("'task_providers' de config.json no es un objeto JSON — se ignora")
-        return "", ""
+        return []
 
     entrada = mapeo.get(tarea)
-    if isinstance(entrada, str):
-        return entrada.strip().lower(), ""
-    if isinstance(entrada, dict):
-        # Se aceptan las claves en español y en inglés: el proyecto mezcla los dos idiomas
-        # y no vale la pena que una tarea se caiga por haber escrito "provider".
-        proveedor = entrada.get("proveedor") or entrada.get("provider") or ""
-        modelo = entrada.get("modelo") or entrada.get("model") or ""
-        if isinstance(proveedor, str) and isinstance(modelo, str):
-            return proveedor.strip().lower(), modelo.strip()
-    if entrada is not None:
-        logger.warning(f"task_providers['{tarea}'] tiene forma inválida, se ignora: {entrada!r}")
-    return "", ""
+    if entrada is None:
+        return []
+
+    destinos: List[Tuple[str, str]] = []
+    for opcion in (entrada if isinstance(entrada, list) else [entrada]):
+        destinos.extend(_leer_opcion_de_tarea(tarea, opcion))
+
+    # Sin duplicados y conservando el orden: repetir un destino solo gasta su timeout dos
+    # veces cuando esta caido.
+    vistos, unicos = set(), []
+    for destino in destinos:
+        if destino not in vistos:
+            vistos.add(destino)
+            unicos.append(destino)
+    return unicos
+
+
+def _leer_opcion_de_tarea(tarea, opcion) -> List[Tuple[str, str]]:
+    """Convierte UNA entrada de `task_providers` en destinos. Nunca lanza."""
+    if isinstance(opcion, str):
+        proveedor = opcion.strip().lower()
+        return [(proveedor, "")] if proveedor else []
+
+    if isinstance(opcion, dict):
+        proveedor = str(opcion.get("proveedor") or opcion.get("provider") or "").strip().lower()
+        if not proveedor:
+            logger.warning(f"task_providers['{tarea}']: una opcion sin proveedor, se ignora")
+            return []
+        modelos = opcion.get("modelos") or opcion.get("models")
+        if isinstance(modelos, list):
+            return [(proveedor, str(m).strip()) for m in modelos if str(m).strip()]
+        modelo = opcion.get("modelo") or opcion.get("model") or ""
+        return [(proveedor, str(modelo).strip())]
+
+    logger.warning(f"task_providers['{tarea}'] tiene una opcion invalida, se ignora: {opcion!r}")
+    return []
+
 
 #: Modelo por defecto de cada proveedor de respaldo. Sin esto se le pedía al respaldo el
 #: modelo configurado para el principal — "deepseek-chat" no existe en Ollama, así que el
@@ -144,10 +187,55 @@ _MODELO_POR_PROVEEDOR = {
     "openrouter": "meta-llama/llama-3.3-70b-instruct:free",
 }
 
+#: Proveedores donde la cuota y el limite de tasa son POR MODELO, no por cuenta. En
+#: OpenRouter cada modelo gratuito tiene su propio cupo: que uno conteste 429 no dice nada
+#: de los otros veinte, y apartar el proveedor entero dejaria fuera a todos los que
+#: seguian funcionando. En DeepSeek, Anthropic u OpenAI es al reves — la cuota es de la
+#: cuenta, asi que apartar solo un modelo haria que el siguiente mensaje vuelva a chocar
+#: contra la misma pared. Ollama queda fuera a proposito: es local y no tiene cuota, asi
+#: que distinguir por modelo solo agregaria una clave mas sin ganar nada.
+_PROVEEDORES_POR_MODELO = ("openrouter",)
+
+
+def _modelo_para_cooldown(proveedor: str, modelo: str) -> str:
+    """Return el modelo con el que apartar a un destino, o "" para apartar al proveedor."""
+    return modelo if proveedor in _PROVEEDORES_POR_MODELO else ""
+
+
 #: Quién soporta tool-calling nativo (REQ-007). Estaba escrito a mano en `generate_response`
 #: y otra vez en `_intentar_respaldos`: agregar un proveedor y olvidar una de las dos copias
 #: dejaba al respaldo sin herramientas justo cuando más falta hacen. Una sola fuente.
 _PROVEEDORES_CON_TOOLS = ("anthropic", "deepseek", "openai", "openrouter")
+
+
+def _destinos_iniciales(tarea, provider, model_name, vision_provider, image_path):
+    """Return los `(proveedor, modelo)` con los que arrancar, en orden de preferencia.
+
+    Uno solo en el caso normal —el proveedor configurado—; varios cuando la tarea tiene
+    una lista en `task_providers`, que es lo que permite rotar entre modelos gratuitos.
+    """
+    destinos = []
+    for prov_tarea, modelo_tarea in destinos_de_tarea(tarea):
+        # Sin modelo explicito en la config, el del proveedor. Cambiar de proveedor sin
+        # cambiar de modelo es el error que este archivo ya cometio dos veces.
+        destinos.append((prov_tarea, modelo_tarea or _MODELO_POR_PROVEEDOR.get(prov_tarea, "")))
+
+    if destinos:
+        logger.debug(f"Tarea '{tarea}' enrutada a {destinos} en vez de '{provider}'")
+    else:
+        destinos = [(provider, model_name)]
+
+    # La vision pisa al enrutado por tarea a proposito: con una imagen de por medio, un
+    # modelo de texto no sirve por barato que sea. Y con el proveedor cambia el modelo:
+    # pedirle "deepseek-chat" a Gemini falla igual que pedirle "gemini-1.5-flash" a
+    # DeepSeek.
+    if image_path and os.path.exists(image_path) and vision_provider:
+        activo, modelo = destinos[0]
+        if vision_provider != activo:
+            modelo = _MODELO_POR_PROVEEDOR.get(vision_provider, "")
+        destinos = [(vision_provider, modelo)]
+
+    return destinos
 
 
 def generate_response(messages, system_prompt, image_path=None, tools=None, tarea="general"):
@@ -164,84 +252,85 @@ def generate_response(messages, system_prompt, image_path=None, tools=None, tare
     toda tarea usa `ai_provider` y el comportamiento es exactamente el de antes.
     """
     provider, vision_provider, fallback_provider, model_name = get_provider_config()
+    destinos = _destinos_iniciales(tarea, provider, model_name, vision_provider, image_path)
 
-    active_provider = provider
-    proveedor_tarea, modelo_tarea = get_proveedor_de_tarea(tarea)
-    if proveedor_tarea:
-        logger.debug(f"Tarea '{tarea}' enrutada a '{proveedor_tarea}' en vez de '{provider}'")
-        active_provider = proveedor_tarea
-        # Sin modelo explícito en la config, el del proveedor. Cambiar de proveedor sin
-        # cambiar de modelo es el error que este archivo ya cometió dos veces.
-        model_name = modelo_tarea or _MODELO_POR_PROVEEDOR.get(proveedor_tarea, "")
-
-    # La visión pisa al enrutado por tarea a propósito: con una imagen de por medio, un
-    # modelo de texto no sirve por barato que sea.
-    if image_path and os.path.exists(image_path):
-        if vision_provider:
-            # Y con el proveedor cambia el modelo. `model_name` es el configurado para el
-            # principal —"deepseek-chat"—, y pedírselo a Gemini falla igual que pedirle
-            # "gemini-1.5-flash" a DeepSeek. Es el mismo descuido que tenía la cadena de
-            # respaldo: cambiar de proveedor sin cambiar de modelo garantiza el error.
-            # Se compara contra el proveedor que `model_name` tiene AHORA (que puede venir
-            # del enrutado por tarea, no de `ai_provider`), no contra el de la config.
-            if vision_provider != active_provider:
-                model_name = _MODELO_POR_PROVEEDOR.get(vision_provider, "")
-            active_provider = vision_provider
-
-    # Cooldown (`ai/provider_health.py`): empezar por un proveedor que acaba de quedarse
-    # sin cuota cuesta su timeout entero antes de caer al respaldo — y lo cuesta en CADA
-    # mensaje mientras la cuota no se reponga. Se arranca por uno disponible; si ninguno lo
-    # está, se prueba igual en el orden de siempre (el cooldown nunca deja al agente mudo).
-    preferido = provider_health.ordenar_por_disponibilidad(
-        [active_provider] + _cadena_de_respaldo(active_provider, fallback_provider)
-    )[0]
-    if preferido != active_provider:
-        logger.info(
-            f"'{active_provider}' en cooldown "
-            f"({provider_health.segundos_restantes(active_provider):.0f}s restantes); "
-            f"se empieza por '{preferido}'"
-        )
-        # Cambiar de proveedor sin cambiar de modelo garantiza el error: misma lección que
-        # la cadena de respaldo y el proveedor de visión, acá arriba.
-        model_name = _MODELO_POR_PROVEEDOR.get(preferido, "")
-        active_provider = preferido
-
-    tools_supported = active_provider in _PROVEEDORES_CON_TOOLS
-    effective_tools = tools if (tools and tools_supported) else None
-
-    try:
-        if effective_tools:
-            # CA-09: nunca se cachea una llamada con tools — bypass total de
-            # _cached_call()/_response_cache en vez de incorporar un hash del schema de
-            # tools a la cache key (ver desarrollo-log-007.md para la justificación).
-            response = _uncached_call(
-                active_provider, messages, system_prompt, image_path, model_name,
-                tools=effective_tools,
+    if len(destinos) == 1:
+        # Un solo destino: el camino de siempre. Cooldown (`ai/provider_health.py`) —
+        # empezar por un proveedor que acaba de quedarse sin cuota cuesta su timeout entero
+        # antes de caer al respaldo, y lo cuesta en CADA mensaje mientras no se reponga. Se
+        # arranca por uno disponible; si ninguno lo esta, se prueba igual en el orden de
+        # siempre (el cooldown nunca deja al agente mudo).
+        activo = destinos[0][0]
+        preferido = provider_health.ordenar_por_disponibilidad(
+            [activo] + _cadena_de_respaldo(activo, fallback_provider)
+        )[0]
+        if preferido != activo:
+            logger.info(
+                f"'{activo}' en cooldown "
+                f"({provider_health.segundos_restantes(activo):.0f}s restantes); "
+                f"se empieza por '{preferido}'"
             )
-        else:
-            response = _cached_call(active_provider, messages, system_prompt, image_path, model_name)
-    except Exception as e:
-        provider_health.registrar_fallo(active_provider, e)
-        return _intentar_respaldos(
-            active_provider, e, messages, system_prompt, image_path, model_name,
-            effective_tools, fallback_provider,
-        )
+            # Cambiar de proveedor sin cambiar de modelo garantiza el error: misma leccion
+            # que la cadena de respaldo y el proveedor de vision.
+            destinos = [(preferido, _MODELO_POR_PROVEEDOR.get(preferido, ""))]
+    else:
+        # Varios destinos para la misma tarea: se prueban en orden de disponibilidad. Esta
+        # es la rotacion entre modelos gratuitos — el que acaba de contestar 429 va al
+        # final, los demas del mismo catalogo siguen sirviendo.
+        ordenables = [(p, _modelo_para_cooldown(p, m)) for p, m in destinos]
+        preferencia = {d: i for i, d in enumerate(provider_health.ordenar_por_disponibilidad(ordenables))}
+        destinos = sorted(destinos, key=lambda d: preferencia[(d[0], _modelo_para_cooldown(d[0], d[1]))])
 
-    if isinstance(response, str) and "Error:" in response:
-        # Un "Error: ..." devuelto como texto es un fallo del proveedor igual que una
-        # excepción: cuenta para el cooldown aunque no haya respaldo al que caer. Antes
-        # este caso solo se miraba si había cadena, así que quedarse sin cuota sin respaldo
-        # configurado no dejaba ningún rastro.
-        provider_health.registrar_fallo(active_provider, response)
-        if _cadena_de_respaldo(active_provider, fallback_provider):
+    ultimo = len(destinos) - 1
+    for indice, (activo, modelo) in enumerate(destinos):
+        tools_supported = activo in _PROVEEDORES_CON_TOOLS
+        effective_tools = tools if (tools and tools_supported) else None
+
+        try:
+            if effective_tools:
+                # CA-09: nunca se cachea una llamada con tools — bypass total de
+                # _cached_call()/_response_cache en vez de incorporar un hash del schema de
+                # tools a la cache key (ver desarrollo-log-007.md para la justificacion).
+                response = _uncached_call(
+                    activo, messages, system_prompt, image_path, modelo,
+                    tools=effective_tools,
+                )
+            else:
+                response = _cached_call(activo, messages, system_prompt, image_path, modelo)
+        except Exception as e:
+            provider_health.registrar_fallo(activo, e, _modelo_para_cooldown(activo, modelo))
+            if indice < ultimo:
+                logger.warning(
+                    f"'{activo}' ({modelo or 'modelo por defecto'}) fallo ({e}); "
+                    f"se prueba el siguiente modelo de la tarea '{tarea}'"
+                )
+                continue
             return _intentar_respaldos(
-                active_provider, Exception(response), messages, system_prompt, image_path,
-                model_name, effective_tools, fallback_provider,
+                activo, e, messages, system_prompt, image_path, modelo,
+                effective_tools, fallback_provider,
             )
-        return response
 
-    provider_health.registrar_exito(active_provider)
-    return response
+        if isinstance(response, str) and "Error:" in response:
+            # Un "Error: ..." devuelto como texto es un fallo del proveedor igual que una
+            # excepcion: cuenta para el cooldown aunque no haya respaldo al que caer. Antes
+            # este caso solo se miraba si habia cadena, asi que quedarse sin cuota sin
+            # respaldo configurado no dejaba ningun rastro.
+            provider_health.registrar_fallo(activo, response, _modelo_para_cooldown(activo, modelo))
+            if indice < ultimo:
+                logger.warning(
+                    f"'{activo}' ({modelo or 'modelo por defecto'}) devolvio un error; "
+                    f"se prueba el siguiente modelo de la tarea '{tarea}'"
+                )
+                continue
+            if _cadena_de_respaldo(activo, fallback_provider):
+                return _intentar_respaldos(
+                    activo, Exception(response), messages, system_prompt, image_path,
+                    modelo, effective_tools, fallback_provider,
+                )
+            return response
+
+        provider_health.registrar_exito(activo, _modelo_para_cooldown(activo, modelo))
+        return response
 
 
 def _cadena_de_respaldo(activo, fallback_config) -> list:
@@ -304,22 +393,55 @@ def _intentar_respaldos(
             if isinstance(respuesta, str) and respuesta.startswith("Error:"):
                 raise Exception(respuesta)
             logger.info(f"Respaldo '{respaldo}' respondió correctamente")
-            provider_health.registrar_exito(respaldo)
+            provider_health.registrar_exito(respaldo, _modelo_para_cooldown(respaldo, modelo))
             return respuesta
         except Exception as e:
-            provider_health.registrar_fallo(respaldo, e)
+            provider_health.registrar_fallo(respaldo, e, _modelo_para_cooldown(respaldo, modelo))
             logger.warning(f"El respaldo '{respaldo}' también falló: {e}")
             errores.append(f"{respaldo}: {e}")
 
     logger.error(f"Todos los proveedores fallaron: {errores}")
-    return (
-        "No consigo comunicarme con ningún proveedor de modelo en este momento. "
-        "Revise su conexión y la configuración de claves."
-    )
+    return SIN_PROVEEDOR
+
+#: Lo que se responde cuando NINGUN proveedor contesta. Es una constante y no un literal
+#: suelto porque hay quien necesita reconocerla: `core/resolution.py` usa este fallo para
+#: caer al camino local (sin conexion, "sube el volumen" tiene que seguir funcionando).
+SIN_PROVEEDOR = (
+    "No consigo comunicarme con ningún proveedor de modelo en este momento. "
+    "Revise su conexión y la configuración de claves."
+)
+
+#: Fallos que devuelven los `_ask_*()` COMO SI FUERAN una respuesta, en vez de lanzar. Es
+#: una lista corta y explicita a proposito: confundir una respuesta legitima con un fallo
+#: mandaria al usuario al camino local teniendo modelo disponible.
+_MARCAS_DE_FALLO = (
+    "no está configurada",
+    "no está ejecutándose",
+    "Error conectando con",
+    "tardó demasiado en responder",
+)
+
+
+def es_respuesta_de_fallo(texto) -> bool:
+    """Return True si `texto` es un fallo del proveedor disfrazado de respuesta.
+
+    Hace falta porque `generate_response()` no distingue: cuando un `_ask_*()` no puede
+    hablar con su proveedor, algunos lanzan (y hay respaldo) y otros RETORNAN el error como
+    si fuera lo que dijo el modelo. Desde afuera, "Error: Ollama no está ejecutándose" y una
+    respuesta real son la misma cosa — un `str`.
+    """
+    if not isinstance(texto, str):
+        return False
+    if texto == SIN_PROVEEDOR:
+        return True
+    return texto.startswith("Error") and any(m in texto for m in _MARCAS_DE_FALLO)
+
 
 def _ask_anthropic(messages, system_prompt, image_path, model_name, tools=None):
     import anthropic
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    from config_manager import get_api_key
+
+    api_key = get_api_key("anthropic")
     if not api_key:
         return "Error: ANTHROPIC_API_KEY no está configurada."
 
@@ -373,15 +495,9 @@ def _ask_anthropic(messages, system_prompt, image_path, model_name, tools=None):
 
 def _ask_gemini(messages, system_prompt, image_path, model_name):
     import google.generativeai as genai
-    api_key = os.environ.get("GEMINI_API_KEY", "")
-    try:
-        config_path = Path(__file__).parent.parent / "config.json"
-        with open(config_path, "r", encoding="utf-8") as f:
-            cfg = json.load(f)
-            api_key = cfg.get("gemini_api_key", api_key)
-    except Exception as e:
-        logger.debug(f"No se pudo leer gemini_api_key de config.json: {e}")
+    from config_manager import get_api_key
 
+    api_key = get_api_key("gemini")
     if not api_key:
         return "Error: GEMINI_API_KEY no está configurada en variables ni en config.json."
         
@@ -464,15 +580,9 @@ def _ask_ollama(messages, system_prompt, image_path, model_name):
 
 def _ask_openai(messages, system_prompt, image_path, model_name, tools=None):
     from openai import OpenAI
-    api_key = os.environ.get("OPENAI_API_KEY", "")
-    try:
-        config_path = Path(__file__).parent.parent / "config.json"
-        with open(config_path, "r", encoding="utf-8") as f:
-            cfg = json.load(f)
-            api_key = cfg.get("openai_api_key", api_key)
-    except Exception as e:
-        logger.debug(f"No se pudo leer openai_api_key de config.json: {e}")
+    from config_manager import get_api_key
 
+    api_key = get_api_key("openai")
     if not api_key:
         return "Error: OPENAI_API_KEY no está configurada."
 
@@ -556,18 +666,9 @@ def _ask_openrouter(messages, system_prompt, image_path, model_name, tools=None)
     proveedor de pago vía `task_providers`.
     """
     from openai import OpenAI
+    from config_manager import get_api_key
 
-    api_key = os.environ.get("OPENROUTER_API_KEY", "")
-    try:
-        config_path = Path(__file__).parent.parent / "config.json"
-        with open(config_path, "r", encoding="utf-8") as f:
-            cfg = json.load(f)
-            # `or api_key` y no `get(clave, api_key)`: con la clave presente pero vacía en
-            # config.json, la segunda forma pisaría una variable de entorno que sí sirve.
-            api_key = cfg.get("openrouter_api_key") or api_key
-    except Exception as e:
-        logger.debug(f"No se pudo leer openrouter_api_key de config.json: {e}")
-
+    api_key = get_api_key("openrouter")
     if not api_key:
         return "Error: OPENROUTER_API_KEY no está configurada."
 

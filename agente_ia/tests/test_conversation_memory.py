@@ -282,3 +282,51 @@ def test_get_recent_role_user_incluye_filas_legacy_con_role_null(isolated_memory
     items = memory.get_recent(user_id="default", limit=10, role="user")
 
     assert [i.text for i in items] == ["pregunta", "legacy"]
+
+# ---------------------------------------------------------------------------
+# Lo importado por `ai/memory_migration.py` no es un chat
+# ---------------------------------------------------------------------------
+
+def _insert_migrada(db_path, text, *, conversation_id, role, user_id="owner",
+                    timestamp="2026-01-01T10:00:00", source="migracion:ai_memory"):
+    """Una fila como las que dejo la migracion: `source` propio e id sintetico."""
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """INSERT INTO memories (user_id, text, importance, category, timestamp,
+                                     archived, source, conversation_id, role)
+               VALUES (?, ?, 0.5, 'interaction', ?, 0, ?, ?, ?)""",
+            (user_id, text, timestamp, source, conversation_id, role),
+        )
+
+
+def test_los_recuerdos_migrados_no_salen_como_conversaciones(isolated_memory_db):
+    """La migracion le puso un conversation_id sintetico a cada par pregunta/respuesta de
+    las bases viejas, y cada recuerdo importado aparecia en la barra lateral como un chat
+    de dos turnos. Con 46 de esos contra una conversacion real —y varios con el mismo
+    titulo— borrarlos parecia no surtir efecto: la barra pagina de a 30 y al reabrir
+    entraban otros desde el fondo."""
+    _insert_migrada(isolated_memory_db, "abre la calculadora", conversation_id="ai_memory#39", role="user")
+    _insert_migrada(isolated_memory_db, "Listo", conversation_id="ai_memory#39", role="assistant")
+    _insert_raw(isolated_memory_db, "Hola", user_id="owner", conversation_id="uuid-real", role="user")
+
+    visibles = [c.conversation_id for c in memory.list_conversations(user_id="owner")]
+    assert visibles == ["uuid-real"]
+
+
+def test_una_conversacion_real_no_se_oculta_por_arrastrar_un_recuerdo_migrado(isolated_memory_db):
+    """Basta UNA fila propia para que se muestre: ocultar una conversacion de verdad
+    porque alguna de sus filas vino de la migracion seria perder un chat, no limpiar."""
+    _insert_migrada(isolated_memory_db, "algo viejo", conversation_id="mixta", role="user")
+    _insert_raw(isolated_memory_db, "y algo de ahora", user_id="owner", conversation_id="mixta",
+                role="assistant")
+
+    assert [c.conversation_id for c in memory.list_conversations(user_id="owner")] == ["mixta"]
+
+
+def test_lo_migrado_sigue_estando_para_recordar(isolated_memory_db):
+    """Solo se oculta del listado: el agente tiene que poder seguir recordando eso."""
+    _insert_migrada(isolated_memory_db, "mi color favorito es el verde", conversation_id="ai_memory#1",
+                    role="user")
+
+    textos = [m.text for m in memory.get_recent(user_id="owner", limit=10)]
+    assert "mi color favorito es el verde" in textos

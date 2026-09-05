@@ -208,6 +208,7 @@ class Bridge(QObject):
     drag_over_changed = pyqtSignal(bool)
     conversation_search_results = pyqtSignal(str)     # json: [{conversation_id, title, snippet, ...}]
     models_loaded = pyqtSignal(str)                   # json: {proveedores, activo}
+    task_models_loaded = pyqtSignal(str)              # json: {tareas, catalogo, general}
     project_items_loaded = pyqtSignal(str, int)       # json: [{kind, item_id, label}], project_id
     assignable_items_loaded = pyqtSignal(str)         # json: {flujos, modulos}
 
@@ -1062,6 +1063,76 @@ class Bridge(QObject):
         self.models_loaded.emit(json.dumps(_build_models_payload()))
         self.notice_shown.emit("ok", f"Ahora respondo con {_MODELOS_CONOCIDOS[provider]['label']}.")
 
+    # ------------------------------------------------------------ modelo por tarea
+    @pyqtSlot()
+    def request_task_models(self) -> None:
+        """Qué modelo atiende cada tarea, y el catálogo para cambiarlo."""
+        self.task_models_loaded.emit(json.dumps(_build_task_models_payload()))
+
+    @pyqtSlot(str, str)
+    def save_task_models(self, tarea: str, destinos_json: str) -> None:
+        """Fija los modelos de una tarea, en orden de preferencia.
+
+        Varios destinos = rotación: si el primero se queda sin cuota —lo normal en los
+        catálogos gratuitos— se prueba el siguiente dentro de la misma llamada, sin
+        abandonar la tarea ni caer al proveedor de pago.
+
+        Una lista vacía borra el enrutado: esa tarea vuelve al modelo general. Todo se
+        valida contra `_MODELOS_CONOCIDOS`: este slot es invocable desde cualquier script
+        de la página, así que lo que llega NO decide qué se escribe en `config.json`.
+        """
+        if tarea not in {t["id"] for t in _TAREAS_ENRUTABLES}:
+            logger.warning(f"tarea desconocida en save_task_models: {tarea!r}")
+            self.notice_shown.emit("error", "Esa tarea no existe.")
+            return
+
+        try:
+            crudos = json.loads(destinos_json or "[]")
+        except json.JSONDecodeError as e:
+            logger.warning(f"save_task_models con JSON invalido: {e}")
+            self.notice_shown.emit("error", "No pude leer los modelos elegidos.")
+            return
+
+        ya_configurados = _destinos_ya_configurados()
+        destinos = []
+        for crudo in crudos if isinstance(crudos, list) else []:
+            if not isinstance(crudo, dict):
+                continue
+            proveedor = str(crudo.get("proveedor", "")).strip().lower()
+            modelo = str(crudo.get("modelo", "")).strip()
+            conocido = _MODELOS_CONOCIDOS.get(proveedor)
+            en_catalogo = bool(conocido) and modelo in conocido["modelos"]
+            if not en_catalogo and (proveedor, modelo) not in ya_configurados:
+                logger.warning(f"destino fuera del catalogo, se ignora: {proveedor}/{modelo}")
+                continue
+            if (proveedor, modelo) not in destinos:
+                destinos.append((proveedor, modelo))
+
+        if crudos and not destinos:
+            self.notice_shown.emit("error", "Ninguno de esos modelos está en el catálogo.")
+            return
+
+        mapeo = dict(config_manager.get_task_providers())
+        if not destinos:
+            mapeo.pop(tarea, None)
+        elif len(destinos) == 1:
+            # Forma compacta para el caso comun: config.json se sigue leyendo a mano.
+            proveedor, modelo = destinos[0]
+            mapeo[tarea] = {"proveedor": proveedor, "modelo": modelo}
+        else:
+            mapeo[tarea] = [{"proveedor": p, "modelo": m} for p, m in destinos]
+
+        config_manager.set_task_providers(mapeo)
+        self.request_task_models()
+
+        etiqueta = next(t["label"] for t in _TAREAS_ENRUTABLES if t["id"] == tarea)
+        if destinos:
+            self.notice_shown.emit(
+                "ok", f"«{etiqueta}» usa ahora {len(destinos)} modelo(s)."
+            )
+        else:
+            self.notice_shown.emit("ok", f"«{etiqueta}» vuelve al modelo general.")
+
     # ------------------------------------------------------------ elementos de proyecto
     @pyqtSlot(int)
     def request_project_items(self, project_id: int) -> None:
@@ -1382,7 +1453,7 @@ class Bridge(QObject):
             self._open_conversation_window()
             QThreadPool.globalInstance().start(self._wake_worker)
             self.notice_shown.emit(
-                "info", "Te escucho. Podés hablar sin decir mi nombre por unos segundos.",
+                "info", "Te escucho. Puedes hablar sin decir mi nombre por unos segundos.",
             )
         else:
             self._stop_wake_word_worker()
@@ -1460,11 +1531,17 @@ class Bridge(QObject):
         self._main_window.close()
 
 
-#: Catálogo de proveedores y modelos que se ofrecen desde el composer. Es una lista
-#: cerrada a propósito: `set_model()` valida contra ella, así que un script que corra en la
-#: página no puede escribir cualquier cosa en `config.json` (los slots del bridge son
-#: invocables desde JS — mismo criterio que `_SECURITY_ROWS_V1` para la pantalla de
-#: seguridad). Agregar un modelo nuevo es agregar una línea acá.
+#: Catálogo de proveedores y modelos que se ofrecen desde la interfaz. Es una lista
+#: cerrada a propósito: `set_model()` y `save_task_models()` validan contra ella, así que un
+#: script que corra en la página no puede escribir cualquier cosa en `config.json` (los
+#: slots del bridge son invocables desde JS — mismo criterio que `_SECURITY_ROWS_V1` para
+#: la pantalla de seguridad). Agregar un modelo nuevo es agregar una línea acá.
+#:
+#: Los `:free` de OpenRouter son gratuitos de verdad (verificado contra el catálogo de
+#: openrouter.ai el 2026-09-04) y TODOS soportan tool-calling, que es lo que el agente
+#: necesita para usar herramientas. Ojo: los IDs gratuitos entran y salen del catálogo —
+#: si uno empieza a responder "model not found", se reemplaza acá por otro de
+#: https://openrouter.ai/models?max_price=0
 _MODELOS_CONOCIDOS: Dict[str, Dict[str, Any]] = {
     "deepseek": {"label": "DeepSeek", "modelos": ["deepseek-chat", "deepseek-reasoner"]},
     "anthropic": {"label": "Claude", "modelos": [
@@ -1473,10 +1550,55 @@ _MODELOS_CONOCIDOS: Dict[str, Dict[str, Any]] = {
     "openai": {"label": "OpenAI", "modelos": ["gpt-4o-mini", "gpt-4o"]},
     "gemini": {"label": "Gemini", "modelos": ["gemini-1.5-flash", "gemini-1.5-pro"]},
     "openrouter": {"label": "OpenRouter", "modelos": [
-        "meta-llama/llama-3.3-70b-instruct:free",
+        # Generalistas
+        "z-ai/glm-5.2:free",
+        "minimax/minimax-m3:free",
+        "minimax/minimax-m2.7:free",
+        "thinkingmachines/inkling:free",
+        "thinkingmachines/inkling-small:free",
+        "inclusionai/ling-3.0-flash-fin:free",
+        "google/gemma-4-31b-it:free",
+        "google/gemma-4-26b-a4b-it:free",
+        "nvidia/nemotron-3-ultra-550b-a55b:free",
+        "nvidia/nemotron-3-super-120b-a12b:free",
+        "nvidia/nemotron-3.5-lightning:free",
+        "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+        "dots-studio/dots-3-note-preview:free",
+        "liquid/lfm-2.5-2.6b:free",
+        # Orientados a codigo
+        "cohere/north-mini-code:free",
+        "poolside/laguna-s-2.1:free",
+        "poolside/laguna-xs-2.1:free",
+        # Comodin: OpenRouter elige por su cuenta entre los gratuitos
+        "openrouter/free",
     ]},
     "ollama": {"label": "Ollama (local)", "modelos": ["qwen3:8b", "llama3.1:8b"]},
 }
+
+#: Las tareas que el sistema etiqueta de verdad en sus llamadas al modelo. Si una tarea no
+#: está acá, ponerla en `task_providers` no haría nada: no hay ningún `generate_response()`
+#: que la nombre. La lista se mantiene junto a los `tarea=` del código.
+_TAREAS_ENRUTABLES: List[Dict[str, str]] = [
+    {
+        "id": "razonamiento",
+        "label": "Respuesta principal",
+        "descripcion": "Lo que te contesta en el chat. Usa herramientas, así que necesita "
+                       "un modelo que las soporte.",
+    },
+    {
+        "id": "codigo",
+        "label": "Escribir código",
+        "descripcion": "Cuando le pides un script. Hay modelos gratuitos especializados "
+                       "que lo hacen bien.",
+    },
+    {
+        "id": "ligera",
+        "label": "Trabajo mecánico",
+        "descripcion": "Resumir correos y páginas, compactar el historial, destilar "
+                       "memoria. Es lo que más conviene mandar a un modelo gratuito.",
+    },
+]
+
 
 #: Módulos de la app que se pueden anotar dentro de un proyecto. No son funcionalidad
 #: nueva: son las piezas que ya existen, para poder decir "esta parte es de este
@@ -1491,6 +1613,96 @@ _MODULOS_ASIGNABLES: List[Dict[str, str]] = [
     {"id": "mcp", "label": "Servidores MCP"},
     {"id": "seguridad", "label": "Niveles de seguridad"},
 ]
+
+
+def _es_gratuito(modelo: str) -> bool:
+    """En OpenRouter lo gratis lo marca el sufijo del ID, no el proveedor."""
+    return str(modelo).endswith(":free")
+
+
+def _destino_legible(proveedor: str, modelo: str) -> str:
+    etiqueta = _MODELOS_CONOCIDOS.get(proveedor, {}).get("label", proveedor)
+    return f"{etiqueta} · {modelo}" if modelo else etiqueta
+
+
+def _destinos_ya_configurados() -> set:
+    """Los destinos que YA están escritos en `config.json`, mirando todas las tareas.
+
+    Se aceptan al guardar aunque no figuren en `_MODELOS_CONOCIDOS`: los IDs gratuitos de
+    OpenRouter entran y salen del catálogo, y sin esto, el día que un modelo guardado deja
+    de estar en la lista, esa tarea queda congelada — cada intento de guardar se rechaza
+    por culpa del modelo que justamente se quiere sacar. Volver a escribir algo que ya
+    estaba escrito no habilita nada nuevo, así que la validación del catálogo sigue
+    cumpliendo su papel: frenar destinos NUEVOS que la página no debería poder inventar.
+    """
+    from ai.llm_provider import destinos_de_tarea
+
+    ya = set()
+    for tarea in _TAREAS_ENRUTABLES:
+        ya.update(destinos_de_tarea(tarea["id"]))
+    return ya
+
+
+def _build_task_models_payload() -> Dict[str, Any]:
+    """Qué modelo atiende cada tarea, y el catálogo para cambiarlo."""
+    from ai.llm_provider import destinos_de_tarea
+
+    tareas = []
+    for tarea in _TAREAS_ENRUTABLES:
+        destinos = [
+            {
+                "proveedor": proveedor,
+                "modelo": modelo,
+                "label": _destino_legible(proveedor, modelo),
+                "gratis": _es_gratuito(modelo),
+            }
+            for proveedor, modelo in destinos_de_tarea(tarea["id"])
+        ]
+        tareas.append({**tarea, "destinos": destinos})
+
+    catalogo = [
+        {
+            "proveedor": pid,
+            "modelo": modelo,
+            "label": _destino_legible(pid, modelo),
+            "gratis": _es_gratuito(modelo),
+        }
+        for pid, datos in _MODELOS_CONOCIDOS.items()
+        for modelo in datos["modelos"]
+    ]
+
+    return {
+        "tareas": tareas,
+        "catalogo": catalogo,
+        "general": _destino_legible(config_manager.get_ai_provider(),
+                                    config_manager.get_ai_model()),
+        "avisos": _avisos_de_claves(tareas),
+    }
+
+
+def _avisos_de_claves(tareas: List[Dict[str, Any]]) -> List[str]:
+    """Proveedores elegidos que todavía no tienen credencial.
+
+    Sin esto, elegir un modelo gratuito de OpenRouter sin haber puesto la clave se ve como
+    un cambio exitoso: la pantalla confirma que quedó guardado, y el error solo aparece
+    mucho después, en medio de una respuesta del chat, con un mensaje que el humano ya no
+    relaciona con lo que tocó en Configuración.
+    """
+    faltan = []
+    for tarea in tareas:
+        for destino in tarea["destinos"]:
+            proveedor = destino["proveedor"]
+            if proveedor in faltan or proveedor == "ollama":
+                continue
+            if not config_manager.get_api_key(proveedor):
+                faltan.append(proveedor)
+
+    return [
+        f"Falta la clave de {_MODELOS_CONOCIDOS.get(p, {}).get('label', p)}: "
+        f"esos modelos no van a responder hasta que configures "
+        f"{config_manager.env_var_de_proveedor(p) or 'su API key'}."
+        for p in faltan
+    ]
 
 
 def _build_models_payload() -> Dict[str, Any]:
