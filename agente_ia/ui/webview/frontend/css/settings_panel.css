@@ -321,3 +321,26 @@
   padding-left: 10px;
   color: var(--text-primary);
 }
+
+/* Conexiones: estado de cada credencial y el campo para ponerla. */
+.conexion-acciones {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.conexion-input {
+  min-width: 240px;
+  flex: 1 1 240px;
+}
+
+.conexion-estado {
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+/* Verde = puesta; el gris de "sin configurar" no es un error, es un dato. */
+.conexion-estado-archivo,
+.conexion-estado-entorno { color: var(--success, #3fb950); }
+.conexion-estado-vacia { color: var(--text-secondary); }

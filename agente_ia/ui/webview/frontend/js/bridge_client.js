@@ -166,3 +166,9 @@ export function saveTaskModels(tarea, destinosJson) {
 }
 export function onTaskModelsLoaded(cb) { _bridge.task_models_loaded.connect(cb); }
 
+// ------------------------------------------------------------ credenciales
+export function requestConnections() { _bridge.request_connections(); }
+export function saveConnection(clave, valor) { _bridge.save_connection(clave, valor); }
+export function clearConnection(clave) { _bridge.clear_connection(clave); }
+export function onConnectionsLoaded(cb) { _bridge.connections_loaded.connect(cb); }
+export function onSetupRequired(cb) { _bridge.setup_required.connect(cb); }

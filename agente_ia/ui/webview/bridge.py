@@ -209,6 +209,8 @@ class Bridge(QObject):
     conversation_search_results = pyqtSignal(str)     # json: [{conversation_id, title, snippet, ...}]
     models_loaded = pyqtSignal(str)                   # json: {proveedores, activo}
     task_models_loaded = pyqtSignal(str)              # json: {tareas, catalogo, general}
+    connections_loaded = pyqtSignal(str)              # json: {conexiones} — nunca los valores
+    setup_required = pyqtSignal(str)                  # id de la seccion que hay que abrir
     project_items_loaded = pyqtSignal(str, int)       # json: [{kind, item_id, label}], project_id
     assignable_items_loaded = pyqtSignal(str)         # json: {flujos, modulos}
 
@@ -283,6 +285,14 @@ class Bridge(QObject):
         self.chips_loaded.emit(json.dumps(_build_chips_payload()))
         self.theme_changed.emit(resolve_theme_name(config_manager.get_ui_theme()))
         self._load_conversations(offset=0)
+
+        # Primer arranque sin `config.json` (ni variables de entorno): sin una sola clave de
+        # proveedor la app no puede contestar nada, así que abrimos donde se ponen en vez de
+        # dejar al usuario delante de un chat que solo devuelve errores. Solo ocurre cuando la
+        # app está inservible: en una instalación que funciona no aparece nunca.
+        if falta_configurar_proveedor():
+            logger.info("No hay ninguna clave de proveedor: abriendo Configuración → Conexiones")
+            self.setup_required.emit("conexiones")
 
     # ------------------------------------------------------------ mensajes (§4.1)
     @pyqtSlot(str)
@@ -1066,6 +1076,54 @@ class Bridge(QObject):
         self.models_loaded.emit(json.dumps(_build_models_payload()))
         self.notice_shown.emit("ok", f"Ahora respondo con {_MODELOS_CONOCIDOS[provider]['label']}.")
 
+    # ------------------------------------------------------------ credenciales
+    @pyqtSlot()
+    def request_connections(self) -> None:
+        """Que credenciales estan puestas y de donde salen. Nunca sus valores."""
+        self.connections_loaded.emit(json.dumps(_build_connections_payload()))
+
+    @pyqtSlot(str, str)
+    def save_connection(self, clave: str, valor: str) -> None:
+        """Guarda una credencial en `config.json`.
+
+        Se valida contra `_CONEXIONES`: este slot es invocable desde cualquier script de la
+        pagina, asi que lo que llega no decide que clave se escribe.
+        """
+        if clave not in {c["id"] for c in _CONEXIONES}:
+            logger.warning(f"save_connection: clave desconocida {clave!r}")
+            self.notice_shown.emit("error", "Esa credencial no existe.")
+            return
+
+        if not config_manager.set_credencial(clave, valor):
+            self.notice_shown.emit("error", "No se guardó: el valor estaba vacío.")
+            return
+
+        etiqueta = next(c["label"] for c in _CONEXIONES if c["id"] == clave)
+        self.request_connections()
+
+        # Si el entorno tiene esa misma variable, manda el entorno: decirlo aca evita que
+        # el usuario pegue una clave, vea "guardada", y siga sin funcionar sin saber por que.
+        if config_manager.origen_de_credencial(clave) == "entorno":
+            self.notice_shown.emit(
+                "info",
+                f"Guardada, pero {etiqueta} sigue usando la variable de entorno, que manda "
+                f"sobre el archivo. Borrala del entorno para que valga esta.",
+            )
+        else:
+            self.notice_shown.emit("ok", f"Clave de {etiqueta} guardada.")
+
+    @pyqtSlot(str)
+    def clear_connection(self, clave: str) -> None:
+        """Quita una credencial del archivo."""
+        if clave not in {c["id"] for c in _CONEXIONES}:
+            logger.warning(f"clear_connection: clave desconocida {clave!r}")
+            return
+
+        etiqueta = next(c["label"] for c in _CONEXIONES if c["id"] == clave)
+        if config_manager.borrar_credencial(clave):
+            self.notice_shown.emit("ok", f"Clave de {etiqueta} borrada.")
+        self.request_connections()
+
     # ------------------------------------------------------------ modelo por tarea
     @pyqtSlot()
     def request_task_models(self) -> None:
@@ -1660,6 +1718,89 @@ _MODULOS_ASIGNABLES: List[Dict[str, str]] = [
     {"id": "mcp", "label": "Servidores MCP"},
     {"id": "seguridad", "label": "Niveles de seguridad"},
 ]
+
+
+#: Las credenciales que la app sabe usar, y como se le explican al humano.
+#:
+#: Lista CERRADA, mismo criterio que `_MODELOS_CONOCIDOS` y `_SECURITY_ROWS_V1`: los slots
+#: que la escriben son invocables desde cualquier script de la pagina, asi que lo que llega
+#: no decide que clave se toca. Cada `id` tiene que existir en `_ENV_KEY_MAP` de
+#: `config_manager.py`, que es quien de verdad las lee.
+_CONEXIONES: List[Dict[str, str]] = [
+    {
+        "id": "deepseek_api_key",
+        "label": "DeepSeek",
+        "descripcion": "El proveedor de pago que responde por defecto.",
+        "variable": "DEEPSEEK_API_KEY",
+    },
+    {
+        "id": "openrouter_api_key",
+        "label": "OpenRouter",
+        "descripcion": "Da acceso a los 18 modelos gratuitos del catálogo.",
+        "variable": "OPENROUTER_API_KEY",
+    },
+    {
+        "id": "anthropic_api_key",
+        "label": "Claude (Anthropic)",
+        "descripcion": "Opcional. Solo hace falta si eliges Claude como modelo.",
+        "variable": "ANTHROPIC_API_KEY",
+    },
+    {
+        "id": "openai_api_key",
+        "label": "OpenAI",
+        "descripcion": "Opcional. Solo hace falta si eliges GPT como modelo.",
+        "variable": "OPENAI_API_KEY",
+    },
+    {
+        "id": "gemini_api_key",
+        "label": "Gemini",
+        "descripcion": "Opcional. Se usa también para leer imágenes.",
+        "variable": "GEMINI_API_KEY",
+    },
+    {
+        "id": "telegram_token",
+        "label": "Telegram",
+        "descripcion": "El token del bot, de BotFather. Sin él, el canal no arranca.",
+        "variable": "TELEGRAM_BOT_TOKEN",
+    },
+    {
+        "id": "discord_token",
+        "label": "Discord",
+        "descripcion": "Opcional. El token del bot de Discord.",
+        "variable": "DISCORD_BOT_TOKEN",
+    },
+]
+
+
+#: De estas siete, las que hacen que el agente pueda contestar. Telegram y Discord son
+#: canales: su ausencia quita una puerta de entrada, no la capacidad de responder.
+_CLAVES_DE_PROVEEDOR = (
+    "deepseek_api_key", "openrouter_api_key",
+    "anthropic_api_key", "openai_api_key", "gemini_api_key",
+)
+
+
+def falta_configurar_proveedor() -> bool:
+    """True si no hay NINGUNA clave de proveedor: la app no puede responder nada."""
+    return not any(
+        config_manager.origen_de_credencial(clave) for clave in _CLAVES_DE_PROVEEDOR
+    )
+
+
+def _build_connections_payload() -> Dict[str, Any]:
+    """Que credenciales hay y de donde salen. NUNCA el valor de ninguna.
+
+    Se manda si esta puesta y donde, y nada mas. Devolver la clave a la pagina la pondria
+    en el DOM, en una captura de pantalla o en un volcado del webview — y para decidir si
+    hay que cambiarla no hace ninguna falta verla.
+    """
+    filas = []
+    for fila in _CONEXIONES:
+        filas.append({
+            **fila,
+            "origen": config_manager.origen_de_credencial(fila["id"]),
+        })
+    return {"conexiones": filas}
 
 
 def _es_gratuito(modelo: str) -> bool:

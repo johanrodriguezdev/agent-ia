@@ -1,0 +1,15 @@
+{
+    "_comentario": "Plantilla de config.json. Copiala a config.json y ajustala, o dejala: la app crea la suya con los valores por defecto al arrancar y se configura desde Configuracion > Conexiones. NUNCA se versiona: guarda preferencias de esta maquina y puede guardar claves de API.",
+    "agent_name": "orion",
+    "agent_pronunciation": "orion",
+    "ai_provider": "deepseek",
+    "ai_model": "deepseek-chat",
+    "vision_provider": "",
+    "fallback_provider": "",
+    "display_name": "",
+    "user_title": "",
+    "weather_city": "",
+    "ui_theme": "dark",
+    "telegram_autostart": true,
+    "_claves": "Las claves de API se pueden poner aqui (deepseek_api_key, openrouter_api_key, anthropic_api_key, openai_api_key, gemini_api_key, telegram_token) o en variables de entorno, que mandan sobre este archivo. Desde la app: Configuracion > Conexiones."
+}

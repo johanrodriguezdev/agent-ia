@@ -21,6 +21,7 @@ import {
   onTerminalOutput, onTerminalState, onTerminalTabs,
   onNoticeShown, onMessageChunk, onConversationSearchResults, onModelsLoaded,
   onProjectItemsLoaded, onAssignableItemsLoaded, onDragOverChanged, onTaskModelsLoaded,
+  onConnectionsLoaded, onSetupRequired,
   requestModels, newConversation,
 } from "./bridge_client.js";
 import {
@@ -53,7 +54,7 @@ import {
   openSettingsPanel, renderSecurityOverrides, handleSecurityOverrideSaved,
   handleSecurityOverrideRejected, renderProfile, handleProfileSaved,
   renderEmailCapabilities, handleEmailCapabilitySaved, handleEmailCapabilityRejected,
-  renderTaskModels,
+  renderTaskModels, renderConnections,
 } from "./settings_panel.js";
 
 const GREETINGS_BY_HOUR = [
@@ -147,6 +148,15 @@ async function bootstrap() {
   onConversationSearchResults((json) => renderSearchResults(JSON.parse(json)));
   onModelsLoaded((json) => renderModels(JSON.parse(json)));
   onTaskModelsLoaded((json) => renderTaskModels(JSON.parse(json)));
+  onConnectionsLoaded((json) => renderConnections(JSON.parse(json)));
+
+  // Arranque sin ninguna clave de proveedor: la app no puede contestar, asi que se abre
+  // donde se ponen en vez de dejar al usuario delante de un chat que solo da errores.
+  onSetupRequired((seccion) => {
+    openSettingsPanel(seccion);
+    mostrarAviso("info", "Falta una clave para poder responder. Pega aquí la del "
+                       + "proveedor que vayas a usar.");
+  });
   onDragOverChanged((activo) => {
     const capa = document.getElementById("drop-overlay");
     if (capa) capa.hidden = !activo;

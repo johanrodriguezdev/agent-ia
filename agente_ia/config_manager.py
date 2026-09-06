@@ -216,6 +216,59 @@ def get_telegram_token() -> str:
     return _get_config_value("telegram_token")
 
 
+def origen_de_credencial(clave: str) -> str:
+    """Return de donde sale una credencial: "entorno", "archivo" o "" si no esta puesta.
+
+    Importa decirlo, y no solo si esta configurada o no: la variable de entorno MANDA sobre
+    el archivo (`_get_config_value`). Sin esta distincion, alguien pega una clave nueva en
+    la pantalla, ve que se guardo, y sigue sin funcionar porque el entorno tiene otra — y no
+    hay forma de entender por que.
+    """
+    if clave not in _ENV_KEY_MAP:
+        return ""
+    if os.environ.get(_ENV_KEY_MAP[clave]):
+        return "entorno"
+    return "archivo" if str(load_config().get(clave, "")).strip() else ""
+
+
+def set_credencial(clave: str, valor: str) -> bool:
+    """Guarda una credencial en config.json. Return si se escribio.
+
+    Solo se admiten las claves de `_ENV_KEY_MAP`: esto lo llama un slot del bridge, que es
+    invocable desde cualquier script de la pagina, asi que lo que llega NO decide que se
+    escribe (mismo criterio que `save_task_models` y `save_security_override`).
+    """
+    if clave not in _ENV_KEY_MAP:
+        logger.warning(f"set_credencial: clave desconocida {clave!r}, se ignora")
+        return False
+
+    valor = (valor or "").strip()
+    if not valor:
+        return False
+
+    config = load_config()
+    config[clave] = valor
+    save_config(config)
+    # El VALOR no se registra nunca, ni siquiera truncado: este log acaba en un archivo.
+    logger.info(f"credencial '{clave}' guardada en config.json")
+    return True
+
+
+def borrar_credencial(clave: str) -> bool:
+    """Quita una credencial del archivo. Return si habia algo que quitar."""
+    if clave not in _ENV_KEY_MAP:
+        logger.warning(f"borrar_credencial: clave desconocida {clave!r}, se ignora")
+        return False
+
+    config = load_config()
+    if clave not in config:
+        return False
+    config.pop(clave, None)
+    save_config(config)
+    logger.info(f"credencial '{clave}' borrada de config.json")
+    return True
+
+
 def get_api_key(proveedor: str) -> str:
     """Return la API key de un proveedor: variable de entorno y, si no, `config.json`.
 
