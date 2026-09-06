@@ -24,17 +24,20 @@ dato, lo pregunta en vez de inventárselo.
 pip install -r requirements.txt
 ```
 
-Después, configura la clave de la API del modelo:
+Después hace falta una clave de API: sin ninguna, el agente no tiene con qué responder.
 
-```bash
-setup_api_key.bat
-```
+**Desde la aplicación** (lo normal): arranca `python main.py`. En un equipo recién clonado no hay
+`config.json`, así que la aplicación abre sola **Configuración → Conexiones**, donde se pegan las
+claves. Se guardan en `config.json`, en ese equipo, y no hace falta reiniciar nada ni editar
+ningún archivo a mano.
 
-Guarda `ANTHROPIC_API_KEY` como variable de entorno permanente. Hay que abrir una terminal nueva
-(o reiniciar el editor) para que el cambio se detecte.
+**Como variables de entorno**, si prefieres no dejarlas en un archivo: `setup_api_key.bat` guarda
+`ANTHROPIC_API_KEY` de forma permanente, y `setup_bots.bat` instala las dependencias de los bots y
+guarda los tokens de Telegram y Discord. Hay que abrir una terminal nueva (o reiniciar el editor)
+para que el cambio se detecte.
 
-Si vas a usar los bots, ejecuta también `setup_bots.bat`: instala sus dependencias y guarda los
-tokens de Telegram y Discord.
+Si pones las dos, **manda la variable de entorno**. La pantalla de Conexiones lo dice en cada
+clave, para que nadie pegue una nueva, la vea guardada, y no entienda por qué sigue sin funcionar.
 
 ## Arranque
 
@@ -50,9 +53,14 @@ mantiene la conversación abierta unos segundos sin repetirlo.
 
 ## Configuración
 
-`config.json` guarda el nombre del agente, cómo se dirige a ti, el tema visual y las preferencias
-de voz. Se puede editar desde la pantalla de Configuración de la aplicación; no hace falta tocarlo
-a mano.
+`config.json` guarda el nombre del agente, cómo se dirige a ti, el tema visual, las preferencias
+de voz y —si las pones ahí— las claves de API. Se edita desde la pantalla de Configuración de la
+aplicación; no hace falta tocarlo a mano.
+
+**No se versiona.** Es estado de una máquina, no del proyecto: `.gitignore` lo excluye y
+`config.example.json` queda como plantilla. Si el archivo falta o está corrupto, la aplicación crea
+uno nuevo con los valores por defecto — perderlo no rompe nada, solo hay que volver a poner las
+claves.
 
 ### El canal de Telegram
 

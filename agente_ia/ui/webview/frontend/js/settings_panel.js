@@ -28,6 +28,7 @@ import {
   requestSecurityOverrides, saveSecurityOverride, requestProfile, saveProfile,
   requestEmailCapabilities, saveEmailCapability,
   requestTaskModels, saveTaskModels,
+  requestConnections, saveConnection, clearConnection,
 } from "./bridge_client.js";
 import { icon } from "./icons.js";
 
@@ -67,6 +68,7 @@ const PROFILE_FIELDS = [
 const SECTIONS = [
   { id: "perfil", label: "Perfil" },
   { id: "modelos", label: "Modelos" },
+  { id: "conexiones", label: "Conexiones" },
   { id: "seguridad", label: "Seguridad" },
 ];
 
@@ -74,10 +76,12 @@ let _panelOpen = false;
 let _pendingRowId = null;   // guard contra doble click/doble evento en la MISMA fila
 let _activeSection = "perfil";
 
-export function openSettingsPanel() {
+export function openSettingsPanel(seccion) {
   if (_panelOpen) return;
   _panelOpen = true;
-  _activeSection = "perfil";
+  // Se valida contra SECTIONS porque esta funcion tambien se usa como listener de click:
+  // ahi el argumento es un Event, que no es ninguna seccion y cae en "perfil".
+  _activeSection = SECTIONS.some((s) => s.id === seccion) ? seccion : "perfil";
   renderShell();
 }
 
@@ -174,6 +178,9 @@ function renderActiveSection() {
   } else if (_activeSection === "modelos") {
     content.appendChild(buildModelsCard(null));
     requestTaskModels();       // mismo criterio: solo al entrar en la sección
+  } else if (_activeSection === "conexiones") {
+    content.appendChild(buildConnectionsCard(null));
+    requestConnections();
   } else {
     content.appendChild(buildSecurityCard());
     content.appendChild(buildEmailCapabilitiesCard());
@@ -607,6 +614,114 @@ export function renderTaskModels(payload) {
 
   const anterior = content.querySelector(".settings-card");
   const nueva = buildModelsCard(payload);
+  if (anterior) anterior.replaceWith(nueva);
+  else content.appendChild(nueva);
+}
+
+// ------------------------------------------------------- sección "Conexiones"
+//
+// Las claves que la app necesita. El valor NUNCA viaja del lado de Python a la página: solo
+// llega si está puesta y de dónde sale. Devolverla la dejaría en el DOM, en una captura de
+// pantalla o en un volcado del webview, y para decidir si hay que cambiarla no hace falta
+// verla.
+
+function buildConnectionsCard(payload) {
+  const card = document.createElement("div");
+  card.className = "settings-card";
+
+  const title = document.createElement("div");
+  title.className = "settings-card-title";
+  title.textContent = "Claves y credenciales";
+  card.appendChild(title);
+
+  const ayuda = document.createElement("p");
+  ayuda.className = "settings-help";
+  ayuda.textContent = payload
+    ? "Se guardan en config.json, en este equipo. Una variable de entorno con el mismo "
+      + "nombre manda sobre lo que pongas aquí."
+    : "Cargando…";
+  card.appendChild(ayuda);
+
+  if (!payload) return card;
+
+  for (const fila of payload.conexiones) {
+    card.appendChild(buildConnectionRow(fila));
+  }
+  return card;
+}
+
+function buildConnectionRow(fila) {
+  const row = document.createElement("div");
+  row.className = "settings-row settings-row-block";
+
+  const info = document.createElement("div");
+  info.className = "settings-row-info";
+  const nombre = document.createElement("span");
+  nombre.className = "settings-row-label";
+  nombre.textContent = fila.label;              // §10.1 — nunca innerHTML
+  const desc = document.createElement("span");
+  desc.className = "settings-row-desc";
+  desc.textContent = fila.descripcion;
+  info.append(nombre, desc);
+
+  const estado = document.createElement("span");
+  estado.className = "conexion-estado conexion-estado-" + (fila.origen || "vacia");
+  estado.textContent = {
+    entorno: "Configurada (variable de entorno)",
+    archivo: "Configurada",
+  }[fila.origen] || "Sin configurar";
+  info.appendChild(estado);
+  row.appendChild(info);
+
+  const acciones = document.createElement("div");
+  acciones.className = "conexion-acciones";
+
+  const campo = document.createElement("input");
+  campo.type = "password";                      // no se ve al escribir ni al pegar
+  campo.className = "settings-input conexion-input";
+  campo.placeholder = fila.origen ? "Reemplazar…" : "Pegar la clave…";
+  campo.setAttribute("aria-label", "Clave de " + fila.label);
+  campo.autocomplete = "off";
+
+  const guardar = document.createElement("button");
+  guardar.type = "button";
+  guardar.className = "panel-submit-btn conexion-guardar";
+  guardar.textContent = "Guardar";
+  guardar.addEventListener("click", () => {
+    const valor = campo.value.trim();
+    if (!valor) return;
+    saveConnection(fila.id, valor);
+    campo.value = "";                           // no se queda en el DOM tras guardarla
+  });
+  campo.addEventListener("keydown", (evt) => {
+    if (evt.key === "Enter") guardar.click();
+  });
+
+  acciones.append(campo, guardar);
+
+  // Quitar solo tiene sentido sobre lo que está EN EL ARCHIVO: lo del entorno no se toca
+  // desde aquí, y ofrecer un botón que no puede cumplir sería mentir.
+  if (fila.origen === "archivo") {
+    const quitar = document.createElement("button");
+    quitar.type = "button";
+    quitar.className = "panel-secondary-btn conexion-quitar";
+    quitar.textContent = "Quitar";
+    quitar.addEventListener("click", () => clearConnection(fila.id));
+    acciones.appendChild(quitar);
+  }
+
+  row.appendChild(acciones);
+  return row;
+}
+
+/** Llega de `connections_loaded`: repinta la sección con lo que hay guardado. */
+export function renderConnections(payload) {
+  if (_activeSection !== "conexiones") return;
+  const content = document.getElementById("settings-content");
+  if (!content) return;
+
+  const anterior = content.querySelector(".settings-card");
+  const nueva = buildConnectionsCard(payload);
   if (anterior) anterior.replaceWith(nueva);
   else content.appendChild(nueva);
 }

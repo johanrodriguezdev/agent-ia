@@ -51,6 +51,14 @@ workspace/**/*.pdf
 # remoto en vez de abrir el bot. Ver authorized_users.example.json para la plantilla.
 authorized_users.json
 
+# Preferencias y credenciales de ESTA maquina: tema, nombre para dirigirse al usuario,
+# geometria de la ventana y, si el usuario las pone ahi, las claves de API. Estuvo
+# versionado y por eso el historial guarda un token de Telegram y una clave de DeepSeek
+# reales (commits b754ce3 y f9103e4): un archivo de estado local no tiene por que viajar
+# en el repositorio. Perderlo es seguro: `config_manager.load_config()` crea uno nuevo con
+# los valores por defecto. Ver config.example.json.
+config.json
+
 # Copias de seguridad que genera el propio agente (migracion de memoria, destilacion de
 # MEMORY.md). Son datos personales y ademas se regeneran solas: no van al repositorio.
 *.bak
