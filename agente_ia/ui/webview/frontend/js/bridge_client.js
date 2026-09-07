@@ -24,7 +24,7 @@ export function getBridge() {
 
 // ------------------------------------------------------------ JS → Python (§4.1)
 export function requestInitialState() { _bridge.request_initial_state(); }
-export function sendMessage(text) { _bridge.send_message(text); }
+export function sendMessage(text, modo) { _bridge.send_message(text, modo || ""); }
 export function newConversation() { _bridge.new_conversation(); }
 export function selectConversation(conversationId) { _bridge.select_conversation(conversationId); }
 export function requestDeleteConversation(conversationId) { _bridge.request_delete_conversation(conversationId); }
@@ -144,6 +144,9 @@ export function runCommandInTerminal(command) { _bridge.run_command_in_terminal(
 export function requestModels() { _bridge.request_models(); }
 export function setModel(provider, model) { _bridge.set_model(provider, model); }
 export function onModelsLoaded(cb) { _bridge.models_loaded.connect(cb); }
+
+// ------------------------------------------------------------ modos estratégicos (REQ-026)
+export function setActiveMode(modoId) { _bridge.set_active_mode(modoId || ""); }
 
 // ------------------------------------------------------------ elementos de proyecto
 export function requestProjectItems(projectId) { _bridge.request_project_items(projectId); }

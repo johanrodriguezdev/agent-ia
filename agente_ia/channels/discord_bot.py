@@ -73,7 +73,15 @@ def _process_message(user_id: str, user_name: str, text: str, image_path: str = 
         response = gateway.process(msg)
         return response.text
     except Exception as e:
-        return f"Error procesando su solicitud: {str(e)[:100]}"
+        logger.error(
+            f"Error en discord_bot._process_message() | usuario={user_id} ({user_name}) | "
+            f"canal=discord: {e}",
+            exc_info=True
+        )
+        return (
+            "Lo siento, he encontrado un inconveniente inesperado. "
+            "Intente de nuevo en un momento."
+        )
 
 
 

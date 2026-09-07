@@ -261,6 +261,64 @@ def test_try_claude_sin_claude_fn_cae_en_reasoning_loop(monkeypatch):
 
 
 # ─────────────────────────────────────────────
+#  REQ-026 — hilo del modo estratégico del composer hasta `reasoning_loop.run()`
+# ─────────────────────────────────────────────
+
+def test_resolve_con_modo_lo_threadea_hasta_reasoning_loop(monkeypatch):
+    """`resolve(..., modo="codigo")` debe llegar como kwarg `modo` a
+    `reasoning_loop.run()` — es el único hilo real que activa la priorización de tools/
+    tarea del modo (`arquitectura-026.md`, "Flujo de datos: Envío de un mensaje")."""
+    from unittest.mock import patch
+
+    from intent import classifier as classifier_module
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(classifier_module.ai_system, "predict", lambda text: "UNKNOWN")
+
+        with patch("core.reasoning_loop.run", return_value="respuesta del loop") as mock_run:
+            result = resolve(
+                "ejecuta un script xyz789", ChannelType.DESKTOP, user_id="u1", modo="codigo",
+            )
+
+    mock_run.assert_called_once_with(
+        "ejecuta un script xyz789", ChannelType.DESKTOP, "u1", estado={}, modo="codigo",
+    )
+    assert result.text == "respuesta del loop"
+
+
+def test_resolve_sin_modo_no_manda_el_kwarg_modo(monkeypatch):
+    """Regresión explícita del hallazgo de `desarrollo-log-026.md`: sin `modo` (o
+    `modo=None`), `_try_claude()` NO agrega el kwarg — preserva la firma exacta de antes
+    de REQ-026 para los caminos que no lo conocen (dobles de test con la firma vieja,
+    Telegram/Discord vía `claude_fn`)."""
+    from unittest.mock import patch
+
+    from intent import classifier as classifier_module
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(classifier_module.ai_system, "predict", lambda text: "UNKNOWN")
+
+        with patch("core.reasoning_loop.run", return_value="ok") as mock_run:
+            resolve("texto sin clasificar abc123", ChannelType.DESKTOP, user_id="u1")
+
+    mock_run.assert_called_once_with(
+        "texto sin clasificar abc123", ChannelType.DESKTOP, "u1", estado={},
+    )
+
+
+def test_try_claude_con_claude_fn_ignora_modo():
+    """Telegram/Discord (`claude_fn` inyectado, vía `channels/gateway.py`) no tienen
+    ningún concepto de modo — un `modo` que igual llegara no debe tocar ese camino."""
+    from core.resolution import _try_claude
+
+    result = _try_claude(
+        "hola", ChannelType.TELEGRAM, "u1", claude_fn=lambda t: f"echo:{t}", modo="codigo",
+    )
+
+    assert result.text == "echo:hola"
+
+
+# ─────────────────────────────────────────────
 #  REQ-017 — "completar todas las tareas pendientes" en lote (CA-01 a CA-06 de SPEC-017)
 # ─────────────────────────────────────────────
 

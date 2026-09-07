@@ -90,6 +90,14 @@ def prepare_for_speech(text: str, solo_voz: bool = False) -> str:
     if not text:
         return ""
 
+    # 0. REQ-022/CA-18: el aviso de cambio de modelo (`ai/llm_provider.py::con_aviso_de_cambio`)
+    # ya viene en forma corta cuando `reasoning_loop.run()` resuelve canal VOICE — pero el
+    # camino manos libres del webview resuelve a DESKTOP (riesgo P2 heredado de REQ-021), así
+    # que acá se reconoce y acorta la forma larga SIEMPRE, sin importar el canal, porque este
+    # es el único punto de todo el sistema que decide qué se dice de verdad en voz alta.
+    from ai.llm_provider import AVISO_CAMBIO_CORTO, AVISO_CAMBIO_RE
+    text = AVISO_CAMBIO_RE.sub(f"\n\n{AVISO_CAMBIO_CORTO}", text)
+
     # 1. Marcado: se quitan los delimitadores, se conserva el contenido.
     clean = _MD_FENCE_RE.sub("", text)
     clean = _MD_LINK_RE.sub(r"\1", clean)

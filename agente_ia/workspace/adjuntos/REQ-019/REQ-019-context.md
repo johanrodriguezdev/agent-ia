@@ -727,3 +727,23 @@ independiente adicional (0 FAIL) sobre CA-02/CA-03/CA-06/CA-08/CA-16/CA-21; desv
 `_on_security_override_error()` evaluada como justificada; coexistencia REQ-018/REQ-019
 confirmada estructuralmente independiente; CSV actualizado vía `update-tracker.mjs`; handoff
 emitido a `orion-qa`
+2026-09-07 | EN_QA → EN_QA (sin cambio de estado) | orion-qa | Continuación autorizada bajo la
+autorización nocturna en bloque del 2026-09-06 (el handoff a `orion-qa` había quedado pendiente
+desde el 2026-08-20 — nadie lo había lanzado). Auditoría de solo lectura completa: `qa-audit-019.md`
+generado en `pruebas/`. Se releyó código real (no solo documentación/pseudocódigo) de
+`core/security_config.py`, `core/security_manager.py`, `ui/webview/bridge.py` (catálogo v1,
+3 señales, 2 slots, `_save_security_override_flow()`, `_build_security_overrides_payload()`),
+`agents/tool_registry.py:133` (4º punto de registro) y `ui/webview/frontend/js/settings_panel.js`
+(728 líneas, línea por línea) — confirmando que los 3 hallazgos de la 1ª auditoría de
+`orion-security` (A/B/C) están correctamente cerrados en el código, que `max(nivel_código,
+nivel_config)` se cumple en los 4 puntos de registro, que `security_overrides.json` está separado
+de `config.json`, que un archivo ausente/corrupto siempre resuelve a "sin overrides" (nunca "sin
+restricciones"), que las 10 acciones RED de REQ-005 quedan fuera del mecanismo, que el cambio
+requiere reinicio, y que CA-12/16/17/18/19/20 se cumplen en el frontend. `py_compile` independiente
+sin errores sobre los 4 módulos Python tocados. Sin `except: pass` silencioso ni secretos
+hardcodeados (grep dirigido, un único match y es un comentario en prosa). Sin hallazgos 🟡/🔴 —
+9 hallazgos 🟢. Veredicto: **✅ APROBADO**. CSV actualizado vía `update-tracker.mjs` — Estado se
+mantiene en `EN_QA` (NO avanza a `LISTO_PARA_COMMIT`: falta la prueba manual de Johan, pendiente
+para cuando despierte). NO se ejecutó `git commit`. Próximo paso: prueba manual del humano
+(Configuración → Seguridad, subir un nivel, confirmar mensaje de "aplica al reiniciar", reiniciar
+y verificar que el nuevo nivel efectivamente pide confirmación) antes de cerrar el REQ.

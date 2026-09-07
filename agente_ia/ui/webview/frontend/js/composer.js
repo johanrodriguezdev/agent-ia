@@ -10,14 +10,27 @@
 
 import {
   sendMessage, runChipAction, toggleWakeWord,
-  openAttachDialog, clearAttachment, stopResolution, requestModels, setModel,
+  openAttachDialog, clearAttachment, stopResolution, requestModels, setModel, setActiveMode,
 } from "./bridge_client.js";
 import { icon } from "./icons.js";
 
 const MAX_VISIBLE_ROWS = 5;
 const LINE_HEIGHT_PX = 20;
 
+// REQ-026 — id del icono del sprite por cada modo. Los 4 ids (`codigo`, `investigacion`,
+// `flujos`, `tareas`) son los que define `core/composer_modes.py`; reutilizan símbolos
+// que ya existían en `index.html`, ninguno nuevo (ui-design-026.md).
+const _MODE_ICONS = {
+  codigo: "terminal",
+  investigacion: "search",
+  flujos: "flows",
+  tareas: "tasks",
+};
+
 let _sendEnabled = true;
+// Estado del modo activo: vive SOLO acá (fuente de verdad, arquitectura-026.md) — el
+// espejo de `Bridge._modo_activo` es efímero y nunca decide nada, solo refleja esto.
+let _activeModeId = null;
 
 function $(id) {
   return document.getElementById(id);
@@ -34,7 +47,7 @@ function doSend() {
   const input = $("composer-input");
   const text = input.value.trim();
   if (!text) return;
-  sendMessage(text);
+  sendMessage(text, _activeModeId || "");
   input.value = "";
   autoGrow(input);
 }
@@ -116,21 +129,106 @@ export function showAttachment(path, name, accepted, reason) {
   chip.hidden = false;
 }
 
-export function renderChips(chips) {
-  const row = $("chips-row");
+// --------------------------------------------------------------------------- modos (REQ-026)
+
+function _applyActiveModeVisuals() {
+  const row = $("actions-row");
+  if (!row) return;
+  for (const btn of row.children) {
+    // REQ-026 addendum 1: `#actions-row` mezcla los 4 botones de modo con "Recuérdame
+    // algo" (mismo componente `.mode-btn`, ver `renderQuickActions()`). Solo los primeros
+    // llevan `dataset.modeId` — "Recuérdame algo" no participa del toggle, no lleva
+    // `aria-pressed` y nunca debe recibir `.mode-btn--active` (ui-design-026-addendum-1.md
+    // §2, tabla de diferencias).
+    if (!btn.dataset.modeId) continue;
+    const active = btn.dataset.modeId === _activeModeId;
+    btn.classList.toggle("mode-btn--active", active);
+    btn.setAttribute("aria-pressed", active ? "true" : "false");
+    // El check se reserva con `visibility` (no se agrega/saca del DOM) para no mover el
+    // resto de los botones al togglear — ui-design-026.md, estado "Activo".
+    const check = btn.querySelector(".mode-btn-check");
+    if (check) check.style.visibility = active ? "visible" : "hidden";
+  }
+}
+
+function toggleMode(modoId) {
+  // Un modo activo se desactiva clickeándolo de nuevo (toggle); clickear otro lo
+  // reemplaza — nunca hay dos modos activos a la vez (SPEC-026).
+  _activeModeId = _activeModeId === modoId ? null : modoId;
+  _applyActiveModeVisuals();
+  // `.mode-btn` nunca se deshabilita (ni siquiera con una respuesta en curso, per
+  // ui-design-026.md "Estados") — togglear siempre está permitido, y el bridge se entera
+  // igual para que el selector de modelo refleje "Fijado: ..." si corresponde.
+  setActiveMode(_activeModeId || "");
+}
+
+export function renderModes(modes) {
+  // REQ-026 addendum 1: `#actions-row` reemplaza a `#modes-row`/`#quick-actions-row` (dos
+  // filas separadas) — ahora los 4 modos y "Recuérdame algo" comparten una única fila sin
+  // salto de línea (SPEC-026-addendum-1.md, "Layout"). Esta función limpia la fila entera
+  // y la deja con solo los 4 modos; `renderQuickActions()` (llamada siempre después, ver
+  // `app.js::onChipsLoaded`) AGREGA "Recuérdame algo" al final sin volver a limpiar — el
+  // orden de las dos llamadas importa.
+  const row = $("actions-row");
   row.replaceChildren();
-  for (const chip of chips) {
+  for (const modo of modes) {
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "chip";
+    btn.className = "mode-btn";
+    btn.dataset.modeId = modo.id;
+    btn.setAttribute("aria-pressed", "false");
+    btn.title = modo.label;
 
-    if (chip.kind === "action" && chip.risk_level) {
-      const dot = document.createElement("span");
-      dot.className = `chip-risk-dot chip-risk-${chip.risk_level}`;
-      btn.appendChild(dot);
-    }
+    const iconName = _MODE_ICONS[modo.id];
+    if (iconName) btn.appendChild(icon(iconName));
 
     const label = document.createElement("span");
+    label.className = "mode-btn-label";
+    label.textContent = modo.label;
+    btn.appendChild(label);
+
+    // Reservado desde el primer render — nunca se agrega/quita del DOM (ver
+    // `_applyActiveModeVisuals`).
+    const check = icon("check", "mode-btn-check");
+    check.style.visibility = "hidden";
+    btn.appendChild(check);
+
+    btn.addEventListener("click", () => toggleMode(modo.id));
+    row.appendChild(btn);
+  }
+  _applyActiveModeVisuals();
+}
+
+// REQ-026: al cambiar de conversación (nueva, cargada del historial, o limpiada) el modo
+// activo no debe sobrevivir — es estado del turno que se está por escribir, no de la
+// conversación que se acaba de abrir.
+export function resetActiveMode() {
+  if (_activeModeId === null) return;
+  _activeModeId = null;
+  _applyActiveModeVisuals();
+  setActiveMode("");
+}
+
+// --------------------------------------------------------------------------- accesos rápidos
+
+// REQ-026 addendum 1: "Recuérdame algo" dejó de ser un `.chip` en píldora aparte — ahora
+// comparte el componente `.mode-btn` con los 4 modos (mismo tamaño/forma/ícono), pero SIN
+// `aria-pressed`, SIN `.mode-btn--active` y SIN el nodo de check reservado: no es un modo,
+// nunca tiene estado activo, solo prellena el input al clickear (ui-design-026-addendum-1.md
+// §2). Se agrega al final de `#actions-row` — nunca limpia la fila, `renderModes()` ya lo
+// hizo (ver su comentario).
+export function renderQuickActions(items) {
+  const row = $("actions-row");
+  for (const chip of items) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "mode-btn";
+    btn.title = chip.label;
+
+    if (chip.icon) btn.appendChild(icon(chip.icon));
+
+    const label = document.createElement("span");
+    label.className = "mode-btn-label";
     label.textContent = chip.label;
     btn.appendChild(label);
 
@@ -161,6 +259,9 @@ function cerrarMenuDeModelos() {
 }
 
 function alternarMenuDeModelos() {
+  // REQ-022/CA-02: defensa en profundidad — el botón ya está `disabled` cuando hay un
+  // destino fijado por tarea, esto cubre una apertura programática.
+  if (_modelos && _modelos.fijado_por_tarea) return;
   if (document.getElementById("model-menu") !== null) {
     cerrarMenuDeModelos();
     return;
@@ -210,8 +311,25 @@ function alternarMenuDeModelos() {
 export function renderModels(payload) {
   _modelos = payload;
   const etiqueta = document.getElementById("model-btn-label");
-  if (etiqueta) etiqueta.textContent = payload.activo.resumen || payload.activo.label || "modelo";
   const boton = document.getElementById("model-btn");
+  const fijado = payload.fijado_por_tarea;
+
+  if (fijado) {
+    // REQ-022/CA-02: "razonamiento" tiene destino fijado en `task_providers` — el
+    // selector no tendría ningún efecto real, así que se muestra deshabilitado en vez
+    // de dejar elegir algo que el backend va a ignorar.
+    if (etiqueta) etiqueta.textContent = `Fijado: ${fijado.etiqueta}`;
+    if (boton) {
+      boton.disabled = true;
+      boton.title = `Fijado desde Configuración: ${fijado.etiqueta}`;
+    }
+    if (document.getElementById("model-menu") !== null) cerrarMenuDeModelos();
+    return;
+  }
+
+  // REQ-022/CA-05: por si el botón había quedado deshabilitado de una carga anterior.
+  if (boton) boton.disabled = false;
+  if (etiqueta) etiqueta.textContent = payload.activo.resumen || payload.activo.label || "modelo";
   if (boton) {
     boton.title = `Responde ${payload.activo.label}${payload.activo.modelo ? " · " + payload.activo.modelo : ""}`;
   }

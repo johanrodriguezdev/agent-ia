@@ -70,15 +70,20 @@ logger = logging.getLogger(__name__)
 # cual — ver docstring del módulo, nota sobre `conversation_list_updated`.
 _CONVERSATION_PAGE_SIZE = 30
 
-# CA-39: los 5 chips de `ui/widgets/composer.py::_CHIPS` (REQ-013, eliminado), portados
-# con el mismo contenido literal (arquitectura-015.md §1, fila CA-39).
-_CHIPS: List[Dict[str, str]] = [
-    {"label": "Resumen del día", "kind": "template",
-     "payload": "Dame un resumen de mi actividad reciente y tareas pendientes"},
-    {"label": "Recuérdame algo", "kind": "template", "payload": "Recuérdame que "},
-    {"label": "Investigación rápida", "kind": "template", "payload": "Investiga sobre "},
-    {"label": "📷 Captura de pantalla", "kind": "action", "payload": "take_screenshot"},
-    {"label": "🌐 Abrir navegador", "kind": "action", "payload": "open_browser"},
+# REQ-026 (addendum 1, post-prueba-manual de Johan): de los 3 accesos rápidos que
+# sobrevivían a los 5 chips originales de CA-39 (REQ-015), Johan pidió sacar "📷 Captura de
+# pantalla" y "🌐 Abrir navegador" de la barra del composer — la capacidad del agente
+# (`take_screenshot`/`open_browser` por texto/voz) NO se toca, solo este atajo de UI
+# (SPEC-026-addendum-1.md, "Aclaración de alcance"). Queda un único acceso rápido
+# ("Recuérdame algo"), que además deja de tener su propia fila: se renderiza junto a los 4
+# modos en `#actions-row` (mismo componente visual `.mode-btn`, sin estado de toggle —
+# `composer.js::renderQuickActions()`). Se mantiene como catálogo propio en vez de fundirse
+# en `core/composer_modes.py::listar_modos()` porque no es un modo real (no tiene
+# `tool_names`/`tarea`/`prompt_hint`, nunca prioriza nada) — opción de modelado más simple
+# señalada como válida por `ui-design-026-addendum-1.md` §1 ("Nota de frontera").
+_QUICK_ACTIONS: List[Dict[str, str]] = [
+    {"label": "Recuérdame algo", "kind": "template", "payload": "Recuérdame que ",
+     "icon": "bell"},
 ]
 
 # REQ-019/§3.1 — catálogo de la categoría v1 ("apertura de aplicaciones y navegación",
@@ -161,7 +166,7 @@ class Bridge(QObject):
     theme_changed = pyqtSignal(str)
     confirmation_requested = pyqtSignal(str, str, str)   # request_id, action_name, message
     file_attached = pyqtSignal(str, str, bool, str)      # path, name, accepted, reason
-    chips_loaded = pyqtSignal(str)                   # json: [{label, kind, payload, risk_level}]
+    chips_loaded = pyqtSignal(str)                   # json: {modes: [...], quick_actions: [...]} (REQ-026)
     error_occurred = pyqtSignal(str)
     window_maximized_changed = pyqtSignal(bool)
 
@@ -245,6 +250,14 @@ class Bridge(QObject):
         # habia un archivo. Se guarda de este lado porque es quien arma el turno.
         self._pending_attachment: Optional[str] = None
 
+        # REQ-026: espejo EFÍMERO (nunca se persiste a disco) del modo activo en el
+        # frontend. `composer.js` es la fuente de verdad real — este espejo solo existe
+        # para que `request_models()` pueda reflejar "fijado por tarea" cuando se invoca
+        # desacoplado de `send_message()` (p. ej. al abrir el menú de modelos, o al
+        # arrancar la app). NUNCA se usa para decidir el ruteo real de un turno:
+        # `send_message(text, modo)` siempre usa su propio argumento explícito.
+        self._modo_activo: Optional[str] = None
+
         # La terminal tiene DOS entradas posibles —el panel y la herramienta del agente— y
         # una sola salida: esta. Se engancha al construir el bridge, no al abrir el panel,
         # para que un comando lanzado por el agente con el panel cerrado igual termine
@@ -282,7 +295,10 @@ class Bridge(QObject):
     @pyqtSlot()
     def request_initial_state(self) -> None:
         """JS llama esto una única vez, apenas `window.bridge` está disponible."""
-        self.chips_loaded.emit(json.dumps(_build_chips_payload()))
+        self.chips_loaded.emit(json.dumps({
+            "modes": _build_modes_payload(),
+            "quick_actions": _build_quick_actions_payload(),
+        }))
         self.theme_changed.emit(resolve_theme_name(config_manager.get_ui_theme()))
         self._load_conversations(offset=0)
 
@@ -295,11 +311,18 @@ class Bridge(QObject):
             self.setup_required.emit("conexiones")
 
     # ------------------------------------------------------------ mensajes (§4.1)
-    @pyqtSlot(str)
-    def send_message(self, text: str) -> None:
+    @pyqtSlot(str, str)
+    def send_message(self, text: str, modo: str = "") -> None:
         """CA-20..CA-24 — guarda `text` como pendiente, deshabilita envío (guard
         server-side, CA-24: el bridge es invocable desde JS sin pasar por el estado
-        `disabled` del DOM, a diferencia de un `QWidget` deshabilitado) y resuelve."""
+        `disabled` del DOM, a diferencia de un `QWidget` deshabilitado) y resuelve.
+
+        `modo` (REQ-026) es el id del modo estratégico activo en el composer
+        (`""` si no hay ninguno) — se pasa tal cual a `resolve()`, que lo propaga hasta
+        `reasoning_loop.run()` para priorizar tools y, si el modo lo define, fijar
+        `tarea`. `composer.js::doSend()` es el único call site real; el default vacío
+        acá es solo defensivo (Qt invoca el slot con los 2 args siempre).
+        """
         if self._resolution_in_flight:
             logger.warning("send_message() ignorado: ya hay una resolución en curso")
             return
@@ -330,7 +353,7 @@ class Bridge(QObject):
 
         from core.resolution import resolve
         run_async(resolve, self._on_resolve_done, self._on_resolve_error, text,
-                   ChannelType.DESKTOP, user_id=OWNER_USER_ID)
+                   ChannelType.DESKTOP, user_id=OWNER_USER_ID, modo=(modo or None))
 
     def _on_stream_chunk(self, pedazo: str) -> None:
         """Recibe un pedazo de respuesta DESDE EL HILO que habla con el modelo.
@@ -1050,10 +1073,35 @@ class Bridge(QObject):
             logger.info(f"comando no ejecutado en la terminal: {e}")
             self.notice_shown.emit("info", "No ejecuté el comando.")
 
+    # ------------------------------------------------------------ modos (REQ-026)
+    def _tarea_activa(self) -> str:
+        """`tarea` efectiva según el modo activo (espejo `self._modo_activo`), o
+        `"razonamiento"` si no hay modo o el modo no fija ninguna. Único lugar que
+        resuelve esta lógica — la usan tanto `request_models()` como `set_active_mode()`
+        para no duplicarla."""
+        from core.composer_modes import get_mode
+
+        modo_def = get_mode(self._modo_activo)
+        if modo_def and modo_def.tarea:
+            return modo_def.tarea
+        return "razonamiento"
+
+    @pyqtSlot(str)
+    def set_active_mode(self, modo_id: str) -> None:
+        """JS llama esto al togglear un `.mode-btn` (activar o desactivar). Actualiza el
+        espejo efímero y reemite `models_loaded` con la tarea del nuevo modo, para que el
+        selector del composer refleje "Fijado: ..." si corresponde (mismo patrón que
+        REQ-022). `modo_id` vacío = "sin modo" (toggle a apagado)."""
+        from core.composer_modes import get_mode
+
+        modo_def = get_mode(modo_id)
+        self._modo_activo = modo_def.id if modo_def else None
+        self.models_loaded.emit(json.dumps(_build_models_payload(self._tarea_activa())))
+
     # ------------------------------------------------------------ proveedor y modelo
     @pyqtSlot()
     def request_models(self) -> None:
-        self.models_loaded.emit(json.dumps(_build_models_payload()))
+        self.models_loaded.emit(json.dumps(_build_models_payload(self._tarea_activa())))
 
     @pyqtSlot(str, str)
     def set_model(self, provider: str, model: str) -> None:
@@ -1062,6 +1110,20 @@ class Bridge(QObject):
         `generate_response()` lee `config.json` en CADA llamada (`get_provider_config()`),
         así que el cambio aplica desde el turno siguiente sin tocar nada más.
         """
+        from ai.llm_provider import destinos_de_tarea
+
+        if destinos_de_tarea("razonamiento"):
+            # REQ-022/CA-03/CA-04: hay un destino fijado por tarea para "razonamiento" —
+            # cambiar acá no tendría efecto real en la próxima respuesta
+            # (`_destinos_iniciales()` lo prioriza por encima de `ai_provider`/`ai_model`).
+            # Se ignora sin tocar `config.json` y sin avisar — el frontend ya debería
+            # mostrar el botón deshabilitado (CA-02), esto es el gate real del lado
+            # servidor para cuando la invocación igual llega (mismo criterio que el resto
+            # de `bridge.py`: la UI deshabilitada es cosmética, el gate que importa vive
+            # acá, porque los slots son invocables desde cualquier script de la página).
+            logger.info("set_model ignorado: 'razonamiento' tiene un destino fijado por tarea")
+            return
+
         if provider not in _MODELOS_CONOCIDOS:
             logger.warning(f"proveedor desconocido: {provider!r} — se ignora")
             self.notice_shown.emit("error", "Ese proveedor no está en el catálogo.")
@@ -1893,8 +1955,15 @@ def _avisos_de_claves(tareas: List[Dict[str, Any]]) -> List[str]:
     ]
 
 
-def _build_models_payload() -> Dict[str, Any]:
-    """Catálogo + qué está activo ahora, para el selector del composer."""
+def _build_models_payload(tarea: str = "razonamiento") -> Dict[str, Any]:
+    """Catálogo + qué está activo ahora, para el selector del composer.
+
+    `tarea` (REQ-026): generaliza el "fijado por tarea" de REQ-022 más allá de
+    `"razonamiento"` hardcodeado — ahora la decide el modo activo del composer
+    (`Bridge._tarea_activa()`), sin cambiar nada acá salvo qué clave se consulta.
+    """
+    from ai.llm_provider import destinos_de_tarea
+
     activo_proveedor = config_manager.get_ai_provider()
     activo_modelo = config_manager.get_ai_model()
     proveedores = [
@@ -1907,6 +1976,18 @@ def _build_models_payload() -> Dict[str, Any]:
         for pid, datos in _MODELOS_CONOCIDOS.items()
     ]
     etiqueta = _MODELOS_CONOCIDOS.get(activo_proveedor, {}).get("label", activo_proveedor or "?")
+
+    # REQ-022/CA-01 (generalizado por REQ-026): si `tarea` tiene destino(s) fijado(s) en
+    # `task_providers`, el selector del chat no tiene efecto real — se le informa al
+    # frontend para que lo muestre deshabilitado (CA-02) en vez de dejar que el usuario
+    # elija algo que no aplica.
+    fijados = destinos_de_tarea(tarea)
+    fijado_por_tarea = None
+    if fijados:
+        fijado_por_tarea = {
+            "etiqueta": " / ".join(_destino_legible(p, m) for p, m in fijados),
+        }
+
     return {
         "proveedores": proveedores,
         "activo": {
@@ -1916,6 +1997,7 @@ def _build_models_payload() -> Dict[str, Any]:
             # Lo que se ve en el composer: el modelo si se conoce, si no el proveedor.
             "resumen": activo_modelo or etiqueta,
         },
+        "fijado_por_tarea": fijado_por_tarea,   # None si CA-05 (sin fijar)
     }
 
 
@@ -1934,13 +2016,29 @@ def _build_assignable_payload() -> Dict[str, Any]:
     return {"flujos": flujos, "modulos": _MODULOS_ASIGNABLES}
 
 
-def _build_chips_payload() -> List[Dict[str, Any]]:
+def _build_modes_payload() -> List[Dict[str, Any]]:
+    """REQ-026 — catálogo de los 4 modos estratégicos para `#actions-row` (addendum 1:
+    antes `#modes-row`, fila propia; ahora comparte fila con "Recuérdame algo"). La
+    definición vive en `core/composer_modes.py`; acá solo se proyecta al shape que consume
+    `composer.js::renderModes()` (id + label, nada de tools/tarea/prompt_hint — eso es
+    interno del backend, el frontend no lo necesita)."""
+    from core.composer_modes import listar_modos
+
+    return [{"id": modo.id, "label": modo.label} for modo in listar_modos()]
+
+
+def _build_quick_actions_payload() -> List[Dict[str, Any]]:
     """CA-40 — `risk_level` se consulta en el momento (nunca hardcodeado): si la
-    clasificación de una acción cambia, el color del chip se actualiza solo."""
+    clasificación de una acción cambia, el color del chip se actualiza solo (la rama
+    `kind == "action"` queda sin consumidor real desde el addendum 1 de REQ-026, que redujo
+    `_QUICK_ACTIONS` a un único acceso `template` — se deja sin retirar por si vuelve a
+    necesitarse un acceso rápido de acción más adelante, mismo criterio que el addendum
+    aplicó a `run_chip_action()`: código sin uso actual no es lo mismo que código a borrar
+    a ciegas)."""
     from core.security_manager import security_manager
 
     result = []
-    for chip in _CHIPS:
+    for chip in _QUICK_ACTIONS:
         entry = dict(chip)
         if chip["kind"] == "action":
             level = security_manager.classify_action(chip["payload"])

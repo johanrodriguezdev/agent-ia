@@ -17,11 +17,80 @@
   padding: 4px 24px 18px;
 }
 
-#chips-row {
+/* REQ-026 addendum 1 (post-prueba-manual de Johan): `#modes-row`/`#quick-actions-row` (dos
+   filas separadas) se reemplazan por una única `#actions-row` — los 4 modos estratégicos +
+   "Recuérdame algo" (único acceso rápido que sobrevive, ver `composer.js::renderQuickActions()`)
+   con el mismo peso visual, en una sola fila sin salto de línea
+   (`ui-design-026-addendum-1.md` §1/§3). `flex-wrap: nowrap` a propósito: la SPEC exige que
+   los 5 elementos nunca salten a una segunda línea, ya no vale el reflow que sí era
+   aceptable con 2 filas. `margin-bottom: 10px` hereda el valor de la antigua
+   `#quick-actions-row` (la fila más cercana al input) para que el input no se corra de
+   lugar. */
+#actions-row {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  flex-wrap: nowrap;
+  gap: 6px;
   margin-bottom: 10px;
+}
+
+/* REQ-026 — botones de `#actions-row`: los 4 modos estratégicos (Código/script,
+   Investigación, Nodos/flujos, Tareas) MÁS "Recuérdame algo" (variante sin toggle, ver
+   `composer.js::renderQuickActions()` y `.mode-btn--active` más abajo). Más peso visual
+   que `.chip` (que queda sin consumidores en el composer tras el addendum 1, tan mantenida
+   por si hace falta en otro lado — no se retira del CSS): fondo sólido + borde propio en
+   vez de solo texto, `--radius-md` (esquinas, no píldora). Nunca se deshabilitan
+   (ui-design-026.md, "Estados" — togglear/clickear tiene que poder hacerse incluso con una
+   respuesta en curso).
+   Tamaño reducido en el addendum 1 (antes: padding 8px 14px, font-size 13px, gap 7px) para
+   que 5 elementos (antes eran 4) entren sin salto en `--content-max: 760px`
+   (`ui-design-026-addendum-1.md` §3 — estimado con ~13% de margen, sin verificación real en
+   navegador; si algún día no entra, el fallback documentado es acortar el label de
+   "Recuérdame algo" a "Recordar", no volver a tocar este tamaño). */
+.mode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  background-color: var(--bg-secondary);
+  color: var(--text-secondary);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background-color 140ms, border-color 140ms, color 140ms;
+}
+
+.mode-btn:hover {
+  background-color: var(--bg-hover);
+  border-color: var(--text-secondary);
+  color: var(--text-primary);
+}
+
+.mode-btn:focus-visible {
+  outline: 2px solid var(--text-accent);
+  outline-offset: 1px;
+}
+
+/* Icono del check reservado desde el primer render (`composer.js` lo agrega siempre,
+   oculto con `visibility`) para que activar/desactivar un modo no mueva el resto de los
+   botones de la fila. */
+.mode-btn-check {
+  width: 14px;
+  height: 14px;
+}
+
+.mode-btn--active {
+  background-color: var(--text-accent);
+  border-color: transparent;
+  color: #ffffff;
+}
+
+/* CA-36 (mismo patrón que `.composer-send-btn` más abajo): blanco sobre `--text-accent`
+   no llega al umbral de 3:1 en el tema oscuro. `--bg-primary` sí — verificado AA en
+   ui-design-026.md (7.70:1 oscuro, 5.19:1 claro). */
+:root[data-theme="dark"] .mode-btn--active {
+  color: var(--bg-primary);
 }
 
 .chip {

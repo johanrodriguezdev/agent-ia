@@ -13,11 +13,14 @@ from typing import Optional
 from agents.tool_registry import execute_tool
 from core import streaming
 from core.cancelacion import abortar_si_cancelado
-from ai.llm_provider import LLMToolResponse, es_respuesta_de_fallo, generate_response
+from ai.llm_provider import (
+    LLMToolResponse, con_aviso_de_cambio, es_respuesta_de_fallo, generate_response,
+)
 from config_manager import get_agent_name, get_display_name, get_user_title
 from core.agent_context import agent_context_manager
-from core.security_manager import ActionDenied, security_manager
+from core.security_manager import ActionDenied, ChannelType, security_manager
 from core.address import momento_actual, vocative, vocative_start
+from core.composer_modes import ModoComposer, get_mode
 from core.progress import report as progress_report
 from core.identity import build_identity_block
 
@@ -76,12 +79,18 @@ def _bloque_de_lo_definido_por_el_usuario() -> str:
     return ("\n\n" + "\n".join(partes)) if partes else ""
 
 
-def _build_system_prompt() -> str:
+def _build_system_prompt(modo_def: Optional[ModoComposer] = None) -> str:
     """Arma el prompt de sistema con el nombre configurado del agente.
 
     Se resuelve en cada llamada (no una vez al importar) para que renombrar al agente o
     cambiar el tratamiento en la pantalla de Configuración tenga efecto inmediato, sin
     reiniciar el proceso ni dejar al agente presentándose con el nombre viejo.
+
+    `modo_def` (REQ-026): si el composer tiene un modo estratégico activo, su
+    `prompt_hint` se agrega SIEMPRE al final, justo antes del bloque de fecha/hora — nunca
+    en medio del prompt — para no romper el cacheo de prefijo de los proveedores que lo
+    soportan salvo cuando el usuario realmente cambia de modo (mismo criterio que ya
+    aplica el bloque de fecha/hora unas líneas más abajo).
     """
     agent_name = get_agent_name()
 
@@ -99,6 +108,12 @@ def _build_system_prompt() -> str:
         "herramienta. Si el resultado de una herramienta indica que la acción fue "
         "denegada, no la reintentes ni intentes una alternativa — infórmalo y detente."
     ) + _bloque_de_lo_definido_por_el_usuario()
+
+    # REQ-026: la pista del modo activo va al final de las reglas, DESPUÉS del bloque de
+    # rutinas/comandos aprendidos y ANTES del de fecha/hora — mismo motivo de caché que
+    # `momento` un poco más abajo.
+    if modo_def is not None and modo_def.prompt_hint:
+        operating_rules += f"\n\n{modo_def.prompt_hint}"
 
     # La fecha y hora va AL FINAL, nunca en el cuerpo — mismo criterio que
     # `ai/claude_brain.py`: los proveedores con caché de prefijo solo reutilizan lo que no
@@ -125,17 +140,36 @@ def _build_system_prompt() -> str:
     )
 
 
-def _build_tool_list(channel=None) -> list[dict]:
+def _reordenar_priorizando(catalogo: list[dict], tool_names: tuple) -> list[dict]:
+    """REQ-026 — mueve al frente de `catalogo` las entradas cuyo `"name"` está en
+    `tool_names`, preservando el orden relativo dentro de cada grupo. NUNCA filtra: el
+    catálogo completo se conserva, solo cambia el orden. Es intencional (arquitectura-026,
+    riesgo "reordenar, no filtrar") — un mensaje que llega con un modo activo pero que no
+    tiene nada que ver con él tiene que seguir pudiendo usar cualquier otra tool.
+    """
+    priorizadas = [t for t in catalogo if t.get("name") in tool_names]
+    resto = [t for t in catalogo if t.get("name") not in tool_names]
+    return priorizadas + resto
+
+
+def _build_tool_list(channel=None, modo_def: Optional[ModoComposer] = None) -> list[dict]:
     """CA-02 — lo que se le ofrece al modelo, ya filtrado por canal.
 
     La lista la arma `agents/tool_registry.py::catalogo_para_modelo()`, que es de donde la
     lee tambien `ai/claude_brain.py`: con una copia por motor, la reduccion del catalogo
     aplicaba en escritorio y no en Telegram. El filtro NO es el control de seguridad — ese
     sigue dentro de `execute_tool()` (CA-11).
+
+    `modo_def` (REQ-026): si hay un modo estratégico activo, sus `tool_names` se
+    priorizan (reordenan al frente) vía `_reordenar_priorizando()` — nunca se filtra el
+    resto del catálogo.
     """
     from agents.tool_registry import catalogo_para_modelo
 
-    return catalogo_para_modelo(channel)
+    catalogo = catalogo_para_modelo(channel)
+    if modo_def is not None and modo_def.tool_names:
+        catalogo = _reordenar_priorizando(catalogo, modo_def.tool_names)
+    return catalogo
 
 
 def _load_prior_turns(agent_name: str, user_id: str) -> list[dict]:
@@ -205,7 +239,7 @@ def _append_history_lines(lines: list[str], history: list[dict]) -> None:
 
 
 def run(task: str, channel, user_id: str = "default", agent_name: str = "reasoning_loop",
-        estado: Optional[dict] = None) -> str:
+        estado: Optional[dict] = None, modo: Optional[str] = None) -> str:
     """Punto de entrada del bucle de razonamiento.
 
     `estado`, si se pasa, es un dict que el bucle RELLENA: `{"denied": True}` cuando corto
@@ -221,12 +255,19 @@ def run(task: str, channel, user_id: str = "default", agent_name: str = "reasoni
     `security_manager.py:239-246` y el patrón de `core/resolution.py::_try_intent()`. Los
     argumentos de un tool call que el LLM proponga para `channel`/`user_id` (si los
     propusiera) se descartan siempre a favor de estos dos parámetros.
+
+    `modo` (REQ-026): id del modo estratégico activo del composer de escritorio, o `None`.
+    Se resuelve acá mismo con `get_mode()` (fail-safe: un id vacío o desconocido equivale
+    a "sin modo") y de ahí salen tanto el catálogo priorizado como la `tarea` que rutea
+    esta llamada.
     """
+    modo_def = get_mode(modo)
     resolved_channel = security_manager.resolve_channel(channel)
-    tools = _build_tool_list(resolved_channel)
+    tools = _build_tool_list(resolved_channel, modo_def)
 
     history: list[dict] = []
     final_text: Optional[str] = None
+    aviso_final: dict = {}   # REQ-022/CA-12 — se "fija" solo en la vuelta que gana
     prior_turns = _load_prior_turns(agent_name, user_id)   # REQ-021/CA-22
 
     for call_number in range(1, MAX_LLM_CALLS + 1):
@@ -240,30 +281,38 @@ def run(task: str, channel, user_id: str = "default", agent_name: str = "reasoni
         progress_report("Pensando" if call_number == 1 else f"Pensando ({call_number})")
 
         prompt = _build_prompt(task, history, prior_turns)
+        aviso_cambio: dict = {}   # REQ-022/CA-12 — vacío otra vez en cada vuelta
         # `permitido()`: lo que salga de ESTA llamada es la respuesta al usuario y se
         # muestra mientras se escribe. Las herramientas que se ejecuten despues pueden
         # consultar al modelo por su cuenta (resumir un correo, leer una captura) y eso NO
         # tiene que aparecer en la burbuja del chat: quedan fuera del bloque.
+        # `tarea`: por defecto "razonamiento" —es LA respuesta al usuario, con herramientas
+        # y varias vueltas—, salvo que el modo activo fije la suya (REQ-026, solo Código e
+        # Investigación lo hacen; Flujos y Tareas necesitan el modelo general de varias
+        # vueltas). Quien quiera mandarla a un modelo distinto del general —uno gratuito
+        # con tool-calling, por ejemplo— lo configura en `task_providers` sin tocar el
+        # resto del sistema.
+        tarea = modo_def.tarea if modo_def and modo_def.tarea else "razonamiento"
         with streaming.permitido():
             response = generate_response(
-                [{"role": "user", "content": prompt}], _build_system_prompt(), tools=tools,
-                # `tarea="razonamiento"`: es LA respuesta al usuario, con herramientas y
-                # varias vueltas. Quien quiera mandarla a un modelo distinto del general
-                # —uno gratuito con tool-calling, por ejemplo— lo configura en
-                # `task_providers` sin tocar el resto del sistema.
-                tarea="razonamiento",
+                [{"role": "user", "content": prompt}], _build_system_prompt(modo_def),
+                tools=tools,
+                tarea=tarea,
+                aviso=aviso_cambio,   # REQ-022/CA-12
             )
 
         if not isinstance(response, LLMToolResponse):
             # CONFIRMADO 1: degradación silenciosa (proveedor sin tool-calling) — texto
             # plano, se acepta como respuesta final.
             final_text = response
+            aviso_final = aviso_cambio
             break
 
         if not response.tool_calls:
             # El LLM respondió sin pedir ninguna tool: se acepta como final (caso borde de
             # SPEC — no confundir "no quiso usar herramientas" con "hay que insistir").
             final_text = response.text or f"No obtuve una respuesta útil del modelo{vocative()}."
+            aviso_final = aviso_cambio
             break
 
         # Un tool call por iteración (decide -> ejecuta -> evalúa, CA-07). Si el modelo
@@ -309,6 +358,14 @@ def run(task: str, channel, user_id: str = "default", agent_name: str = "reasoni
     # "sube el volumen" tiene que seguir funcionando.
     if estado is not None and es_respuesta_de_fallo(final_text):
         estado["sin_modelo"] = True
+
+    # REQ-022/CA-12/13/14/16/17: se evalúa DESPUÉS de `es_respuesta_de_fallo()` — cuando
+    # hubo un swap exitoso, `final_text` ya es una respuesta real (nunca `SIN_PROVEEDOR`),
+    # así que el orden no cambia ese chequeo en ningún caso. Forma corta en VOICE, larga
+    # (con proveedor y modelo) en cualquier otro canal.
+    final_text = con_aviso_de_cambio(
+        final_text, aviso_final, corto=(resolved_channel == ChannelType.VOICE),
+    )
 
     # CA-10: un solo par user/assistant por invocación completa del loop, sin importar
     # cuántas iteraciones internas hubo.

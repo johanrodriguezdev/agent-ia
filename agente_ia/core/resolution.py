@@ -656,6 +656,7 @@ def _try_intent(text: str, channel: "ChannelType", user_id: str) -> Optional[Res
 def _try_claude(
     text: str, channel: "ChannelType", user_id: str,
     claude_fn: Optional[Callable[[str], str]] = None,
+    modo: Optional[str] = None,
 ) -> ResolutionResult:
     """Último recurso — siempre responde algo, nunca retorna `None`.
 
@@ -665,6 +666,11 @@ def _try_claude(
     que `resolution.py` tenga que conocer `GlassMessage`/sesiones de usuario — el ORDEN de
     resolución (CA-03) es idéntico en los tres canales, solo el detalle de implementación
     de este último paso puede variar por canal, igual que ya variaba antes de este REQ.
+
+    `modo` (REQ-026) es el id del modo estratégico activo en el composer de escritorio.
+    Solo tiene efecto en el camino `claude_fn is None` (desktop, vía `reasoning_loop.run()`
+    directo) — Telegram/Discord siguen pasando por `claude_fn` sin ningún concepto de modo,
+    así que ese branch ni lo lee.
     """
     from ai.llm_provider import es_respuesta_de_fallo
 
@@ -679,7 +685,18 @@ def _try_claude(
     from core.reasoning_loop import run as reasoning_run
 
     estado: dict = {}
-    result = reasoning_run(text, channel, user_id, estado=estado)
+    # `modo` se pasa solo si viene seteado (REQ-026): varios dobles de test instalan un
+    # `run()` falso con la firma previa (sin `modo`) vía
+    # `monkeypatch.setattr("core.reasoning_loop.run", ...)` — a diferencia de un
+    # `unittest.mock.patch()` (MagicMock, tolera kwargs desconocidos), esos son funciones
+    # planas y explotan con `TypeError` ante un kwarg que no esperan. Ninguno de esos
+    # caminos existentes pasa nunca un `modo` real (solo `Bridge.send_message()` lo hace),
+    # así que omitir el kwarg cuando es `None` preserva la firma exacta de antes para todo
+    # lo que no es la funcionalidad nueva, sin perder el hilo real de REQ-026.
+    if modo is not None:
+        result = reasoning_run(text, channel, user_id, estado=estado, modo=modo)
+    else:
+        result = reasoning_run(text, channel, user_id, estado=estado)
 
     if estado.get("sin_modelo"):
         local = _resolver_sin_modelo(text, channel, user_id)
@@ -826,6 +843,7 @@ def _marcar_si_quedo_pregunta(
 def resolve(
     text: str, channel, user_id: str = "default",
     claude_fn: Optional[Callable[[str], str]] = None,
+    modo: Optional[str] = None,
 ) -> ResolutionResult:
     """Punto único de resolución de O.R.I.O.N. (CA-01).
 
@@ -837,6 +855,10 @@ def resolve(
     con `security_manager.resolve_channel()`, la única función de resolución de canal del
     sistema (REQ-005), y viaja ya resuelto a cada resolver. Nunca se infiere de `params`
     ni de texto libre (mismo invariante de `security_manager.py:214-221`).
+
+    `modo` (REQ-026): id del modo estratégico activo del composer de escritorio, o `None`
+    si no hay ninguno. Solo lo lee `_try_claude` — se pasa acá y no más abajo porque
+    `resolve()` es el único punto que conoce a todos los resolvers y decide cuál invocar.
     """
     resolved_channel = security_manager.resolve_channel(channel)
     logger.info(f"resolve() canal={resolved_channel.value} user={user_id}: {text[:80]}")
@@ -849,7 +871,7 @@ def resolve(
         abortar_si_cancelado(f"resolve, antes de '{name}'")
         try:
             if name == "claude":
-                result = fn(text, resolved_channel, user_id, claude_fn=claude_fn)
+                result = fn(text, resolved_channel, user_id, claude_fn=claude_fn, modo=modo)
             else:
                 result = fn(text, resolved_channel, user_id)
         except ActionDenied as e:

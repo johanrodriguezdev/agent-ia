@@ -374,8 +374,16 @@ def test_el_boton_de_manos_libres_enciende_y_apaga_el_worker(ventana, qtbot):
 
 
 def test_un_chip_de_plantilla_prellena_el_campo(ventana, qtbot):
+    """REQ-026 addendum 1: "Recuérdame algo" dejó de ser un `.chip` en píldora — ahora
+    comparte `#actions-row`/`.mode-btn` con los 4 modos y se distingue de ellos por no
+    llevar `dataset.modeId` (ui-design-026-addendum-1.md §2). El comportamiento de click
+    (prellenar el input, no ejecutar ninguna acción) no cambió."""
     _, page, registro = ventana
-    _click(page, "document.querySelectorAll('.chip')[0]")
+    _click(
+        page,
+        "Array.from(document.querySelectorAll('#actions-row .mode-btn'))"
+        ".find(b => !b.dataset.modeId)",
+    )
     _esperar(qtbot, 300)
 
     assert _run_js(page, "document.getElementById('composer-input').value") != ""
@@ -383,22 +391,91 @@ def test_un_chip_de_plantilla_prellena_el_campo(ventana, qtbot):
     _sin_errores(page)
 
 
-def test_un_chip_de_accion_ejecuta_su_accion(ventana, qtbot):
-    """Los chips de acción son los únicos botones que disparan una acción del sistema desde
-    la pantalla: se comprueba que llegue al registro de acciones, con el nombre correcto."""
-    _, page, registro = ventana
-    nombre = _run_js(page, """
-        (function () {
-            const chips = Array.from(document.querySelectorAll('.chip'));
-            const accion = chips.find(c => c.querySelector('.chip-risk-dot'));
-            accion.click();
-            return accion.textContent.trim();
-        })()
-    """)
+def test_ya_no_hay_accesos_rapidos_de_accion_pero_la_capacidad_sigue_intacta(ventana, qtbot):
+    """SPEC-026-addendum-1.md: "📷 Captura de pantalla" y "🌐 Abrir navegador" desaparecen
+    como botón del composer (ya no queda ningún `.chip`/`.chip-risk-dot` para clickear — se
+    verifica la ausencia real en el DOM, no solo que el código ya no los liste), pero "la
+    capacidad del agente... no se toca — el agente sigue pudiendo ejecutar `take_screenshot`
+    y `open_browser` cuando el usuario lo pide por texto o voz". Se comprueba esa segunda
+    mitad invocando `run_chip_action()` directamente sobre el bridge real de la ventana — el
+    mismo mecanismo que usaría el agente, ya sin ningún botón que lo dispare desde acá."""
+    window, page, registro = ventana
+
+    sin_chips_de_accion = _run_js(page, """(
+        document.querySelectorAll('.chip').length === 0 &&
+        document.querySelectorAll('.chip-risk-dot').length === 0
+    )""")
+    assert sin_chips_de_accion is True
+
+    window.bridge.run_chip_action("take_screenshot")
     qtbot.waitUntil(lambda: registro["acciones"] != [], timeout=5000)
 
     assert registro["acciones"] == ["take_screenshot"]
-    assert nombre                       # el chip tiene etiqueta visible
+    _sin_errores(page)
+
+
+def test_actions_row_tiene_exactamente_5_elementos_en_una_sola_fila_sin_salto(ventana, qtbot):
+    """SPEC-026-addendum-1.md, criterios "Catálogo final" y "Layout — una sola fila":
+    exactamente 5 elementos (4 modos + "Recuérdame algo"), un único contenedor
+    (`#modes-row`/`#quick-actions-row` ya no existen), `flex-wrap: nowrap` de verdad en el
+    CSS computado (no solo en el archivo fuente), y ninguno de los 5 cae a una segunda línea
+    en el ancho estándar de la app (mismo `offsetTop` para los 5). Verificación en DOM real
+    vía `QWebEngineView`, cerrando el "pendiente de confirmación visual real" que
+    `desarrollo-log-026.md` dejó anotado para esta pasada de `orion-tester`."""
+    _, page, _ = ventana
+
+    datos = _run_js(page, """
+        (function () {
+            const row = document.getElementById('actions-row');
+            const botones = Array.from(row.querySelectorAll('.mode-btn'));
+            const estilo = getComputedStyle(row);
+            const tops = new Set(botones.map(b => b.offsetTop));
+            return {
+                total: botones.length,
+                sinModo: botones.filter(b => !b.dataset.modeId).length,
+                flexWrap: estilo.flexWrap,
+                unaSolaFila: tops.size === 1,
+                quickActionsRowExiste: document.getElementById('quick-actions-row') !== null,
+                modesRowExiste: document.getElementById('modes-row') !== null,
+            };
+        })()
+    """)
+
+    assert datos["total"] == 5
+    assert datos["sinModo"] == 1
+    assert datos["flexWrap"] == "nowrap"
+    assert datos["unaSolaFila"] is True
+    assert datos["quickActionsRowExiste"] is False
+    assert datos["modesRowExiste"] is False
+    _sin_errores(page)
+
+
+def test_recuerdame_algo_nunca_queda_con_estado_activo_al_togglear_un_modo(ventana, qtbot):
+    """SPEC-026-addendum-1.md: "Recuérdame algo" no adopta el comportamiento de modo — no
+    lleva `aria-pressed`, no queda resaltado, no tiene ícono de check reservado. Se togglea
+    un modo real (Código) y se confirma que "Recuérdame algo" sigue intacto incluso después
+    de que `_applyActiveModeVisuals()` recorrió toda la fila compartida `#actions-row`."""
+    _, page, registro = ventana
+
+    _click(page, "document.querySelector('#actions-row .mode-btn[data-mode-id=\"codigo\"]')")
+    _esperar(qtbot, 200)
+
+    estado = _run_js(page, """
+        (function () {
+            const boton = Array.from(document.querySelectorAll('#actions-row .mode-btn'))
+                .find(b => !b.dataset.modeId);
+            return {
+                ariaPressed: boton.getAttribute('aria-pressed'),
+                activo: boton.classList.contains('mode-btn--active'),
+                sinCheck: boton.querySelector('.mode-btn-check') === null,
+            };
+        })()
+    """)
+
+    assert estado["ariaPressed"] is None
+    assert estado["activo"] is False
+    assert estado["sinCheck"] is True
+    assert registro["mensajes"] == []   # togglear un modo no manda ningún mensaje
     _sin_errores(page)
 
 
@@ -547,16 +624,34 @@ def test_lo_que_se_esta_escribiendo_se_ve_y_lo_reemplaza_la_respuesta(ventana, q
 # --------------------------------------------------------------------------- modelo
 
 def test_el_selector_de_modelo_muestra_el_activo_y_lo_cambia(ventana, qtbot, monkeypatch):
-    _, page, _ = ventana
+    window, page, _ = ventana
     import config_manager
+    import ai.llm_provider as prov
 
     cambios = []
     monkeypatch.setattr(config_manager, "set_ai_provider_and_model",
                         lambda p, m="": cambios.append((p, m)))
+    # REQ-022/CA-01..05: este test verifica el selector LIBRE (sin destino fijado por
+    # tarea). `destinos_de_tarea()` lee `config.json` de disco tal cual está en la máquina
+    # que corre la suite — sin este monkeypatch, el resultado dependería de si ese archivo
+    # real tiene o no `task_providers.razonamiento` configurado. `bridge.py` la importa
+    # localmente dentro de `set_model()`/`_build_models_payload()`, así que hace falta
+    # parchear el atributo en el módulo de origen, no un import ya resuelto. El caso
+    # "fijado" se prueba aparte en
+    # `test_el_selector_de_modelo_se_deshabilita_si_esta_fijado_por_tarea`.
+    monkeypatch.setattr(prov, "destinos_de_tarea", lambda tarea: [])
 
     qtbot.waitUntil(
         lambda: _run_js(page, "document.getElementById('model-btn-label').textContent")
         not in ("", "…"),
+        timeout=5000,
+    )
+    # El primer `models_loaded` ya salió al cargar la página, ANTES del monkeypatch de
+    # arriba — se vuelve a pedir para que el payload refleje el escenario "sin fijar".
+    window.bridge.request_models()
+    qtbot.waitUntil(
+        lambda: not _run_js(page, "document.getElementById('model-btn-label').textContent")
+        .startswith("Fijado:"),
         timeout=5000,
     )
 
@@ -574,6 +669,45 @@ def test_el_selector_de_modelo_muestra_el_activo_y_lo_cambia(ventana, qtbot, mon
 
     assert cambios, "no se guardó el modelo elegido"
     assert _run_js(page, "document.getElementById('model-menu') === null") is True
+    _sin_errores(page)
+
+
+def test_el_selector_de_modelo_se_deshabilita_si_esta_fijado_por_tarea(ventana, qtbot, monkeypatch):
+    """REQ-022/CA-01/CA-02: con un destino fijado en `task_providers.razonamiento`, elegir
+    otro modelo desde el chat no tendría ningún efecto real — el botón se muestra
+    deshabilitado en vez de dejar elegir algo que el backend va a ignorar."""
+    window, page, _ = ventana
+    import config_manager
+    import ai.llm_provider as prov
+
+    cambios = []
+    monkeypatch.setattr(config_manager, "set_ai_provider_and_model",
+                        lambda p, m="": cambios.append((p, m)))
+    monkeypatch.setattr(
+        prov, "destinos_de_tarea",
+        lambda tarea: [("openrouter", "z-ai/glm-5.2:free")] if tarea == "razonamiento" else [],
+    )
+
+    qtbot.waitUntil(
+        lambda: _run_js(page, "document.getElementById('model-btn-label').textContent")
+        not in ("", "…"),
+        timeout=5000,
+    )
+    # El primer `models_loaded` ya salió al cargar la página, ANTES del monkeypatch de
+    # arriba — se vuelve a pedir para que el payload refleje el escenario "fijado".
+    window.bridge.request_models()
+    qtbot.waitUntil(
+        lambda: _run_js(page, "document.getElementById('model-btn-label').textContent")
+        .startswith("Fijado:"),
+        timeout=5000,
+    )
+    assert _run_js(page, "document.getElementById('model-btn').disabled") is True
+
+    # CA-02: ni siquiera una apertura programática del menú debe mostrar opciones.
+    _click(page, "document.getElementById('model-btn')")
+    _esperar(qtbot, 300)
+    assert _run_js(page, "document.getElementById('model-menu') === null") is True
+    assert not cambios
     _sin_errores(page)
 
 
