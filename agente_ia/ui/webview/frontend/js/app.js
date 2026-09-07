@@ -33,7 +33,8 @@ import {
   appendChunk, clearChunks,
 } from "./chat.js";
 import {
-  initComposer, setComposerEnabled, setWakeState, showAttachment, renderChips, renderModels,
+  initComposer, setComposerEnabled, setWakeState, showAttachment,
+  renderModes, renderQuickActions, resetActiveMode, renderModels,
 } from "./composer.js";
 import { initTheme, applyTheme } from "./theme.js";
 import { showConfirmModal } from "./confirm_modal.js";
@@ -100,16 +101,28 @@ async function bootstrap() {
     applyTheme(name);
     refrescarTemaTerminal();   // xterm pinta sobre canvas: no hereda el cambio de CSS
   });
-  onChipsLoaded((json) => renderChips(JSON.parse(json)));
+  onChipsLoaded((json) => {
+    const payload = JSON.parse(json);
+    // REQ-026 addendum 1: ambos catálogos comparten ahora una única fila (`#actions-row`)
+    // — el orden importa: `renderModes()` limpia la fila y pinta los 4 modos primero,
+    // `renderQuickActions()` agrega "Recuérdame algo" al final sin volver a limpiar (ver
+    // comentarios en `composer.js`).
+    renderModes(payload.modes);
+    renderQuickActions(payload.quick_actions);
+  });
 
   onConversationListUpdated((json) => renderConversationList(JSON.parse(json)));
   onConversationCleared(() => {
     clearActiveConversation();
     clearMessages();
+    resetActiveMode();   // REQ-026: el modo no sobrevive a una conversación nueva/limpiada
   });
   onConversationRemoved((conversationId) => removeConversationFromList(conversationId));
 
-  onTurnsLoaded((json) => renderTurns(JSON.parse(json)));
+  onTurnsLoaded((json) => {
+    renderTurns(JSON.parse(json));
+    resetActiveMode();   // REQ-026: tampoco sobrevive a cargar una conversación distinta
+  });
   onMessageAppended((json) => appendMessage(JSON.parse(json)));
 
   onProgressUpdated((text) => setProgress(text));

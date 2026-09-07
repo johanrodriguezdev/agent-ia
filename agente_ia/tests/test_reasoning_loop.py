@@ -268,3 +268,219 @@ def test_confirmado1_proveedor_sin_tool_calling_degrada_a_texto_plano():
     assert result == "respuesta en texto plano"
     assert mock_gen.call_count == 1
     mock_exec.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# REQ-022/CA-12, CA-13, CA-14, CA-16, CA-17 — aviso de cambio de modelo dentro del texto
+# de la respuesta. `test-results-022.md` (hallazgo de orion-tester): ninguno de estos CA
+# tenía test dedicado — `generate_response` se mockeaba siempre con `return_value` fijo,
+# que nunca rellena el parámetro `aviso` que el loop le pasa por kwargs.
+# ---------------------------------------------------------------------------
+
+def _fake_generate_response_con_aviso(aviso_a_rellenar):
+    """`generate_response(..., aviso=un_dict_vacio)` en la vida real RELLENA ese dict
+    in-place cuando hubo un swap de proveedor. Este fake reproduce ese contrato."""
+
+    def _fake(*args, **kwargs):
+        aviso = kwargs.get("aviso")
+        if aviso is not None:
+            aviso.update(aviso_a_rellenar)
+        return "la respuesta es 42"
+
+    return _fake
+
+
+def test_ca12_14_17_aviso_de_cambio_queda_en_el_texto_final_por_defecto():
+    """CA-12/CA-14/CA-17: canal desktop (no VOICE) — la forma LARGA del aviso (con
+    proveedor y modelo de origen/destino) queda pegada al final de `final_text`, el mismo
+    valor que se guarda en `agent_context` y se le muestra al usuario."""
+    aviso = {
+        "proveedor_desde": "deepseek", "modelo_desde": "deepseek-chat",
+        "proveedor_hacia": "openrouter", "modelo_hacia": "openrouter/free",
+    }
+    fake_gen = _fake_generate_response_con_aviso(aviso)
+
+    with patch("core.reasoning_loop.generate_response", side_effect=fake_gen), \
+         patch("core.reasoning_loop.execute_tool") as mock_exec, \
+         patch("core.reasoning_loop.agent_context_manager") as mock_ctx:
+        result = reasoning_loop.run("cuánto es 6x7", "desktop", "u1")
+
+    assert result == (
+        "la respuesta es 42\n\n"
+        "Cambié a openrouter (openrouter/free) porque deepseek (deepseek-chat) no respondió."
+    )
+    mock_exec.assert_not_called()
+    # CA-14: lo que se persiste en agent_context es el texto CON el aviso, no el crudo.
+    ultima_escritura = mock_ctx.update_context.call_args_list[-1]
+    assert "Cambié a" in ultima_escritura.args[2]["content"]
+
+
+def test_ca13_sin_cambio_de_destino_el_texto_no_lleva_aviso():
+    """CA-13: sin swap (aviso queda vacío), `final_text` no gana ninguna línea nueva."""
+    fake_gen = _fake_generate_response_con_aviso({})
+
+    with patch("core.reasoning_loop.generate_response", side_effect=fake_gen), \
+         patch("core.reasoning_loop.execute_tool"), \
+         patch("core.reasoning_loop.agent_context_manager"):
+        result = reasoning_loop.run("cuánto es 6x7", "desktop", "u1")
+
+    assert result == "la respuesta es 42"
+    assert "Cambié" not in result
+
+
+def test_ca16_en_canal_voice_el_aviso_es_la_forma_corta_sin_nombres_tecnicos():
+    """CA-16: `resolved_channel == ChannelType.VOICE` → forma corta, sin nombres de
+    proveedor/modelo."""
+    aviso = {
+        "proveedor_desde": "deepseek", "modelo_desde": "deepseek-chat",
+        "proveedor_hacia": "openrouter", "modelo_hacia": "openrouter/free",
+    }
+    fake_gen = _fake_generate_response_con_aviso(aviso)
+
+    with patch("core.reasoning_loop.generate_response", side_effect=fake_gen), \
+         patch("core.reasoning_loop.execute_tool"), \
+         patch("core.reasoning_loop.agent_context_manager"):
+        result = reasoning_loop.run("cuánto es 6x7", "voice", "u1")
+
+    assert result == "la respuesta es 42\n\nCambié de modelo."
+    assert "deepseek" not in result
+    assert "openrouter" not in result
+
+
+# ---------------------------------------------------------------------------
+# REQ-026 — modos estratégicos del composer: reorden de tools, prompt_hint y `tarea`
+# derivada del modo activo. `test-results-026.md` (orion-tester): ninguna de estas piezas
+# tenía cobertura — `core/composer_modes.py` es un módulo nuevo y `_reordenar_priorizando`/
+# `modo_def` en `_build_tool_list`/`_build_system_prompt`/`run()` no se ejercitaban en
+# ningún test existente.
+# ---------------------------------------------------------------------------
+
+def test_reordenar_priorizando_mueve_al_frente_sin_filtrar():
+    catalogo = [{"name": "a"}, {"name": "b"}, {"name": "c"}, {"name": "d"}]
+
+    resultado = reasoning_loop._reordenar_priorizando(catalogo, ("c", "a"))
+
+    # Las priorizadas van al frente, preservando su orden relativo original (a antes que c).
+    assert [t["name"] for t in resultado] == ["a", "c", "b", "d"]
+    # NUNCA filtra: el catálogo completo se conserva.
+    assert len(resultado) == len(catalogo)
+
+
+def test_reordenar_priorizando_sin_coincidencias_no_cambia_el_orden():
+    catalogo = [{"name": "a"}, {"name": "b"}]
+    assert reasoning_loop._reordenar_priorizando(catalogo, ("z",)) == catalogo
+
+
+def test_reordenar_priorizando_catalogo_vacio_no_rompe():
+    assert reasoning_loop._reordenar_priorizando([], ("a",)) == []
+
+
+def test_build_tool_list_con_modo_def_prioriza_sin_filtrar():
+    from core.composer_modes import ModoComposer
+
+    register_tool(ToolSpec(
+        name="req026_tool_a", description="a",
+        parameters_schema={"type": "object", "properties": {}},
+        risk_level=RiskLevel.GREEN, invoke=lambda params: "ok",
+    ))
+    register_tool(ToolSpec(
+        name="req026_tool_b", description="b",
+        parameters_schema={"type": "object", "properties": {}},
+        risk_level=RiskLevel.GREEN, invoke=lambda params: "ok",
+    ))
+    modo_def = ModoComposer(
+        id="req026_test_modo", label="Test", tool_names=("req026_tool_b",),
+        tarea=None, prompt_hint="hint de prueba",
+    )
+
+    sin_modo = reasoning_loop._build_tool_list()
+    con_modo = reasoning_loop._build_tool_list(modo_def=modo_def)
+
+    # Nunca filtra: mismo conjunto de nombres con y sin modo.
+    assert {t["name"] for t in con_modo} == {t["name"] for t in sin_modo}
+    nombres = [t["name"] for t in con_modo]
+    assert nombres.index("req026_tool_b") < nombres.index("req026_tool_a")
+
+
+def test_build_tool_list_sin_modo_def_no_reordena_nada():
+    """Regresión: `modo_def=None` (default) es idéntico al comportamiento de antes de
+    REQ-026 — mismo catálogo, mismo orden."""
+    assert (
+        [t["name"] for t in reasoning_loop._build_tool_list()]
+        == [t["name"] for t in reasoning_loop._build_tool_list(None, None)]
+    )
+
+
+def test_build_system_prompt_sin_modo_no_agrega_ninguna_frase():
+    """Regresión: sin modo activo (default `None`), el prompt no menciona ningún modo —
+    idéntico a antes de REQ-026."""
+    assert "Modo activo" not in reasoning_loop._build_system_prompt()
+    assert "Modo activo" not in reasoning_loop._build_system_prompt(None)
+
+
+def test_build_system_prompt_agrega_prompt_hint_al_final_antes_de_fecha_hora():
+    from core.composer_modes import get_mode
+
+    modo_def = get_mode("codigo")
+    prompt = reasoning_loop._build_system_prompt(modo_def)
+
+    assert modo_def.prompt_hint in prompt
+    # arquitectura-026.md: el hint va SIEMPRE al final, antes del bloque de fecha/hora —
+    # nunca en medio del prompt, para no romper el prefix-caching.
+    assert prompt.index(modo_def.prompt_hint) < prompt.index("Fecha y hora actual:")
+
+
+def test_run_con_modo_codigo_activo_fija_tarea_modo_codigo_y_agrega_el_hint():
+    direct_response = LLMToolResponse(text="listo", tool_calls=[])
+
+    with patch("core.reasoning_loop.generate_response", return_value=direct_response) as mock_gen, \
+         patch("core.reasoning_loop.execute_tool"), \
+         patch("core.reasoning_loop.agent_context_manager"):
+        result = reasoning_loop.run("escribime un script", "desktop", "u1", modo="codigo")
+
+    assert result == "listo"
+    assert mock_gen.call_args.kwargs["tarea"] == "modo_codigo"
+    assert "Modo activo: Código/script" in mock_gen.call_args.args[1]
+
+
+def test_run_con_modo_sin_tarea_fijada_sigue_usando_razonamiento():
+    """Nodos/flujos y Tareas (arquitectura-026.md §3) no fijan `tarea` — el ruteo de
+    modelo sigue siendo el de siempre aunque el modo esté activo."""
+    direct_response = LLMToolResponse(text="ok", tool_calls=[])
+
+    with patch("core.reasoning_loop.generate_response", return_value=direct_response) as mock_gen, \
+         patch("core.reasoning_loop.execute_tool"), \
+         patch("core.reasoning_loop.agent_context_manager"):
+        reasoning_loop.run("creá un flujo nuevo", "desktop", "u1", modo="flujos")
+
+    assert mock_gen.call_args.kwargs["tarea"] == "razonamiento"
+    assert "Modo activo: Nodos/flujos" in mock_gen.call_args.args[1]
+
+
+def test_run_sin_modo_activo_es_identico_a_antes_de_req026():
+    """Caso de no-regresión explícito de SPEC-026: un mensaje sin ningún modo activo se
+    comporta exactamente igual que hoy."""
+    direct_response = LLMToolResponse(text="ok", tool_calls=[])
+
+    with patch("core.reasoning_loop.generate_response", return_value=direct_response) as mock_gen, \
+         patch("core.reasoning_loop.execute_tool"), \
+         patch("core.reasoning_loop.agent_context_manager"):
+        reasoning_loop.run("qué hora es", "desktop", "u1")
+
+    assert mock_gen.call_args.kwargs["tarea"] == "razonamiento"
+    assert "Modo activo" not in mock_gen.call_args.args[1]
+
+
+def test_run_con_modo_id_desconocido_no_rompe_el_turno():
+    """Fail-safe (`get_mode()`): un `modo_id` inválido u obsoleto —p. ej. un frontend
+    cacheado tras cambiar el catálogo— se trata como 'sin modo', nunca como un error que
+    le impida al usuario mandar el mensaje."""
+    direct_response = LLMToolResponse(text="ok", tool_calls=[])
+
+    with patch("core.reasoning_loop.generate_response", return_value=direct_response) as mock_gen, \
+         patch("core.reasoning_loop.execute_tool"), \
+         patch("core.reasoning_loop.agent_context_manager"):
+        result = reasoning_loop.run("hola", "desktop", "u1", modo="modo_que_no_existe")
+
+    assert result == "ok"
+    assert mock_gen.call_args.kwargs["tarea"] == "razonamiento"

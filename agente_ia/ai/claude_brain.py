@@ -133,7 +133,7 @@ def _resolver_con_tools(history, system_prompt, image_path, channel, user_id):
     del caller y nunca uno deducido del texto.
     """
     from agents.tool_registry import catalogo_para_modelo, execute_tool
-    from ai.llm_provider import LLMToolResponse, generate_response
+    from ai.llm_provider import LLMToolResponse, con_aviso_de_cambio, generate_response
     from core.security_manager import ActionDenied, security_manager
 
     canal = security_manager.resolve_channel(channel)
@@ -147,6 +147,7 @@ def _resolver_con_tools(history, system_prompt, image_path, channel, user_id):
     mensajes = list(history)
     for ronda in range(1, MAX_TOOL_ROUNDS + 1):
         progress_report("Pensando" if ronda == 1 else f"Pensando ({ronda})")
+        aviso_cambio: dict = {}   # REQ-022/CA-12 — vacío otra vez en cada ronda
         # Igual que en `core/reasoning_loop.py`: lo que salga de ESTA llamada es la
         # respuesta al usuario y se muestra mientras se escribe. Lo que consulten despues
         # las herramientas queda afuera del bloque y no llega a la burbuja del chat.
@@ -159,12 +160,15 @@ def _resolver_con_tools(history, system_prompt, image_path, channel, user_id):
                 # Misma etiqueta que `core/reasoning_loop.py`: los dos son la respuesta al
                 # usuario, y separarlos obligaria a configurar dos veces lo mismo.
                 tarea="razonamiento",
+                aviso=aviso_cambio,   # REQ-022/CA-12
             )
 
         if not isinstance(respuesta, LLMToolResponse):
-            return respuesta                      # proveedor sin tool-calling: texto plano
+            # proveedor sin tool-calling: texto plano. `corto` queda en su default `False`
+            # (CA-15): este camino nunca resuelve ChannelType.VOICE.
+            return con_aviso_de_cambio(respuesta, aviso_cambio)
         if not respuesta.tool_calls:
-            return respuesta.text or ""
+            return con_aviso_de_cambio(respuesta.text or "", aviso_cambio)
 
         llamada = respuesta.tool_calls[0]
         params = dict(llamada.arguments or {})
@@ -190,8 +194,12 @@ def _resolver_con_tools(history, system_prompt, image_path, channel, user_id):
         }]
 
     # Agotadas las rondas: se pide un cierre en texto, sin herramientas.
-    ultimo = generate_response(messages=mensajes, system_prompt=system_prompt)
-    return ultimo if isinstance(ultimo, str) else getattr(ultimo, "text", "") or ""
+    aviso_cambio_final: dict = {}   # REQ-022/CA-12
+    ultimo = generate_response(
+        messages=mensajes, system_prompt=system_prompt, aviso=aviso_cambio_final,
+    )
+    texto = ultimo if isinstance(ultimo, str) else getattr(ultimo, "text", "") or ""
+    return con_aviso_de_cambio(texto, aviso_cambio_final)
 
 
 def ask_claude(

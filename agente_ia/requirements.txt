@@ -48,6 +48,14 @@ markdown
 Pygments
 bleach
 
+# --- SDK de OpenAI ---
+# Requerido no solo para el proveedor "openai": DeepSeek y OpenRouter exponen una API
+# compatible con OpenAI y `ai/llm_provider.py` reusa este mismo SDK para los tres
+# (`_ask_openai`, `_ask_deepseek`, `_ask_openrouter` hacen `from openai import OpenAI`).
+# Sin este paquete, esos tres proveedores fallan con "No module named 'openai'" aunque
+# la API key este bien configurada.
+openai
+
 # ================================================================
 # DEPENDENCIAS OPCIONALES (descomenta si las necesitas)
 # ================================================================

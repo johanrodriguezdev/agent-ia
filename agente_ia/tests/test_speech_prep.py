@@ -101,6 +101,44 @@ def test_idempotencia():
 
 
 # ─────────────────────────────────────────────
+#  REQ-022/CA-18 — aviso de cambio de modelo, acortado antes de hablar
+# ─────────────────────────────────────────────
+#
+# `tests/test_speech_prep.py` no tenía ningún caso de REQ-022 (test-results-022.md,
+# hallazgo de orion-tester) — solo CA-24/CA-27 de REQ-021. `prepare_for_speech()` es el
+# único punto de todo el sistema que decide qué se dice de verdad en voz alta (cubre tanto
+# el manos libres del webview, que resuelve DESKTOP, como el modo voz de `main.py`), así
+# que reconoce la forma LARGA del aviso (`ai.llm_provider.AVISO_CAMBIO_RE`) sin importar el
+# canal que la generó, y la sustituye por la forma corta.
+
+def test_ca18_la_forma_larga_del_aviso_se_acorta_sin_nombres_de_proveedor_o_modelo():
+    from ai.llm_provider import con_aviso_de_cambio
+
+    aviso = {
+        "proveedor_desde": "deepseek", "modelo_desde": "deepseek-chat",
+        "proveedor_hacia": "openrouter", "modelo_hacia": "openrouter/free",
+    }
+    texto_largo = con_aviso_de_cambio("la respuesta es 42", aviso)
+    assert "deepseek" in texto_largo and "openrouter" in texto_largo   # el fixture es representativo
+
+    hablado = prepare_for_speech(texto_largo)
+
+    # El doble "\n\n" que agrega `con_aviso_de_cambio()` se aplana carácter a carácter
+    # (paso 6, literal como `ui/cli.py`), así que quedan dos puntos seguidos — comportamiento
+    # ya existente del aplanado, no algo que este REQ deba corregir.
+    assert hablado == "la respuesta es 42. . Cambié de modelo."
+    assert "deepseek" not in hablado
+    assert "openrouter" not in hablado
+    assert "openrouter/free" not in hablado
+
+
+def test_ca18_sin_aviso_de_cambio_el_texto_no_se_toca():
+    """Contracara: un texto que no termina en la forma larga del aviso pasa intacto por
+    este punto (más allá del resto del pipeline de limpieza, ya cubierto por CA-24)."""
+    assert "Cambié" not in prepare_for_speech("la respuesta es 42, sin ningún cambio de modelo")
+
+
+# ─────────────────────────────────────────────
 #  CA-27 — el resto del pipeline de la consola no cambia
 # ─────────────────────────────────────────────
 

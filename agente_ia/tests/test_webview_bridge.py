@@ -110,6 +110,11 @@ def test_load_more_conversations_pasa_el_offset_recibido(bridge, monkeypatch):
 
 
 def test_request_initial_state_emite_chips_theme_y_conversaciones(bridge, monkeypatch):
+    """REQ-026 addendum 1: `chips_loaded` sigue emitiendo `{"modes": [...], "quick_actions":
+    [...]}` (CA-39, portados de REQ-015), pero `quick_actions` se redujo de 3 a 1 entrada —
+    "📷 Captura de pantalla" y "🌐 Abrir navegador" se eliminaron del composer
+    (SPEC-026-addendum-1.md, "Catálogo final"); su capacidad de agente no se toca, solo el
+    atajo de UI, y por eso no forman parte de este payload nunca más."""
     from ai.memory_manager import memory
     import config_manager
 
@@ -123,7 +128,21 @@ def test_request_initial_state_emite_chips_theme_y_conversaciones(bridge, monkey
 
     bridge.request_initial_state()
 
-    assert len(chips_received[0]) == 5  # CA-39: los 5 chips portados
+    payload = chips_received[0]
+    assert len(payload["modes"]) == 4
+    assert {m["id"] for m in payload["modes"]} == {"codigo", "investigacion", "flujos", "tareas"}
+    assert len(payload["quick_actions"]) == 1
+    etiquetas = {c["label"] for c in payload["quick_actions"]}
+    assert etiquetas == {"Recuérdame algo"}
+    # "📷 Captura de pantalla" y "🌐 Abrir navegador" (addendum 1) y "Resumen del día" /
+    # "Investigación rápida" (REQ-026 original) ya no aparecen en ningún catálogo.
+    assert "📷 Captura de pantalla" not in etiquetas
+    assert "🌐 Abrir navegador" not in etiquetas
+    assert "Resumen del día" not in etiquetas
+    assert "Investigación rápida" not in etiquetas
+    # Campo nuevo del addendum 1: el frontend necesita el ícono para renderizar "Recuérdame
+    # algo" con el mismo componente que los 4 modos (`#ic-bell`, ver ui-design-026-addendum-1.md §4).
+    assert next(iter(payload["quick_actions"]))["icon"] == "bell"
     assert theme_received == ["dark"]
     assert conv_received == [[]]
 
@@ -247,6 +266,58 @@ def test_send_message_con_texto_vacio_no_hace_nada(bridge, monkeypatch):
     assert bridge._resolution_in_flight is False
 
 
+# ---------------------------------------------------------------------------
+# REQ-026 — `send_message(text, modo)` threadea el modo activo del composer hasta
+# `resolve()`. `test-results-026.md` (orion-tester): la firma nueva no tenía ningún test
+# que la ejercitara (ningún test de este archivo pasaba un segundo argumento antes de
+# estos dos), así que el cambio de contrato (`_try_claude`/`resolve(modo=...)`,
+# desarrollo-log-026.md "Decisiones de implementación") quedaba sin cubrir end-to-end
+# desde el único call site real (`composer.js::doSend()`).
+# ---------------------------------------------------------------------------
+
+def test_send_message_con_modo_lo_pasa_a_resolve_como_kwarg(bridge, monkeypatch):
+    from ai.memory_manager import memory
+
+    recibido = {}
+
+    def fake_resolve(*args, **kwargs):
+        recibido.update(kwargs)
+        return SimpleNamespace(text="respuesta", matched_by="dispatcher")
+
+    monkeypatch.setattr("core.resolution.resolve", fake_resolve)
+    monkeypatch.setattr(memory, "store_turn", lambda *a, **k: None)
+    monkeypatch.setattr(memory, "new_conversation_id", lambda: "new-id")
+    monkeypatch.setattr(memory, "list_conversations", lambda **k: [])
+
+    bridge.send_message("ejecuta un script", "codigo")
+
+    assert recibido["modo"] == "codigo"
+
+
+def test_send_message_sin_modo_manda_none_no_string_vacio(bridge, monkeypatch):
+    """`modo=""` (default del slot, o el frontend sin ningún modo activo) debe llegar a
+    `resolve()` como `None` — `get_mode(None)` y `get_mode("")` son equivalentes
+    (`test_composer_modes.py`), pero `resolve()`/`_try_claude()` distinguen `is not None`
+    para decidir si pasan el kwarg `modo` a `reasoning_loop.run()`, así que el bridge debe
+    normalizar antes de llamar."""
+    from ai.memory_manager import memory
+
+    recibido = {}
+
+    def fake_resolve(*args, **kwargs):
+        recibido.update(kwargs)
+        return SimpleNamespace(text="respuesta", matched_by="dispatcher")
+
+    monkeypatch.setattr("core.resolution.resolve", fake_resolve)
+    monkeypatch.setattr(memory, "store_turn", lambda *a, **k: None)
+    monkeypatch.setattr(memory, "new_conversation_id", lambda: "new-id")
+    monkeypatch.setattr(memory, "list_conversations", lambda **k: [])
+
+    bridge.send_message("hola")  # sin segundo argumento -> default ""
+
+    assert recibido["modo"] is None
+
+
 def test_on_resolve_error_no_persiste_turno(bridge, monkeypatch):
     from ai.memory_manager import memory
 
@@ -306,22 +377,132 @@ def test_run_chip_action_error_se_reporta_como_mensaje_system(bridge, monkeypatc
     assert "Error" in received[0]["html"]
 
 
-def test_build_chips_payload_consulta_risk_level_en_el_momento(monkeypatch):
+def test_build_quick_actions_payload_consulta_risk_level_en_el_momento(monkeypatch):
+    """REQ-026 addendum 1: `_QUICK_ACTIONS` se redujo de 3 entradas (1 template + 2 action)
+    a 1 sola entrada `template` ("Recuérdame algo") — "📷 Captura de pantalla" y
+    "🌐 Abrir navegador" (los 2 `kind == "action"`) se eliminaron del catálogo. La rama
+    `kind == "action"` de `_build_quick_actions_payload()` (CA-40, risk_level consultado en
+    el momento) queda sin ningún elemento que la ejercite desde este catálogo — se deja sin
+    retirar (ver docstring de la función), así que se verifica acá que sigue sin romper nada
+    aunque no tenga consumidor: cero action_chips, `classify_action()` nunca se llama."""
     from core.security_manager import RiskLevel, security_manager
 
+    calls = []
     monkeypatch.setattr(
         security_manager, "classify_action",
-        lambda name: RiskLevel.GREEN if name == "take_screenshot" else RiskLevel.YELLOW,
+        lambda name: calls.append(name) or RiskLevel.YELLOW,
     )
 
-    payload = bridge_module._build_chips_payload()
+    payload = bridge_module._build_quick_actions_payload()
 
     action_chips = [c for c in payload if c["kind"] == "action"]
     template_chips = [c for c in payload if c["kind"] == "template"]
-    assert len(action_chips) == 2
-    assert len(template_chips) == 3
-    assert all(c["risk_level"] is None for c in template_chips)
-    assert any(c["risk_level"] == "green" for c in action_chips)
+    assert len(action_chips) == 0
+    assert len(template_chips) == 1
+    assert template_chips[0]["risk_level"] is None
+    assert template_chips[0]["icon"] == "bell"
+    assert calls == []
+
+
+def test_build_modes_payload_devuelve_4_modos_id_y_label_sin_detalle_interno():
+    """REQ-026: el frontend recibe solo `{id, label}` por modo — `tool_names`/`tarea`/
+    `prompt_hint` son detalle interno del backend, `composer.js::renderModes()` no lo
+    necesita."""
+    payload = bridge_module._build_modes_payload()
+
+    assert len(payload) == 4
+    for entry in payload:
+        assert set(entry.keys()) == {"id", "label"}
+    assert [e["id"] for e in payload] == ["codigo", "investigacion", "flujos", "tareas"]
+
+
+# ---------------------------------------------------------------------------
+# REQ-026 — `set_active_mode()` / `_tarea_activa()`: el espejo efímero `_modo_activo` que
+# permite a `request_models()` (menú de modelos, disparado desacoplado de `send_message()`)
+# reflejar "fijado por el modo" sin esperar al próximo mensaje. `test-results-026.md`
+# (orion-tester): sin cobertura previa — ningún test ejercitaba este slot ni `_tarea_activa`.
+# ---------------------------------------------------------------------------
+
+def test_set_active_mode_actualiza_el_espejo_y_reemite_models_loaded_con_su_tarea(bridge, monkeypatch):
+    tareas_consultadas = []
+    monkeypatch.setattr(
+        bridge_module, "_build_models_payload",
+        lambda tarea="razonamiento": tareas_consultadas.append(tarea) or {"tarea": tarea},
+    )
+
+    recibidos = []
+    bridge.models_loaded.connect(lambda j: recibidos.append(json.loads(j)))
+
+    bridge.set_active_mode("codigo")
+
+    assert bridge._modo_activo == "codigo"
+    assert tareas_consultadas == ["modo_codigo"]
+    assert recibidos[-1] == {"tarea": "modo_codigo"}
+
+
+def test_set_active_mode_con_modo_sin_tarea_fijada_usa_razonamiento(bridge, monkeypatch):
+    """`flujos`/`tareas` (arquitectura-026.md §3) no fijan `tarea` — el modo queda activo
+    en el espejo, pero el selector de modelo sigue ruteando como siempre."""
+    tareas_consultadas = []
+    monkeypatch.setattr(
+        bridge_module, "_build_models_payload",
+        lambda tarea="razonamiento": tareas_consultadas.append(tarea) or {},
+    )
+
+    bridge.set_active_mode("flujos")
+
+    assert bridge._modo_activo == "flujos"
+    assert tareas_consultadas == ["razonamiento"]
+
+
+def test_set_active_mode_vacio_limpia_el_espejo_ca_toggle_off(bridge, monkeypatch):
+    """SPEC-026: togglear el mismo modo activo lo desactiva — el frontend manda `""`."""
+    monkeypatch.setattr(bridge_module, "_build_models_payload", lambda tarea="razonamiento": {})
+
+    bridge.set_active_mode("codigo")
+    assert bridge._modo_activo == "codigo"
+
+    bridge.set_active_mode("")
+
+    assert bridge._modo_activo is None
+
+
+def test_set_active_mode_id_desconocido_es_fail_safe_no_lanza(bridge, monkeypatch):
+    """Un `modo_id` inválido/obsoleto (frontend con catálogo cacheado) se trata como 'sin
+    modo' — nunca rompe el slot (`get_mode()` es fail-safe, `test_composer_modes.py`)."""
+    monkeypatch.setattr(bridge_module, "_build_models_payload", lambda tarea="razonamiento": {})
+
+    bridge.set_active_mode("modo_que_no_existe")
+
+    assert bridge._modo_activo is None
+
+
+def test_request_models_refleja_la_tarea_del_modo_activo_via_el_espejo(bridge, monkeypatch):
+    """`request_models()` (abrir el menú de modelos) está desacoplado de `send_message()` —
+    debe usar `_modo_activo` (seteado por un `set_active_mode()` previo), no depender de
+    que se haya enviado ya un mensaje con ese modo."""
+    tareas_consultadas = []
+    monkeypatch.setattr(
+        bridge_module, "_build_models_payload",
+        lambda tarea="razonamiento": tareas_consultadas.append(tarea) or {},
+    )
+
+    bridge._modo_activo = "investigacion"
+    bridge.request_models()
+
+    assert tareas_consultadas == ["modo_investigacion"]
+
+
+def test_request_models_sin_modo_activo_usa_razonamiento(bridge, monkeypatch):
+    tareas_consultadas = []
+    monkeypatch.setattr(
+        bridge_module, "_build_models_payload",
+        lambda tarea="razonamiento": tareas_consultadas.append(tarea) or {},
+    )
+
+    bridge.request_models()
+
+    assert tareas_consultadas == ["razonamiento"]
 
 
 # ---------------------------------------------------------------------------
@@ -707,6 +888,72 @@ def test_request_delete_project_emite_project_removed_solo_si_delete_project_dev
     monkeypatch.setattr(memory, "delete_project", lambda *a, **k: True)
     bridge.request_delete_project(3)
     assert removed == [3]
+
+
+# ---------------------------------------------------------------------------
+# REQ-022/CA-03, CA-04: set_model() no debe tener efecto real cuando hay un destino
+# fijado por tarea para "razonamiento" — ni escribir config.json ni emitir el toast.
+#
+# `test-results-022.md` (hallazgo de orion-tester): el test de GUI más cercano
+# (`test_webview_buttons.py::...se_deshabilita_si_esta_fijado_por_tarea`) prueba CA-02 (el
+# menú no se abre) pero, justo porque el menú no se abre, nunca llega a invocar el slot
+# `set_model()` — así que el gate real del lado servidor (línea 1067 de `bridge.py`, el que
+# importa porque el slot es alcanzable desde cualquier script de la página, no solo desde
+# el botón) nunca se ejercitaba en ningún test. Estos dos tests lo invocan directo.
+# ---------------------------------------------------------------------------
+
+def test_ca03_set_model_no_escribe_config_si_hay_destino_fijado_por_tarea(bridge, monkeypatch):
+    import ai.llm_provider as llm_provider_module
+
+    monkeypatch.setattr(
+        llm_provider_module, "destinos_de_tarea",
+        lambda tarea: [("openai", "gpt-4o-mini")] if tarea == "razonamiento" else [],
+    )
+    escrituras = []
+    monkeypatch.setattr(
+        bridge_module.config_manager, "set_ai_provider_and_model",
+        lambda *a, **k: escrituras.append((a, k)),
+    )
+
+    bridge.set_model("deepseek", "deepseek-chat")
+
+    assert escrituras == []
+
+
+def test_ca04_set_model_no_emite_notice_si_hay_destino_fijado_por_tarea(bridge, monkeypatch):
+    import ai.llm_provider as llm_provider_module
+
+    monkeypatch.setattr(
+        llm_provider_module, "destinos_de_tarea",
+        lambda tarea: [("openai", "gpt-4o-mini")] if tarea == "razonamiento" else [],
+    )
+    notices = []
+    bridge.notice_shown.connect(lambda nivel, msg: notices.append((nivel, msg)))
+
+    bridge.set_model("deepseek", "deepseek-chat")
+
+    assert notices == []
+
+
+def test_ca05_set_model_sin_destino_fijado_escribe_config_y_avisa(bridge, monkeypatch):
+    """Regresión — sin destino fijado por tarea, el comportamiento pre-REQ-022 sigue
+    intacto: `set_model()` SÍ escribe `config.json` y SÍ emite el toast de confirmación."""
+    import ai.llm_provider as llm_provider_module
+
+    monkeypatch.setattr(llm_provider_module, "destinos_de_tarea", lambda tarea: [])
+    escrituras = []
+    monkeypatch.setattr(
+        bridge_module.config_manager, "set_ai_provider_and_model",
+        lambda *a, **k: escrituras.append((a, k)),
+    )
+    monkeypatch.setattr(bridge_module, "_build_models_payload", lambda: {})
+    notices = []
+    bridge.notice_shown.connect(lambda nivel, msg: notices.append((nivel, msg)))
+
+    bridge.set_model("deepseek", "deepseek-chat")
+
+    assert escrituras == [(("deepseek", "deepseek-chat"), {})]
+    assert notices and notices[0][0] == "ok"
 
 
 # ---------------------------------------------------------------------------

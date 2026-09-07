@@ -103,8 +103,14 @@ class GlassGateway:
             return GlassResponse(text=result, speak=True)
 
         except Exception as e:
+            logger.error(
+                f"Error en GlassGateway.process() | usuario={message.user_id} | "
+                f"canal={message.channel}: {e}",
+                exc_info=True
+            )
             return GlassResponse(
-                text=f"Lo siento, he encontrado un inconveniente: {str(e)[:80]}",
+                text="Lo siento, he encontrado un inconveniente inesperado. "
+                     "Intente de nuevo en un momento.",
                 speak=True
             )
 
@@ -133,9 +139,14 @@ class GlassGateway:
             return result
 
         except Exception as e:
+            logger.error(
+                f"Error en GlassGateway._ask_claude_for_user() | usuario={message.user_id} | "
+                f"canal={message.channel}: {e}",
+                exc_info=True
+            )
             if session.conversation_history and session.conversation_history[-1]["role"] == "user":
                 session.conversation_history.pop()
-            return f"Error en inteligencia conversacional: {str(e)}"
+            return "Lo siento, no pude procesar esa solicitud en este momento. Intente de nuevo."
 
     def _handle_screenshot(self, session, text: str) -> GlassResponse:
         """Toma captura y la devuelve para enviar como imagen en Telegram."""
@@ -161,8 +172,13 @@ class GlassGateway:
                 image_path=tmp_path
             )
         except Exception as e:
+            logger.error(
+                f"Error en GlassGateway._handle_screenshot() | usuario={session.user_id} | "
+                f"canal={session.channel}: {e}",
+                exc_info=True
+            )
             return GlassResponse(
-                text=f"No pude tomar la captura{vocative()}: {str(e)[:60]}",
+                text=f"No pude tomar la captura{vocative()}. Intente de nuevo en un momento.",
                 speak=True
             )
 

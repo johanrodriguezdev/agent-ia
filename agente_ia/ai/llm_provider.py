@@ -2,6 +2,7 @@ import hashlib
 import os
 import json
 import logging
+import re
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
@@ -238,7 +239,8 @@ def _destinos_iniciales(tarea, provider, model_name, vision_provider, image_path
     return destinos
 
 
-def generate_response(messages, system_prompt, image_path=None, tools=None, tarea="general"):
+def generate_response(messages, system_prompt, image_path=None, tools=None, tarea="general",
+                       aviso: Optional[dict] = None):
     """`tools` (REQ-007, CA-03): lista opcional de dicts `{name, description,
     parameters_schema}`. Se reenvía al proveedor activo únicamente si soporta tool-calling
     nativo (`_PROVEEDORES_CON_TOOLS`) — con cualquier otro proveedor, se ignora en silencio
@@ -250,6 +252,13 @@ def generate_response(messages, system_prompt, image_path=None, tools=None, tare
     una búsqueda— a un modelo local o gratuito, y reservar el de pago para lo que de verdad
     lo necesita. El mapeo vive en `task_providers` de config.json y es OPCIONAL: sin él,
     toda tarea usa `ai_provider` y el comportamiento es exactamente el de antes.
+
+    `aviso` (REQ-022, CA-12): dict opcional que el caller pasa VACÍO (`{}`) y que esta
+    función RELLENA si el destino final difirió del configurado — por un swap preventivo de
+    cooldown o por un respaldo tras un fallo en vivo. Mismo patrón que `estado` en
+    `reasoning_loop.py::run()`: por defecto `None`, ningún caller existente cambia de
+    comportamiento. Claves cuando hubo cambio: `proveedor_desde`, `modelo_desde`,
+    `proveedor_hacia`, `modelo_hacia`. Dict vacío == no hubo cambio.
     """
     provider, vision_provider, fallback_provider, model_name = get_provider_config()
     destinos = _destinos_iniciales(tarea, provider, model_name, vision_provider, image_path)
@@ -260,19 +269,33 @@ def generate_response(messages, system_prompt, image_path=None, tools=None, tare
         # antes de caer al respaldo, y lo cuesta en CADA mensaje mientras no se reponga. Se
         # arranca por uno disponible; si ninguno lo esta, se prueba igual en el orden de
         # siempre (el cooldown nunca deja al agente mudo).
-        activo = destinos[0][0]
-        preferido = provider_health.ordenar_por_disponibilidad(
-            [activo] + _cadena_de_respaldo(activo, fallback_provider)
-        )[0]
+        #
+        # REQ-022/CA-06: los candidatos ya incluyen el default OpenRouter->Ollama cuando no
+        # hay `fallback_provider` explícito (ver `_resolver_cadena_de_respaldo()`), no solo
+        # la config explícita — así un proveedor único en cooldown también puede arrancar
+        # directo por el default en vez de intentar igual al que se sabe caído. Los
+        # candidatos son siempre tuplas `(proveedor, modelo)` — nunca strings sueltos — para
+        # que la comparación de más abajo sea siempre `str == str`, nunca `tupla == str`.
+        activo, modelo_explicito = destinos[0]
+        candidatos = [(activo, modelo_explicito)] + _resolver_cadena_de_respaldo(activo, fallback_provider)
+        preferido, modelo_preferido = provider_health.ordenar_por_disponibilidad(candidatos)[0]
         if preferido != activo:
             logger.info(
                 f"'{activo}' en cooldown "
                 f"({provider_health.segundos_restantes(activo):.0f}s restantes); "
                 f"se empieza por '{preferido}'"
             )
+            if aviso is not None:
+                # REQ-022/CA-12, punto (a) de arquitectura-022.md: el swap preventivo SÍ
+                # avisa, con el mismo criterio que un fallo en vivo — el usuario debe
+                # enterarse siempre que la respuesta no vino del modelo que configuró.
+                aviso["proveedor_desde"] = activo
+                aviso["modelo_desde"] = modelo_explicito
+                aviso["proveedor_hacia"] = preferido
+                aviso["modelo_hacia"] = modelo_preferido
             # Cambiar de proveedor sin cambiar de modelo garantiza el error: misma leccion
             # que la cadena de respaldo y el proveedor de vision.
-            destinos = [(preferido, _MODELO_POR_PROVEEDOR.get(preferido, ""))]
+            destinos = [(preferido, modelo_preferido)]
     else:
         # Varios destinos para la misma tarea: se prueban en orden de disponibilidad. Esta
         # es la rotacion entre modelos gratuitos — el que acaba de contestar 429 va al
@@ -307,7 +330,7 @@ def generate_response(messages, system_prompt, image_path=None, tools=None, tare
                 continue
             return _intentar_respaldos(
                 activo, e, messages, system_prompt, image_path, modelo,
-                effective_tools, fallback_provider,
+                effective_tools, fallback_provider, aviso=aviso,
             )
 
         if isinstance(response, str) and "Error:" in response:
@@ -322,12 +345,19 @@ def generate_response(messages, system_prompt, image_path=None, tools=None, tare
                     f"se prueba el siguiente modelo de la tarea '{tarea}'"
                 )
                 continue
-            if _cadena_de_respaldo(activo, fallback_provider):
-                return _intentar_respaldos(
-                    activo, Exception(response), messages, system_prompt, image_path,
-                    modelo, effective_tools, fallback_provider,
-                )
-            return response
+            # REQ-022/CA-06/CA-11: antes esta rama solo llamaba a `_intentar_respaldos()`
+            # si YA había una cadena explícita (`_cadena_de_respaldo(...)` truthy) — sin
+            # `fallback_provider` configurado, el "Error: ..." crudo del proveedor (p. ej.
+            # "Error: DEEPSEEK_API_KEY no está configurada.", "Error: Ollama no está
+            # ejecutándose...") se devolvía tal cual al usuario. Es exactamente el caso de
+            # una instalación nueva sin claves (Casos Borde de SPEC-022.md), así que ahora
+            # siempre se delega en `_intentar_respaldos()`: internamente ya resuelve el
+            # default OpenRouter->Ollama cuando corresponde, y si de verdad no hay ningún
+            # destino devuelve `SIN_PROVEEDOR` — nunca el string crudo.
+            return _intentar_respaldos(
+                activo, Exception(response), messages, system_prompt, image_path,
+                modelo, effective_tools, fallback_provider, aviso=aviso,
+            )
 
         provider_health.registrar_exito(activo, _modelo_para_cooldown(activo, modelo))
         return response
@@ -354,37 +384,76 @@ def _cadena_de_respaldo(activo, fallback_config) -> list:
     return cadena
 
 
+def _cadena_de_respaldo_por_defecto(activo: str) -> List[Tuple[str, str]]:
+    """REQ-022/CA-06/07/08: OpenRouter (catálogo gratuito) -> Ollama local, cuando no hay
+    `fallback_provider` configurado. Nunca ofrece al proveedor que ya está activo.
+
+    CA-07: si no hay `OPENROUTER_API_KEY` (ni en config.json), OpenRouter se omite del
+    todo — ni se intenta la llamada ni se registra como fallo en `provider_health`, porque
+    no hubo ningún intento real que fallara.
+    """
+    import config_manager
+
+    cadena: List[Tuple[str, str]] = []
+    if activo != "openrouter" and config_manager.get_api_key("openrouter"):
+        cadena.append(("openrouter", "openrouter/free"))
+    if activo != "ollama":
+        cadena.append(("ollama", _MODELO_POR_PROVEEDOR["ollama"]))
+    return cadena
+
+
+def _resolver_cadena_de_respaldo(activo, fallback_config) -> List[Tuple[str, str]]:
+    """Destinos `(proveedor, modelo)` a los que caer, ya resueltos.
+
+    Con `fallback_provider` configurado (string o lista), se usa tal cual —
+    `_cadena_de_respaldo()` no cambia de firma ni de comportamiento (CA-09). Sin
+    configuración explícita, se usa el default de CA-06/07/08.
+    """
+    if fallback_config:
+        return [
+            (p, _MODELO_POR_PROVEEDOR.get(p, ""))
+            for p in _cadena_de_respaldo(activo, fallback_config)
+        ]
+    return _cadena_de_respaldo_por_defecto(activo)
+
+
 def _intentar_respaldos(
     activo, error_original, messages, system_prompt, image_path, model_name,
-    tools, fallback_config,
+    tools, fallback_config, aviso: Optional[dict] = None,
 ):
     """Recorre la cadena de respaldo hasta que alguno responda.
 
-    Tres diferencias con lo que hacía antes:
+    Diferencias con lo que hacía antes:
 
     - Recorre una CADENA, no un único respaldo. Si el segundo también está caído, prueba el
       siguiente en vez de rendirse.
     - Conserva las herramientas si el respaldo las soporta. Antes se perdían, así que el
       agente caía a un modo en el que no podía buscar ni consultar nada, justo cuando ya
       estaba teniendo un mal día.
-    - El aviso va al registro, no a la respuesta. Que el proveedor principal fallara es un
-      problema de operación, no algo que el usuario deba leer mezclado con lo que preguntó.
+    - El aviso técnico completo va al registro, no a la respuesta cruda. Que el proveedor
+      principal fallara es un problema de operación, no algo que el usuario deba leer
+      mezclado con lo que preguntó — el usuario sí se entera, pero por el mensaje claro que
+      arma `con_aviso_de_cambio()` a partir de `aviso` (REQ-022/CA-12), no por la excepción.
     - Los respaldos en cooldown se prueban al final, no primero (`ai/provider_health.py`).
       Siguen en la cadena: si todos están apartados se los intenta igual.
+    - REQ-022/CA-06: sin `fallback_provider` explícito, la cadena ya no está vacía por
+      defecto — `_resolver_cadena_de_respaldo()` aporta el default OpenRouter->Ollama.
+    - REQ-022/CA-11: sin ningún destino al que caer (cadena vacía incluso con el default,
+      o todos los respaldos fallan), la respuesta es siempre `SIN_PROVEEDOR` — nunca el
+      texto crudo de la excepción original.
     """
     cadena = provider_health.ordenar_por_disponibilidad(
-        _cadena_de_respaldo(activo, fallback_config)
+        _resolver_cadena_de_respaldo(activo, fallback_config)
     )
     if not cadena:
         logger.error(f"Proveedor '{activo}' falló y no hay respaldo configurado: {error_original}")
-        return f"Error ({activo}): {error_original}"
+        return SIN_PROVEEDOR
 
     logger.warning(f"Proveedor '{activo}' falló ({error_original}); probando respaldos: {cadena}")
 
     errores = [f"{activo}: {error_original}"]
-    for respaldo in cadena:
+    for respaldo, modelo in cadena:
         try:
-            modelo = _MODELO_POR_PROVEEDOR.get(respaldo, model_name)
             soporta_tools = respaldo in _PROVEEDORES_CON_TOOLS
             respuesta = _uncached_call(
                 respaldo, messages, system_prompt, image_path, modelo,
@@ -394,6 +463,13 @@ def _intentar_respaldos(
                 raise Exception(respuesta)
             logger.info(f"Respaldo '{respaldo}' respondió correctamente")
             provider_health.registrar_exito(respaldo, _modelo_para_cooldown(respaldo, modelo))
+            if aviso is not None:
+                # REQ-022/CA-12: el respaldo exitoso llena `aviso` para que el caller pueda
+                # avisarle al usuario dentro del texto de la respuesta.
+                aviso["proveedor_desde"] = activo
+                aviso["modelo_desde"] = model_name
+                aviso["proveedor_hacia"] = respaldo
+                aviso["modelo_hacia"] = modelo
             return respuesta
         except Exception as e:
             provider_health.registrar_fallo(respaldo, e, _modelo_para_cooldown(respaldo, modelo))
@@ -435,6 +511,48 @@ def es_respuesta_de_fallo(texto) -> bool:
     if texto == SIN_PROVEEDOR:
         return True
     return texto.startswith("Error") and any(m in texto for m in _MARCAS_DE_FALLO)
+
+
+# --------------------------------------------------------------------- REQ-022: aviso de cambio
+
+#: Forma corta del aviso de cambio de modelo (CA-16/CA-18) — sin nombres técnicos.
+AVISO_CAMBIO_CORTO = "Cambié de modelo."
+
+#: Plantilla de la forma larga (CA-12/CA-17). Un solo lugar arma el texto Y el regex que lo
+#: reconoce (`AVISO_CAMBIO_RE`) — evita que se desincronicen si la redacción cambia.
+_PLANTILLA_AVISO_LARGO = "Cambié a {hacia} porque {desde} no respondió."
+
+#: Reconoce la forma larga tal como la arma `con_aviso_de_cambio()`, para que
+#: `ui/tts_engine.py::prepare_for_speech()` la acorte sin reimplementar la redacción
+#: (CA-18). Ancla a fin de texto porque `con_aviso_de_cambio()` siempre la agrega al final.
+AVISO_CAMBIO_RE = re.compile(r"\n\nCambié a .+? porque .+? no respondió\.\s*$")
+
+
+def _etiqueta_destino(proveedor: str, modelo: str) -> str:
+    """Nombre para el aviso — deliberadamente simple, sin importar el catálogo de
+    etiquetas "bonitas" de `ui/webview/bridge.py::_MODELOS_CONOCIDOS` (capa de UI; este
+    módulo no depende de la UI, y CA-17 solo exige nombres de proveedor y modelo, no
+    marketing)."""
+    return f"{proveedor} ({modelo})" if modelo else proveedor
+
+
+def texto_aviso_cambio(aviso: Optional[dict], corto: bool = False) -> str:
+    """Return la frase de aviso, o `""` si `aviso` no marca ningún cambio."""
+    if not aviso or not aviso.get("proveedor_hacia"):
+        return ""
+    if corto:
+        return AVISO_CAMBIO_CORTO
+    return _PLANTILLA_AVISO_LARGO.format(
+        hacia=_etiqueta_destino(aviso["proveedor_hacia"], aviso["modelo_hacia"]),
+        desde=_etiqueta_destino(aviso["proveedor_desde"], aviso["modelo_desde"]),
+    )
+
+
+def con_aviso_de_cambio(texto: str, aviso: Optional[dict], corto: bool = False) -> str:
+    """`texto` con la línea de aviso agregada al final (CA-12/14), o `texto` sin tocar si
+    no hubo cambio (CA-13)."""
+    frase = texto_aviso_cambio(aviso, corto=corto)
+    return f"{texto}\n\n{frase}" if frase else texto
 
 
 def _ask_anthropic(messages, system_prompt, image_path, model_name, tools=None):

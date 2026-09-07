@@ -225,17 +225,25 @@ def test_al_saltar_al_respaldo_por_cooldown_tambien_cambia_el_modelo(monkeypatch
     assert recibido["modelo"] == prov._MODELO_POR_PROVEEDOR["ollama"]
 
 
-def test_sin_respaldo_configurado_se_usa_el_principal_aunque_este_apartado(monkeypatch):
-    """Fail-open de punta a punta: sin alternativa, se intenta igual."""
+def test_sin_respaldo_configurado_se_usa_el_default_en_vez_del_apartado(monkeypatch):
+    """REQ-022/CA-06: sin `fallback_provider` explícito ya no es sinónimo de "sin
+    alternativa" — el default OpenRouter->Ollama entra también en el swap preventivo de un
+    solo destino. Antes (sin ningún respaldo configurado ni posible) se insistía con el
+    mismo proveedor apartado; ahora se prueba primero el default disponible, sin gastar el
+    timeout completo del que ya se sabe caído. Reemplaza al test homónimo pre-REQ-022, que
+    documentaba justo el comportamiento que esta CA cambia a propósito."""
+    import config_manager
+
     llamados = []
     monkeypatch.setattr(prov, "get_provider_config", _config("deepseek", ""))
+    monkeypatch.setattr(config_manager, "get_api_key", lambda p: "")   # sin clave de OpenRouter
     monkeypatch.setattr(
         prov, "_cached_call", lambda p, *a, **k: (llamados.append(p), "hola")[1],
     )
     salud.registrar_fallo("deepseek", "Insufficient Balance")
 
     assert prov.generate_response([], "sp") == "hola"
-    assert llamados == ["deepseek"]
+    assert llamados == ["ollama"]
 
 
 def test_un_fallo_de_cuota_del_principal_lo_aparta_para_el_proximo_mensaje(monkeypatch):
@@ -263,13 +271,22 @@ def test_un_error_devuelto_como_texto_tambien_aparta(monkeypatch):
 
 
 def test_cuando_el_proveedor_revive_se_lo_deja_de_apartar(monkeypatch):
-    monkeypatch.setattr(prov, "get_provider_config", _config("deepseek", ""))
+    """REQ-022/CA-06: para que este caso siga probando "sin alternativa, se reintenta el
+    mismo y si responde se levanta el cooldown", el activo tiene que ser justo el que el
+    default de CA-06 nunca reemplaza a sí mismo (`ollama`), y sin clave de OpenRouter para
+    que tampoco haya ese default. Con `deepseek` como activo (el caso de antes de este
+    REQ), ahora SÍ hay una alternativa (`ollama`), así que ya no aplica: ver
+    `test_sin_respaldo_configurado_se_usa_el_default_en_vez_del_apartado`."""
+    import config_manager
+
+    monkeypatch.setattr(prov, "get_provider_config", _config("ollama", ""))
+    monkeypatch.setattr(config_manager, "get_api_key", lambda p: "")
     monkeypatch.setattr(prov, "_cached_call", lambda *a, **k: "hola de nuevo")
-    salud.registrar_fallo("deepseek", "Insufficient Balance")
+    salud.registrar_fallo("ollama", "Insufficient Balance")
 
     prov.generate_response([], "sp")
 
-    assert not salud.en_cooldown("deepseek")
+    assert not salud.en_cooldown("ollama")
 
 
 def test_el_respaldo_que_falla_por_cuota_tambien_queda_apartado(monkeypatch):

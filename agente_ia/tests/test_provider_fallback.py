@@ -94,13 +94,25 @@ def test_si_todos_fallan_se_avisa_sin_tecnicismos(monkeypatch):
     assert "RuntimeError" not in resultado       # el detalle va al log, no al usuario
 
 
-def test_sin_respaldo_se_devuelve_el_error_del_principal(monkeypatch):
+def test_sin_ningun_destino_se_devuelve_sin_proveedor(monkeypatch):
+    """REQ-022/CA-11: antes se devolvía el texto crudo de la excepción original
+    (`f"Error ({activo}): {error_original}"`) — eso es justo el tecnicismo que este REQ
+    saca de la vista del usuario. Con la cadena resuelta genuinamente vacía (ni respaldo
+    explícito ni default posible), la respuesta es siempre `SIN_PROVEEDOR`.
+
+    `_resolver_cadena_de_respaldo` se monkeypatchea para forzar una cadena vacía: con
+    `fallback_config=""` el código real cae al default de CA-06 (OpenRouter->Ollama), que
+    salvo en una instalación sin Ollama y sin clave de OpenRouter, no está vacío — probar
+    eso de verdad dependería de la máquina que corre el test.
+    """
+    monkeypatch.setattr(prov, "_resolver_cadena_de_respaldo", lambda activo, cfg: [])
+
     resultado = prov._intentar_respaldos(
         "deepseek", Exception("sin credito"), [], "sp", None, "m", None, "",
     )
 
-    assert "deepseek" in resultado
-    assert "sin credito" in resultado
+    assert resultado == prov.SIN_PROVEEDOR
+    assert "sin credito" not in resultado
 
 
 def test_una_respuesta_de_error_del_respaldo_cuenta_como_fallo(monkeypatch):
