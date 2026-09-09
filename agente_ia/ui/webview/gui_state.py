@@ -27,7 +27,12 @@ GLOBAL_STATE = "IDLE"
 
 # REQ-009: canal de estado del modo manos libres (wake word), independiente de
 # GLOBAL_STATE — nunca se pisan ni se confunden. Valores: "INACTIVE" / "LISTENING_WAKE" /
-# "AWAKE".
+# "AWAKE" / "RECONNECTING".
+#
+# REQ-028 agrega "RECONNECTING": perdió el micrófono (otra aplicación se lo llevó) y está
+# reintentando solo. Es deliberadamente distinto de "INACTIVE", que significa "el manos
+# libres está apagado porque vos lo apagaste" — hasta REQ-028 el usuario veía "INACTIVE"
+# en los dos casos y no había forma de distinguir un apagado de una caída silenciosa.
 WAKE_STATE = "INACTIVE"
 
 

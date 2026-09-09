@@ -8,10 +8,10 @@ el bucle de escucha, propaga, cierra el micrófono y termina el worker. El toggl
 libre. Objetivo: reconexión automática + aviso visible.
 
 ## Estado actual
-- **Estado tracker:** NUEVO
-- **Último agente:** conversación principal (coordinación) → siguiente: `orion-spec`
+- **Estado tracker:** ARQUITECTURA_APROBADA
+- **Último agente:** conversación principal (spec + arquitectura por autorización) → siguiente: `orion-dev`
 - **Fecha última actualización:** 2026-09-08
-- **Rama git:** — (a definir con el humano; hoy la sesión está en `feature/REQ-027-reasoning-loop-nativo`)
+- **Rama git:** `feature/REQ-027-reasoning-loop-nativo` (REQ-027 y el fix de ventana ya commiteados y pusheados)
 - **Categoría:** VOZ
 - **Tipo de cambio:** BUG_FIX
 
@@ -91,3 +91,70 @@ usuario cree que está diciéndole. A confirmar por spec si entra en el alcance.
 ## Log de transiciones
 <!-- FECHA | DE → A | AGENTE | NOTA -->
 2026-09-08 | — → NUEVO | coordinación | REQ creado a partir del reporte de la reunión, con la reproducción ya adjunta
+
+---
+
+## Actualización 2026-09-08 — spec y arquitectura, sin el ciclo de agentes
+
+Johan autorizó explícitamente saltar `orion-spec` y `orion-architect` e ir directo a
+desarrollo. Los documentos existen igual, porque sin criterios de aceptación el dev inventa
+el alcance y el tester no tiene contra qué medir:
+
+- `spec/SPEC-028.md` — 13 criterios de aceptación testeables
+- `propuestas/arquitectura-028.md` — piezas, flujo, riesgos y pruebas sugeridas
+- `origen/baseline-028.md` — qué existe hoy y qué fallo es pre-existente
+
+**Decisión de producto asumida:** el manos libres **vuelve solo** cuando el micrófono se
+libera. Es la recomendación que se le dio a Johan y que él no corrigió al autorizar el
+desarrollo. Si la decisión fuera la contraria (quedarse apagado con un aviso), cambian
+CA-01, CA-03 y CA-05 de la SPEC — y nada más.
+
+### Decisiones tomadas
+2026-09-08 | conversación principal | Reconexión automática con backoff (1,2,4,8,15,30s) en vez de morir | Perder el micrófono es temporal (una reunión); apagarse es justo el fallo reportado
+2026-09-08 | conversación principal | Solo se captura `OSError`, nunca `Exception` | Un error de código no puede quedar tapado detrás de reintentos infinitos
+2026-09-08 | conversación principal | La reconexión vive en `voice/wake_word.py`, no en el worker de la GUI | El camino headless (`ui/cli.py`) no pasa por el worker y tiene el mismo problema
+2026-09-08 | conversación principal | Estado nuevo `RECONNECTING`, distinto de `INACTIVE` | `INACTIVE` significa "lo apagaste vos"; el botón no puede mentir sobre por qué no escucha
+
+### Log de transiciones
+2026-09-08 | NUEVO → ARQUITECTURA_APROBADA | conversación principal | Spec + baseline + arquitectura escritos de una, por autorización explícita de Johan
+2026-09-08 | ARQUITECTURA_APROBADA → (handoff) | conversación principal | Entregado a `orion-dev`
+
+---
+
+## Actualización 2026-09-08 — desarrollo (`orion-dev`)
+
+Implementado lo aprobado en `propuestas/arquitectura-028.md`. Detalle completo en
+`propuestas/desarrollo-log-028.md`.
+
+`listen_for_wake_word()` pasó de ser **una sesión de micrófono con un bucle adentro** a ser
+un **bucle de sesiones**. Firma pública intacta; el cuerpo de escucha (barge-in,
+confirmación hablada, ventana de REQ-021) quedó igual, solo movido a `_escuchar_en_sesion()`.
+
+**Archivos tocados:** `voice/wake_word.py`, `ui/webview/gui_state.py`,
+`ui/webview/frontend/js/composer.js`, `ui/webview/frontend/css/composer.css`,
+`tests/test_wake_word_reconexion.py` (nuevo, 25 tests) y
+`origen/reproduccion-mic-ocupado.py` (adaptado). `ui/webview/wake_word_worker.py` NO se tocó.
+Sin dependencias nuevas.
+
+**Verificación:** `1904 passed, 1 failed` — el único fallo es el flaky de reloj pre-existente
+(`test_task_slots.py::test_la_hora_dicha_se_respeta`), ya registrado en `origen/baseline-028.md`.
+Baseline `1879 passed, 1 failed` → cero fallos nuevos. Los 13 criterios de aceptación quedan
+cubiertos por test, salvo la parte de hardware real que va a la prueba manual.
+
+### Decisiones tomadas
+2026-09-08 | orion-dev | La recuperación se declara con una LECTURA buena, no con una apertura | En Windows un micrófono tomado por otra app se deja ABRIR igual y falla recién al leerlo; dar por recuperada la sesión al abrirla reiniciaría el backoff a 1 s en cada vuelta y produciría justo el bucle golpeando PyAudio que el REQ evita
+2026-09-08 | orion-dev | El techo de 3 intentos de CA-07 se gobierna con `hubo_lectura_buena`, no con `al_abrir` a secas | Separa "no hay micrófono conectado" (se rinde) de "me lo quitaron en uso" (se reintenta indefinidamente), que es la distinción que pedía la arquitectura
+2026-09-08 | orion-dev | Se agregó regla CSS para `RECONNECTING` en `composer.css`, no listada en la tabla de piezas | Sin ella ninguna regla matchea y el botón se pinta igual que `INACTIVE`: parecería apagado mientras sigue vivo reintentando, que es el aviso silencioso que el REQ vino a arreglar. Reusa `--danger`, sin tokens nuevos
+2026-09-08 | orion-dev | `origen/reproduccion-mic-ocupado.py` se adaptó (worker en un hilo aparte) | Después del fix `run()` ya no retorna solo: llamarlo en línea colgaría el script para siempre. El encabezado conserva la salida del "antes" para comparar
+
+### Riesgos activos (actualizado)
+- Los dos riesgos de bucle infinito y de ruido en el log quedaron cerrados por CA-07 y CA-08,
+  fijados por test.
+- **Queda abierto** lo que no se puede probar sin hardware: que PyAudio en el equipo de Johan
+  levante efectivamente `OSError` (y no otra excepción) al perder el dispositivo. La
+  reproducción usa `-9988`/`-9999`, que son los códigos observados en el diagnóstico. Si en la
+  prueba manual apareciera otro tipo de excepción, el fix no la captura a propósito (solo
+  `OSError`, nunca `Exception`) y habría que ampliarlo con el tipo real a la vista.
+
+### Log de transiciones
+2026-09-08 | ARQUITECTURA_APROBADA → EN_PRUEBAS | orion-dev | Implementación completa, 25 tests nuevos, CA-13 verificado; handoff a `orion-tester`
