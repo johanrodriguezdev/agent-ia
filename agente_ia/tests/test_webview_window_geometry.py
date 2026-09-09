@@ -9,7 +9,7 @@ cero acá (arquitectura-015.md §1, fila CA-04).
 
 import pytest
 
-from ui.webview.window_geometry import fit_size_to_screen
+from ui.webview.window_geometry import fit_size_to_screen, resolver_maximizado
 
 
 def test_pantalla_normal_1920x1080():
@@ -76,3 +76,58 @@ def test_minimum_por_defecto_es_1024x640():
     # área disponible menor que el mínimo por defecto -> usa el área completa (100x100)
     assert width == 100
     assert height == 100
+
+
+# --------------------------------------------------------------- resolver_maximizado()
+# El bug: con la app maximizada, minimizarla y volver (clic en la barra de tareas, Win+D)
+# la dejaba a pantalla completa pero SIN el estado maximizado, y el frontend volvía a
+# dibujar el gutter de 10px con esquinas redondeadas — se veía "encogida" sin que la
+# ventana hubiera cambiado de tamaño.
+
+def test_minimizar_estando_maximizada_recuerda_el_estado():
+    recordar, reafirmar = resolver_maximizado(
+        minimizada=True, maximizada=True, maximizada_al_minimizar=False,
+    )
+    assert recordar is True
+    assert reafirmar is False
+
+
+def test_restaurar_perdiendo_el_maximizado_lo_reafirma():
+    """El caso del bug: vuelve de minimizada y Qt ya no la considera maximizada."""
+    recordar, reafirmar = resolver_maximizado(
+        minimizada=False, maximizada=False, maximizada_al_minimizar=True,
+    )
+    assert reafirmar is True
+    assert recordar is False
+
+
+def test_restaurar_conservando_el_maximizado_no_hace_nada():
+    """Si el estado sobrevivió (otras plataformas, u otro camino de restauración), no se
+    vuelve a maximizar: sería un `showMaximized()` de más en cada ciclo."""
+    recordar, reafirmar = resolver_maximizado(
+        minimizada=False, maximizada=True, maximizada_al_minimizar=True,
+    )
+    assert reafirmar is False
+    assert recordar is False
+
+
+def test_ventana_en_tamano_normal_nunca_se_maximiza_sola():
+    """Minimizar y restaurar una ventana que estaba en tamaño normal tiene que devolverla
+    en tamaño normal — el arreglo no puede convertirse en un maximizado sorpresa."""
+    recordar, _ = resolver_maximizado(
+        minimizada=True, maximizada=False, maximizada_al_minimizar=False,
+    )
+    assert recordar is False
+    _, reafirmar = resolver_maximizado(
+        minimizada=False, maximizada=False, maximizada_al_minimizar=recordar,
+    )
+    assert reafirmar is False
+
+
+def test_cambio_de_estado_sin_minimizar_no_arrastra_memoria():
+    """Un maximizar/restaurar normal (botón de la barra) no deja memoria pendiente que
+    después dispare un reafirmado fuera de lugar."""
+    recordar, reafirmar = resolver_maximizado(
+        minimizada=False, maximizada=True, maximizada_al_minimizar=False,
+    )
+    assert (recordar, reafirmar) == (False, False)

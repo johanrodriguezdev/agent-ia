@@ -300,6 +300,12 @@ class Bridge(QObject):
             "quick_actions": _build_quick_actions_payload(),
         }))
         self.theme_changed.emit(resolve_theme_name(config_manager.get_ui_theme()))
+        # El estado de la ventana también: `window_maximized_changed` solo se emite cuando
+        # el estado CAMBIA, así que una página recién cargada —el arranque con geometría
+        # maximizada guardada, o una recarga tras un crash del render— no sabía que estaba
+        # maximizada y dibujaba el gutter de tamaño normal a pantalla completa.
+        if self._main_window is not None:
+            self.window_maximized_changed.emit(self._main_window.isMaximized())
         self._load_conversations(offset=0)
 
         # Primer arranque sin `config.json` (ni variables de entorno): sin una sola clave de

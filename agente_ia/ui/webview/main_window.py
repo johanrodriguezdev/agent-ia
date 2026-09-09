@@ -34,7 +34,7 @@ from core.security_manager import ChannelType
 from ui.webview.bridge import Bridge
 from ui.webview.confirmation_adapter import WebViewConfirmationAdapter
 from ui.webview.file_drop import validate_dropped_file
-from ui.webview.window_geometry import fit_size_to_screen
+from ui.webview.window_geometry import fit_size_to_screen, resolver_maximizado
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +61,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._agent_name = get_agent_name().upper()
         self._wake_worker_ref_owner = None  # ver Bridge — el worker vive en el Bridge
+        # Ver `changeEvent()`: Windows devuelve esta ventana de minimizada sin el
+        # estado maximizado, y hay que reafirmarlo.
+        self._maximizada_al_minimizar = False
 
         self.setWindowTitle(f"{self._agent_name} — Panel de control")
         # En la ventana Y en la aplicación. Sin lo segundo, la barra de tareas de Windows
@@ -315,10 +318,26 @@ class MainWindow(QMainWindow):
         solo tienen sentido en tamaño normal: maximizado dejaban un borde visible que
         impedía que la app se viera a pantalla completa. El frontend necesita saber el
         estado para anularlos, y `showMaximized()` no es el único camino (Win+↑, doble
-        click en la barra), por eso se escucha el cambio de estado de la ventana."""
+        click en la barra), por eso se escucha el cambio de estado de la ventana.
+
+        Y se reafirma el maximizado al volver de minimizada: Windows restaura esta ventana
+        con el tamaño de pantalla completa pero SIN el estado maximizado, con lo que el
+        frontend volvía a dibujar el gutter y la app se veía encogida dentro de una ventana
+        que nunca cambió de tamaño. Ver `window_geometry.resolver_maximizado()`."""
         super().changeEvent(event)
-        if event.type() == QEvent.Type.WindowStateChange:
-            self.bridge.window_maximized_changed.emit(self.isMaximized())
+        if event.type() != QEvent.Type.WindowStateChange:
+            return
+
+        minimizada = bool(self.windowState() & Qt.WindowState.WindowMinimized)
+        self._maximizada_al_minimizar, reafirmar = resolver_maximizado(
+            minimizada, self.isMaximized(), self._maximizada_al_minimizar,
+        )
+        if reafirmar:
+            # Dispara otro WindowStateChange, y es ese el que emite el estado bueno.
+            self.showMaximized()
+            return
+
+        self.bridge.window_maximized_changed.emit(self.isMaximized())
 
     def closeEvent(self, event) -> None:
         """CA-01 — portado sin cambios de comportamiento: cerrar minimiza a la bandeja en
