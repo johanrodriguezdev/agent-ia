@@ -69,6 +69,21 @@ function timeBasedGreeting() {
   return match ? match.text : "Buenas noches";
 }
 
+//: Cada cuanto se vuelve a mirar el reloj. La app esta pensada para quedar abierta todo el
+//: dia (arranca con Windows y vive en la bandeja), asi que el saludo se calculaba una sola
+//: vez al cargar la pagina y a las nueve de la noche seguia diciendo "Buenos dias"
+//: (REQ-012). Un minuto es de sobra: nadie nota el cambio de franja al segundo.
+const MS_ENTRE_REVISIONES_DE_SALUDO = 60_000;
+
+function refrescarSaludo() {
+  const el = document.getElementById("empty-state-greeting");
+  if (!el) return;
+  const saludo = timeBasedGreeting();
+  // Solo si cambio: repintar el mismo texto cada minuto no se ve, pero pisa la seleccion
+  // del usuario si justo estaba copiando algo.
+  if (el.textContent !== saludo) el.textContent = saludo;
+}
+
 function setAgentIdentity(name) {
   // CA-46: avatar = círculo con la inicial del agente. El valor inicial lo inyecta
   // `MainWindow` como variable global (ver `main_window.py::_inject_agent_name_script`);
@@ -222,6 +237,12 @@ async function bootstrap() {
   // señal se perdería (Qt no reproduce señales para suscriptores tardíos). No se usa en
   // producción.
   window.__ORION_APP_READY__ = true;
+
+  // El saludo mira el reloj cada minuto (REQ-012). Ver `refrescarSaludo()`.
+  setInterval(refrescarSaludo, MS_ENTRE_REVISIONES_DE_SALUDO);
+  // Mismo criterio que `__ORION_APP_READY__`: un test no puede esperar un minuto ni
+  // adelantar el reloj del sistema, pero si puede fingir la hora y disparar la revision.
+  window.__ORION_REFRESCAR_SALUDO__ = refrescarSaludo;
 }
 
 bootstrap();
