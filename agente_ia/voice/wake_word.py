@@ -2,7 +2,8 @@ import speech_recognition as sr
 import logging
 import threading
 import time
-from typing import Callable, Optional
+from contextlib import contextmanager
+from typing import Any, Callable, Iterator, Optional, Union
 import numpy as np
 from ui.tts_engine import speak
 from nlp.parser import clean_text
@@ -10,6 +11,7 @@ from config_manager import (
     get_wake_words, get_agent_name, get_agent_pronunciation, normalize_for_match,
 )
 from core.address import vocative
+from core.notificaciones import notificar
 
 logger = logging.getLogger(__name__)
 
@@ -281,16 +283,109 @@ def _report_awake(wake_state_callback: Optional[Callable[[str], None]]) -> None:
     _report_state(wake_state_callback, "AWAKE")
 
 
+# --------------------------------------------------------------- REQ-028: reconexión
+# El manos libres era UNA sesión de micrófono con un bucle adentro: si el dispositivo se
+# caía, se caía todo. Ahora es un BUCLE DE SESIONES — cuando otra aplicación se lleva el
+# micrófono (una reunión, una llamada), se cierra esa sesión, se espera, y se abre otra.
+
+
+class _MicrofonoPerdido(Exception):
+    """El dispositivo de audio dejó de estar disponible durante una sesión de escucha.
+
+    Interna al módulo: nunca sale de `listen_for_wake_word()`. Existe para cortar la sesión
+    en curso sin matar la función, que es justo lo que hacía el `OSError` crudo de PyAudio.
+
+    `al_abrir` separa los dos fallos que se tratan distinto: no haber podido tomar nunca el
+    micrófono (puede que no haya ninguno conectado — CA-07, techo de 3 intentos) de haberlo
+    perdido con la sesión ya andando (CA-01, se reintenta mientras el usuario lo quiera).
+    """
+
+    def __init__(self, mensaje: str, al_abrir: bool) -> None:
+        super().__init__(mensaje)
+        self.al_abrir = al_abrir
+
+
+#: Escalera de espera entre reintentos, en segundos. Crece para no golpear a PyAudio una
+#: vez por segundo durante una reunión de una hora, y tiene techo para que recuperar el
+#: micrófono nunca tarde más de medio minuto desde que queda libre.
+_ESPERAS_DE_RECONEXION: tuple[float, ...] = (1.0, 2.0, 4.0, 8.0, 15.0, 30.0)
+
+#: En qué trozos se consume la espera. `stop_event` se consulta en cada uno: apagar el
+#: manos libres mientras reintenta no puede tardar los 30 s del último escalón (CA-06).
+_PASO_DE_ESPERA = 0.5
+
+#: Cuántas aperturas fallidas seguidas, sin haber leído nunca el dispositivo, bastan para
+#: concluir que no hay micrófono. Distinto de perderlo estando en uso: eso no se rinde.
+_MAX_APERTURAS_SIN_MICROFONO = 3
+
+
+def siguiente_espera(intento: int) -> float:
+    """Return los segundos a esperar antes del reintento número `intento` (1 = el primero).
+
+    Función pura a propósito: la escalera de backoff se puede fijar por test sin dormir ni
+    tocar el micrófono (mismo criterio que `fit_size_to_screen()` y `resolver_maximizado()`).
+    """
+    if intento < 1:
+        intento = 1
+    return _ESPERAS_DE_RECONEXION[min(intento, len(_ESPERAS_DE_RECONEXION)) - 1]
+
+
+def _esperar_troceado(
+    segundos: float, stop_event: Optional[threading.Event],
+) -> bool:
+    """Esperar `segundos` en trozos de `_PASO_DE_ESPERA`. Return False si hay que parar.
+
+    Sin esto, apagar el manos libres durante el último escalón del backoff tardaría hasta
+    30 segundos en tomar efecto, y el usuario vería un botón que dice "apagado" con un hilo
+    todavía vivo detrás (REQ-028/CA-06).
+    """
+    restante = float(segundos)
+    while restante > 0:
+        paso = min(_PASO_DE_ESPERA, restante)
+        if stop_event is not None:
+            if stop_event.wait(paso):
+                return False
+        else:
+            time.sleep(paso)
+        restante -= paso
+    return True
+
+
+@contextmanager
+def _sesion_de_microfono(recognizer: sr.Recognizer, agent_label: str) -> Iterator[Any]:
+    """Abrir el micrófono para UNA sesión de escucha, traduciendo el fallo del dispositivo.
+
+    Es un context manager y no una función suelta porque el stream se abre en el `__enter__`
+    de `sr.Microphone`: envolver solo la construcción dejaría fuera justo el punto donde
+    PyAudio falla cuando otra aplicación ya tiene el dispositivo tomado.
+
+    Todo lo que ocurre antes del `yield` —construir, abrir el stream y calibrar el ruido
+    ambiente, que ya lee del dispositivo durante un segundo— cuenta como "al abrir".
+    """
+    abriendo = True
+    try:
+        with sr.Microphone() as source:
+            print(f"\n[Modo Manos Libres]: Escuchando... Di \"{agent_label}\" para activarme")
+            recognizer.adjust_for_ambient_noise(source, duration=1)
+            abriendo = False
+            yield source
+    except OSError as e:
+        raise _MicrofonoPerdido(str(e), al_abrir=abriendo) from e
+
+
 def listen_for_wake_word(
     stop_event: Optional[threading.Event] = None,
     wake_state_callback: Optional[Callable[[str], None]] = None,
     conversation_window=None,
-):
+) -> Union[str, bool, None]:
     """Escuchar hasta detectar la wake word, o retornar por cancelación/KeyboardInterrupt.
 
     Retorna: `str` con el comando extraído tras la wake word, `True` si se detectó la wake
     word sin comando extra, `False` si se interrumpió con `KeyboardInterrupt`, o `None` si
-    `stop_event` fue señalado (REQ-009/CA-05 — parada cooperativa, best-effort).
+    `stop_event` fue señalado (REQ-009/CA-05 — parada cooperativa, best-effort). Desde
+    REQ-028 `None` cubre además el caso de que no haya ningún micrófono con el que escuchar
+    (CA-07): para quien llama significa lo mismo de siempre —el bucle terminó solo y no hay
+    comando que ejecutar—, y tanto `main.py` como `WakeWordWorker` ya lo tratan igual.
 
     `stop_event`/`wake_state_callback` son opcionales (`None` por defecto): sin ellos, el
     comportamiento es idéntico al existente antes de REQ-009 (uso desde `ui/cli.py` en
@@ -305,6 +400,11 @@ def listen_for_wake_word(
     `ui/webview/wake_word_worker.py`), una frase transcrita durante la ventana abierta se
     acepta SIN wake word y se devuelve por este mismo `return`: mismo camino, misma señal
     `command_detected`, mismo `resolve()`, mismo gate de seguridad.
+
+    REQ-028: perder el micrófono ya no termina la función. Cada vuelta del `while` es una
+    sesión de micrófono completa; si el dispositivo se cae, se espera con backoff y se abre
+    otra. La reconexión vive acá y no en `WakeWordWorker` porque el camino headless
+    (`main.py`, opción 3) no pasa por el worker y tenía exactamente el mismo problema.
     """
     recognizer = sr.Recognizer()
     recognizer.dynamic_energy_threshold = False
@@ -312,10 +412,107 @@ def listen_for_wake_word(
 
     agent_label = get_agent_pronunciation() or get_agent_name()
 
-    with sr.Microphone() as source:
-        print(f"\n[Modo Manos Libres]: Escuchando... Di \"{agent_label}\" para activarme")
-        recognizer.adjust_for_ambient_noise(source, duration=1)
+    intento = 0                 # reintentos de la caída EN CURSO; 0 = no hay caída
+    aperturas_fallidas = 0      # fallos seguidos sin llegar a leer: ¿hay micrófono siquiera?
+    hubo_lectura_buena = False  # ¿este dispositivo llegó a responder alguna vez?
+    perdido = False             # ¿ya se le avisó al usuario de la caída en curso?
 
+    def al_leer_bien() -> None:
+        """El dispositivo respondió: se da por terminada la caída, si es que había una.
+
+        La señal de recuperación es una LECTURA, no una apertura. Un micrófono tomado por
+        otra aplicación se deja abrir igual en Windows y falla recién al leerlo: dar por
+        recuperada la sesión al abrirla reiniciaría el backoff en cada vuelta y el
+        resultado sería el bucle de reintentos a máxima velocidad que este REQ evita.
+        """
+        nonlocal intento, aperturas_fallidas, hubo_lectura_buena, perdido
+        hubo_lectura_buena = True
+        aperturas_fallidas = 0
+        if not perdido:
+            return
+        perdido = False
+        intento = 0
+        logger.info("[Wake word] Micrófono recuperado; el modo manos libres vuelve a escuchar")
+        notificar(
+            "Micrófono recuperado",
+            "El modo manos libres volvió a escuchar.",
+            "ok",
+        )
+        _report_state(wake_state_callback, "LISTENING_WAKE")
+
+    while True:
+        if stop_event is not None and stop_event.is_set():
+            return None
+
+        try:
+            return _escuchar_en_sesion(
+                recognizer, agent_label, stop_event, wake_state_callback,
+                conversation_window, al_leer_bien,
+            )
+        except _MicrofonoPerdido as fallo:
+            if fallo.al_abrir:
+                aperturas_fallidas += 1
+            intento += 1
+
+            # CA-08: el primer fallo se grita, los reintentos se susurran. Una reunión de
+            # una hora dejaría 120 líneas de `error` con el techo de 30 s, y el log del
+            # agente serviría para nada más que para eso.
+            if not perdido:
+                perdido = True
+                logger.error(
+                    f"[Wake word] Se perdió el acceso al micrófono ({fallo}); "
+                    f"el modo manos libres va a reconectarse solo"
+                )
+                notificar(
+                    "Micrófono no disponible",
+                    "Otra aplicación tomó el micrófono. El modo manos libres se "
+                    "reconectará solo en cuanto vuelva a quedar libre.",
+                    "error",
+                )
+            else:
+                logger.debug(
+                    f"[Wake word] Reintento {intento} de conexión al micrófono: {fallo}"
+                )
+
+            # CA-07: no haber podido abrir NUNCA el dispositivo es un caso distinto de
+            # haberlo perdido en uso. Sin micrófono conectado no hay nada que esperar, y
+            # reintentar para siempre sería un hilo vivo golpeando PyAudio de por vida.
+            if (fallo.al_abrir and not hubo_lectura_buena
+                    and aperturas_fallidas >= _MAX_APERTURAS_SIN_MICROFONO):
+                logger.error(
+                    f"[Wake word] No se pudo abrir ningún micrófono en "
+                    f"{aperturas_fallidas} intentos; se apaga el modo manos libres"
+                )
+                notificar(
+                    "Sin micrófono",
+                    "No se encontró ningún micrófono disponible. El modo manos libres "
+                    "quedó apagado.",
+                    "error",
+                )
+                _report_state(wake_state_callback, "INACTIVE")
+                return None
+
+            # CA-04: "reconectando" no es "apagado". `INACTIVE` significa que lo apagaste
+            # vos, y el botón no puede mentir sobre por qué dejó de escuchar.
+            _report_state(wake_state_callback, "RECONNECTING")
+            if not _esperar_troceado(siguiente_espera(intento), stop_event):
+                return None
+
+
+def _escuchar_en_sesion(
+    recognizer: sr.Recognizer,
+    agent_label: str,
+    stop_event: Optional[threading.Event],
+    wake_state_callback: Optional[Callable[[str], None]],
+    conversation_window,
+    al_leer_bien: Callable[[], None],
+) -> Union[str, bool, None]:
+    """Una sesión de micrófono completa: el cuerpo que `listen_for_wake_word()` tenía dentro.
+
+    Devuelve lo mismo que `listen_for_wake_word()`, o levanta `_MicrofonoPerdido` si el
+    dispositivo se cae — que es la única diferencia de comportamiento respecto de REQ-021.
+    """
+    with _sesion_de_microfono(recognizer, agent_label) as source:
         while True:
             if stop_event is not None and stop_event.is_set():
                 return None
@@ -331,9 +528,21 @@ def listen_for_wake_word(
                 # capturarse mientras el agente hablaba no puede aceptarse sin wake word
                 # aunque termine después de abrirse la ventana.
                 listen_started_at = time.monotonic()
-                audio = recognizer.listen(
-                    source, timeout=1, phrase_time_limit=_limite_de_frase(),
-                )
+                try:
+                    audio = recognizer.listen(
+                        source, timeout=1, phrase_time_limit=_limite_de_frase(),
+                    )
+                except OSError as e:
+                    # REQ-028/CA-01: esto es PyAudio quedándose sin dispositivo
+                    # (-9988 "Stream closed", -9999 "Unanticipated host error") porque otra
+                    # aplicación se lo llevó. Antes propagaba, cerraba el micrófono y
+                    # terminaba el worker; ahora corta solo ESTA sesión y se abre otra.
+                    #
+                    # Se captura `OSError` y nunca `Exception`: un error de código tiene que
+                    # seguir subiendo y muriendo ruidosamente, no quedar tapado detrás de
+                    # reintentos infinitos.
+                    raise _MicrofonoPerdido(str(e), al_abrir=False) from e
+                al_leer_bien()
 
                 if wake_state_callback is None:
                     try:
@@ -458,7 +667,10 @@ def listen_for_wake_word(
                     )
 
             except sr.WaitTimeoutError:
-                pass
+                # Silencio, no un fallo: el dispositivo se dejó leer durante el timeout
+                # entero. Cuenta como lectura buena, así que da por cerrada una
+                # reconexión en curso igual que una frase transcrita (REQ-028/CA-05).
+                al_leer_bien()
             except sr.UnknownValueError:
                 pass
             except sr.RequestError:
