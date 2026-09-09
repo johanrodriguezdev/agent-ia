@@ -185,13 +185,36 @@ def test_lo_que_el_modelo_pide_manda_si_se_reconoce(monkeypatch):
 def test_el_texto_original_lo_pone_el_bucle_no_el_modelo():
     """Mismo invariante que `channel` y `user_id`: es un dato de la invocación, y el modelo
     no puede proponerlo. Si pudiera, podría hacer pasar por "lo que dijo el usuario" algo
-    que el usuario nunca dijo."""
+    que el usuario nunca dijo.
+
+    REQ-027: la inyección se mudó de `run()` a `_ejecutar_vuelta()`, que es donde ahora se
+    arman los params de CADA una de las N herramientas de una vuelta. Además del grep se
+    verifica el comportamiento: un `texto_original` propuesto por el modelo tiene que
+    quedar PISADO, que es lo que el invariante promete de verdad.
+    """
     import inspect
+    from unittest.mock import patch
 
+    from ai.llm_provider import ToolCallRequest
     from core import reasoning_loop
+    from core.security_manager import ChannelType
 
-    fuente = inspect.getsource(reasoning_loop.run)
+    fuente = inspect.getsource(reasoning_loop._ejecutar_vuelta)
     assert 'params["texto_original"] = task' in fuente
+
+    calls = [
+        ToolCallRequest(id="a", name="t_a", arguments={"texto_original": "lo que nunca dijo"}),
+        ToolCallRequest(id="b", name="t_b", arguments={}),
+    ]
+    with patch("core.reasoning_loop.execute_tool", return_value="ok") as mock_exec:
+        reasoning_loop._ejecutar_vuelta(
+            calls, 1, ChannelType.DESKTOP, "u1", "lo que el usuario dijo de verdad",
+        )
+
+    # En las N, no solo en la primera.
+    assert mock_exec.call_count == 2
+    for llamada in mock_exec.call_args_list:
+        assert llamada.args[1]["texto_original"] == "lo que el usuario dijo de verdad"
 
 
 # ─────────────────────────────────────────────

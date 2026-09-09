@@ -25,6 +25,12 @@ class ModoComposer:
 
     `tool_names`: tools que se mueven al frente del catálogo que ve el modelo
     (`core/reasoning_loop.py::_reordenar_priorizando()`) — nunca se filtra el resto.
+    `presupuesto` (REQ-027/CA-12): cuantas llamadas al modelo puede gastar un turno
+    mientras el modo esta activo. Cuenta LLAMADAS, no herramientas: una vuelta que ejecuta
+    cuatro herramientas gasta una sola unidad, porque el costo y la latencia los pone la
+    llamada al modelo. La llamada de cierre va aparte, fuera del presupuesto (CA-30).
+    Sin default a proposito: un modo nuevo que se olvide de declararlo tiene que explotar
+    al importar, no heredar en silencio el presupuesto mas bajo.
     `tarea`: si no es `None`, reemplaza `tarea="razonamiento"` en la llamada a
     `generate_response()` mientras el modo está activo (rutea a `task_providers[tarea]`
     si existe una entrada; si no, se comporta igual que "razonamiento" sin fijar).
@@ -36,6 +42,7 @@ class ModoComposer:
     id: str
     label: str
     tool_names: Tuple[str, ...]
+    presupuesto: int
     tarea: Optional[str]
     prompt_hint: str
 
@@ -48,6 +55,7 @@ _MODOS: Tuple[ModoComposer, ...] = (
         id="codigo",
         label="Código/script",
         tool_names=("EXECUTE_CODE",),
+        presupuesto=40,
         tarea="modo_codigo",
         prompt_hint=(
             "Modo activo: Código/script. Priorizá generar y ejecutar código con "
@@ -59,6 +67,7 @@ _MODOS: Tuple[ModoComposer, ...] = (
         id="investigacion",
         label="Investigación",
         tool_names=("web_search", "web_read", "wikipedia_search", "BROWSE_WEB"),
+        presupuesto=25,
         tarea="modo_investigacion",
         prompt_hint=(
             "Modo activo: Investigación. Priorizá buscar y leer información con "
@@ -71,6 +80,7 @@ _MODOS: Tuple[ModoComposer, ...] = (
         id="flujos",
         label="Nodos/flujos",
         tool_names=("flujo", "CREATE_FLOW"),
+        presupuesto=12,
         tarea=None,
         prompt_hint=(
             "Modo activo: Nodos/flujos. Priorizá trabajar con flujos (listar, ejecutar, "
@@ -83,6 +93,7 @@ _MODOS: Tuple[ModoComposer, ...] = (
         id="tareas",
         label="Tareas",
         tool_names=("task_create", "task_list", "task_complete", "task_complete_all"),
+        presupuesto=10,
         tarea=None,
         prompt_hint=(
             "Modo activo: Tareas. Priorizá crear, listar y completar tareas con "
