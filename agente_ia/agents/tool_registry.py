@@ -1682,3 +1682,91 @@ register_tool(ToolSpec(
     risk_level=RiskLevel.YELLOW,
     invoke=_http_request_invoke,
 ))
+
+
+# ─────────────────────────────────────────────
+#  REQ-032 — cerrar el ciclo: ver el proyecto, correrlo, leer el fallo
+# ─────────────────────────────────────────────
+
+def _project_tree_invoke(params: dict) -> str:
+    from core.workspace_files import arbol
+
+    profundidad = _entero(params, "depth")
+    return _con_manejo(
+        "project_tree",
+        lambda: arbol(str(params.get("path") or ""), 3 if profundidad is None else profundidad),
+    )
+
+
+register_tool(ToolSpec(
+    name="project_tree",
+    description=(
+        "Muestra la estructura de un proyecto habilitado: carpetas y archivos con sangría, "
+        "hasta la profundidad que pidas. Usala PRIMERO cuando llegues a un repositorio que "
+        "no conocés, en vez de ir listando carpeta por carpeta. Salteá node_modules y .git "
+        "ya viene hecho."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Carpeta a mostrar. Opcional si hay una sola habilitada.",
+            },
+            "depth": {
+                "type": "integer",
+                "description": "Cuántos niveles bajar (por defecto 3, máximo 8).",
+            },
+        },
+    },
+    risk_level=RiskLevel.GREEN,
+    invoke=_project_tree_invoke,
+))
+
+
+def _project_run_invoke(params: dict) -> str:
+    from core.workspace_run import describir, ejecutar
+
+    comando = str(params.get("command") or "").strip()
+    if not comando:
+        return f"Necesito el comando que querés que corra{vocative()}."
+    timeout = _entero(params, "timeout")
+    return _con_manejo(
+        "project_run",
+        lambda: describir(ejecutar(comando, str(params.get("path") or ""), timeout=timeout)),
+    )
+
+
+register_tool(ToolSpec(
+    name="project_run",
+    description=(
+        "Ejecuta un comando DENTRO de la carpeta de un proyecto habilitado y te devuelve su "
+        "salida y su código de salida: las pruebas, un build, un linter, un script. Es la "
+        "herramienta para COMPROBAR lo que escribiste — corré, leé el error, corregí con "
+        "file_edit y volvé a correr. No usa la terminal que el usuario tiene en pantalla."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "command": {
+                "type": "string",
+                "description": "El comando exacto, tal cual se escribiría en la consola.",
+            },
+            "path": {
+                "type": "string",
+                "description": "Carpeta del proyecto. Opcional si hay una sola habilitada.",
+            },
+            "timeout": {
+                "type": "integer",
+                "description": "Segundos antes de cortarlo (por defecto 120, máximo 600).",
+            },
+        },
+        "required": ["command"],
+    },
+    # YELLOW y confirma CADA llamada mostrando el comando (`command` está en
+    # `_DETAILS_ALLOWED_KEYS`). No es cosmético: un comando puede escribir archivos, así que
+    # sin esta confirmación la de `file_write` quedaría decorativa — habría un camino que la
+    # rodea. Decisión explícita de Johan el 2026-09-09.
+    risk_level=RiskLevel.YELLOW,
+    invoke=_project_run_invoke,
+))

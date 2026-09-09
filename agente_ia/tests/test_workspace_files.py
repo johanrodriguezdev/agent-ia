@@ -529,3 +529,76 @@ def test_file_read_si_lee_un_secreto_si_se_lo_piden_por_su_nombre(repo, raices):
         f.write("CLAVE=valor\n")
 
     assert "CLAVE=valor" in wf.leer(".env", raices=raices)
+
+
+# ───────── REQ-032: `arbol()` — orientarse en un repo sin listar carpeta por carpeta ─────────
+
+def test_el_arbol_muestra_la_estructura_con_sangria(repo, raices):
+    salida = wf.arbol(raices=raices)
+
+    assert "src/" in salida
+    assert "main.py" in salida
+
+
+def test_el_arbol_saltea_el_ruido_de_dependencias(tmp_path, repo, raices):
+    """`node_modules` y `.git` tienen miles de archivos que no dicen nada del proyecto."""
+    for basura in ("node_modules", "__pycache__", ".git"):
+        carpeta = os.path.join(repo, basura)
+        os.makedirs(carpeta, exist_ok=True)
+        with open(os.path.join(carpeta, "adentro.txt"), "w", encoding="utf-8") as f:
+            f.write("x")
+
+    salida = wf.arbol(raices=raices)
+
+    assert "node_modules" not in salida
+    assert "__pycache__" not in salida
+    assert "adentro.txt" not in salida
+
+
+def test_el_arbol_respeta_la_profundidad(repo, raices):
+    hondo = os.path.join(repo, "uno", "dos", "tres")
+    os.makedirs(hondo, exist_ok=True)
+    with open(os.path.join(hondo, "profundo.txt"), "w", encoding="utf-8") as f:
+        f.write("x")
+
+    corto = wf.arbol(profundidad=1, raices=raices)
+    largo = wf.arbol(profundidad=5, raices=raices)
+
+    assert "profundo.txt" not in corto
+    assert "profundo.txt" in largo
+
+
+def test_el_arbol_avisa_cuando_recorta(repo, raices):
+    """Un repo de 10.000 archivos se comería el turno entero del modelo."""
+    from core.workspace_files import _MAX_LINEAS_ARBOL
+
+    muchos = os.path.join(repo, "muchos")
+    os.makedirs(muchos, exist_ok=True)
+    for i in range(_MAX_LINEAS_ARBOL + 50):
+        with open(os.path.join(muchos, f"archivo_{i:04d}.txt"), "w", encoding="utf-8") as f:
+            f.write("x")
+
+    salida = wf.arbol(raices=raices)
+
+    assert "recortado" in salida
+
+
+def test_el_arbol_sin_carpetas_habilitadas_lo_dice_sin_reventar():
+    salida = wf.arbol(raices=[])
+
+    assert "habilitada" in salida
+
+
+def test_el_arbol_no_se_va_por_un_enlace_que_sale_de_la_raiz(tmp_path, repo, raices):
+    """Mismo criterio que `buscar()`: el recorrido visita rutas que nadie pidió."""
+    afuera = tmp_path / "privado_del_arbol"
+    afuera.mkdir()
+    (afuera / "secreto.txt").write_text("x", encoding="utf-8")
+
+    enlace = os.path.join(repo, "atajo")
+    if not _crear_enlace(str(afuera), enlace):
+        pytest.skip("este sistema no permite crear enlaces de directorio sin privilegios")
+
+    salida = wf.arbol(profundidad=5, raices=raices)
+
+    assert "secreto.txt" not in salida
