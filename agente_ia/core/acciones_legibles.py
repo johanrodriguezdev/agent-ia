@@ -56,6 +56,10 @@ _DESCRIPCIONES: Dict[str, str] = {
     "delete_folder": "borre una carpeta",
     "save_file_desktop": "guarde un archivo en el escritorio",
     "write_file_direct": "escriba un archivo",
+    # REQ-029 — las dos amarillas de las herramientas de repositorio. Las 6 verdes (leer,
+    # listar, buscar, git status/diff/log) nunca preguntan, así que no necesitan traducción.
+    "file_write": "cree o reescriba un archivo del repositorio",
+    "file_edit": "cambie un fragmento de un archivo del repositorio",
 
     # ── Código y habilidades ──
     "EXECUTE_CODE": "ejecute un programa que acabo de escribir",

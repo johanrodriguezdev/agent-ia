@@ -54,13 +54,28 @@ _MODOS: Tuple[ModoComposer, ...] = (
     ModoComposer(
         id="codigo",
         label="Código/script",
-        tool_names=("EXECUTE_CODE",),
+        # REQ-029/CA-15 — las 8 herramientas de repositorio van PRIMERO, y `EXECUTE_CODE`
+        # queda al final: en este modo lo habitual es trabajar sobre un repo que ya
+        # existe (leer, buscar, editar, mirar el git), no generar un script suelto y
+        # ejecutarlo. El orden de esta tupla es el orden en que el modelo ve el catálogo
+        # (`reasoning_loop._reordenar_priorizando()`), y dentro de ellas también importa:
+        # buscar y leer antes que escribir, porque editar sin haber leído es adivinar.
+        # `presupuesto=40` (REQ-027) no se toca: editar un repo son ~20 pasos.
+        tool_names=(
+            "file_search", "file_read", "file_list", "file_edit", "file_write",
+            "git_status", "git_diff", "git_log", "EXECUTE_CODE",
+        ),
         presupuesto=40,
         tarea="modo_codigo",
         prompt_hint=(
-            "Modo activo: Código/script. Priorizá generar y ejecutar código con "
-            "'EXECUTE_CODE' cuando el pedido lo amerite. Si el pedido no tiene que ver "
-            "con código, respondé con normalidad sin forzar esa herramienta."
+            "Modo activo: Código/script. Trabajás sobre repositorios reales: orientate "
+            "con 'file_search' y 'file_list', leé con 'file_read' antes de cambiar nada, "
+            "cambiá con 'file_edit' (o 'file_write' si el archivo es nuevo) y mirá el "
+            "estado del repo con 'git_status', 'git_diff' y 'git_log'. Solo podés tocar "
+            "las carpetas que el usuario habilitó: si una ruta se rechaza, decíselo en "
+            "vez de insistir por otro camino. Para generar y correr un script suelto está "
+            "'EXECUTE_CODE'. Si el pedido no tiene que ver con código, respondé con "
+            "normalidad sin forzar esas herramientas."
         ),
     ),
     ModoComposer(

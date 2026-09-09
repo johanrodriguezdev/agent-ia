@@ -14,7 +14,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Optional
 
-from core.security_manager import ActionDenied, RiskLevel, format_details, security_manager
+from core.security_manager import (ActionDenied, ChannelType, DESKTOP_ONLY_ACTIONS,
+                                   RiskLevel, format_details, security_manager)
 from core.address import vocative, vocative_start
 
 logger = logging.getLogger(__name__)
@@ -98,10 +99,21 @@ def catalogo_para_modelo(channel=None) -> list:
         logger.debug(f"No se pudo leer la lista de intents ocultos: {e}")
         ocultos = frozenset()
 
+    # REQ-029 — las herramientas de repositorio son de escritorio y punto (CA-06). Fuera
+    # de ahí ni se ofrecen: son verdes, así que el filtro por nivel de arriba no las
+    # sacaría, y el modelo gastaría una vuelta pidiendo algo que `execute_tool()` va a
+    # denegar. Esto NO es el control de seguridad —ese es `DESKTOP_ONLY_ACTIONS` dentro
+    # de `is_action_allowed()`—, es no ofrecer lo que no se puede dar.
+    solo_escritorio = frozenset()
+    if channel is not None and security_manager.resolve_channel(channel) is not ChannelType.DESKTOP:
+        solo_escritorio = frozenset(DESKTOP_ONLY_ACTIONS)
+
     catalogo = []
     for name in list_tool_names():
         spec = get_tool(name)
         if spec is None or name in ocultos:
+            continue
+        if name in solo_escritorio:
             continue
         if permitidos is not None and spec.risk_level not in permitidos:
             continue
@@ -235,6 +247,16 @@ _PARAM_DE_DETALLE = {
     "wikipedia_search": "query",
     "task_create": "text",
     "terminal_run_command": "command",
+    # REQ-029 — qué archivo o qué carpeta se está tocando. Es lo que el usuario necesita
+    # ver pasar por pantalla mientras el agente trabaja sobre un repo.
+    "file_list": "path",
+    "file_read": "path",
+    "file_search": "query",
+    "file_write": "path",
+    "file_edit": "path",
+    "git_status": "path",
+    "git_diff": "path",
+    "git_log": "path",
 }
 
 
@@ -1143,4 +1165,340 @@ register_tool(ToolSpec(
     # fuera de los canales remotos igual que el resto de la terminal.
     risk_level=RiskLevel.YELLOW,
     invoke=_terminal_read_output_invoke,
+))
+
+
+# ─────────────────────────────────────────────
+#  REQ-029 — Manos para trabajar con repos: archivos y git, confinados
+#
+#  Las 8 son envoltorios finos. Toda la seguridad vive en dos lugares que NO están acá:
+#  `core/workspace_files.py::resolver()` (el confinamiento de rutas) y el gate de
+#  `execute_tool()` de arriba, que ya corrió `security_manager.require_confirmation()`
+#  antes de que cualquiera de estos `invoke` llegue a ejecutarse (CA-09). Ningún camino
+#  propio: ninguna de las 8 se invoca por fuera de `execute_tool()`.
+#
+#  Las 8 están además en `DESKTOP_ONLY_ACTIONS` (`core/security_manager.py`): ni siquiera
+#  las verdes son alcanzables desde Telegram, Discord, voz, API o correo (CA-06).
+# ─────────────────────────────────────────────
+
+def _con_manejo(nombre: str, operacion: Callable[[], str]) -> str:
+    """Corre una operación de archivo devolviendo SIEMPRE texto que el modelo entienda.
+
+    Un escape de confinamiento vuelve como la explicación de `RutaFueraDeRaiz` (que ya
+    dice qué pasó y sobre qué carpetas sí puede trabajar); cualquier otro fallo vuelve
+    como una frase, nunca como un stacktrace (CA-14). El detalle técnico va al log, que
+    es donde sirve, y no a la conversación, donde solo confunde.
+    """
+    from core.workspace_files import RutaFueraDeRaiz
+
+    try:
+        return operacion()
+    except RutaFueraDeRaiz as e:
+        logger.warning(f"'{nombre}' rechazada por confinamiento de rutas: {e}")
+        return str(e)
+    except OSError as e:
+        logger.error(f"'{nombre}' falló por el sistema de archivos: {e}")
+        return (
+            f"No pude completar esa operación sobre el archivo: "
+            f"{e.strerror or 'error del sistema de archivos'}."
+        )
+    except Exception as e:
+        logger.error(f"'{nombre}' falló inesperadamente: {type(e).__name__}: {e}")
+        return "No pude completar esa operación sobre el repositorio."
+
+
+def _entero(params: dict, clave: str) -> Optional[int]:
+    """Return el parámetro como entero, o None si falta o no es un número."""
+    valor = params.get(clave)
+    if valor is None or valor == "":
+        return None
+    try:
+        return int(valor)
+    except (TypeError, ValueError):
+        logger.debug(f"parámetro '{clave}' no numérico, se ignora: {valor!r}")
+        return None
+
+
+def _file_list_invoke(params: dict) -> str:
+    from core.workspace_files import listar
+
+    ruta = str(params.get("path") or "")
+    return _con_manejo("file_list", lambda: listar(ruta))
+
+
+register_tool(ToolSpec(
+    name="file_list",
+    description=(
+        "Lista el contenido de una carpeta de un repositorio habilitado. Sin 'path' te "
+        "dice cuáles son las carpetas habilitadas, que es por donde conviene empezar. "
+        "Solo funciona dentro de esas carpetas: cualquier otra ruta se rechaza."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": (
+                    "Carpeta a listar, absoluta o relativa a una carpeta habilitada. "
+                    "Vacío para ver cuáles están habilitadas."
+                ),
+            },
+        },
+    },
+    # GREEN: mirar el índice de una carpeta que el humano ya autorizó no merece una
+    # confirmación por uso. El permiso se dio al habilitar la carpeta, igual que la
+    # terminal embebida lo pide al abrir y no por comando (security-levels.md).
+    risk_level=RiskLevel.GREEN,
+    invoke=_file_list_invoke,
+))
+
+
+def _file_read_invoke(params: dict) -> str:
+    from core.workspace_files import leer
+
+    ruta = str(params.get("path") or "")
+    desde = _entero(params, "desde")
+    hasta = _entero(params, "hasta")
+    return _con_manejo("file_read", lambda: leer(ruta, desde, hasta))
+
+
+register_tool(ToolSpec(
+    name="file_read",
+    description=(
+        "Lee un archivo de un repositorio habilitado, con las líneas numeradas. Un archivo "
+        "grande vuelve truncado avisando en qué línea se cortó: para seguir, volvé a "
+        "llamarla con 'desde' en la línea siguiente. Usala antes de editar, para copiar el "
+        "fragmento exacto que vas a reemplazar."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Archivo a leer, absoluto o relativo a una carpeta habilitada.",
+            },
+            "desde": {
+                "type": "integer",
+                "description": "Primera línea a leer (1 es la primera). Opcional.",
+            },
+            "hasta": {
+                "type": "integer",
+                "description": "Última línea a leer, inclusive. Opcional.",
+            },
+        },
+        "required": ["path"],
+    },
+    # GREEN por el permiso ya dado al habilitar la carpeta; DESKTOP_ONLY porque leer un
+    # archivo es mandárselo al proveedor del modelo, y verde no puede significar acá
+    # "alcanzable desde Telegram".
+    risk_level=RiskLevel.GREEN,
+    invoke=_file_read_invoke,
+))
+
+
+def _file_search_invoke(params: dict) -> str:
+    from core.workspace_files import buscar
+
+    texto = str(params.get("query") or "")
+    ruta = str(params.get("path") or "")
+    return _con_manejo("file_search", lambda: buscar(texto, ruta))
+
+
+register_tool(ToolSpec(
+    name="file_search",
+    description=(
+        "Busca un texto literal dentro de los repositorios habilitados y devuelve archivo, "
+        "línea y el texto de la línea. Es la forma de orientarse en un repo que no conocés: "
+        "buscá el nombre de la función o de la constante y después leé el archivo. No es "
+        "una expresión regular: se busca el texto tal cual."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Texto literal a buscar.",
+            },
+            "path": {
+                "type": "string",
+                "description": "Carpeta donde buscar. Vacío para buscar en todas las habilitadas.",
+            },
+        },
+        "required": ["query"],
+    },
+    risk_level=RiskLevel.GREEN,
+    invoke=_file_search_invoke,
+))
+
+
+def _file_write_invoke(params: dict) -> str:
+    from core.workspace_files import escribir
+
+    ruta = str(params.get("path") or "")
+    contenido = params.get("content")
+    if contenido is None:
+        return f"Necesito el contenido a escribir{vocative()}."
+    return _con_manejo("file_write", lambda: escribir(ruta, str(contenido)))
+
+
+register_tool(ToolSpec(
+    name="file_write",
+    description=(
+        "Crea un archivo nuevo o reescribe uno entero dentro de un repositorio habilitado, "
+        "creando las carpetas que falten. REESCRIBE TODO el archivo: para cambiar una parte "
+        "de un archivo que ya existe usá file_edit, que no pisa el resto."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Archivo a crear o reescribir, dentro de una carpeta habilitada.",
+            },
+            "content": {
+                "type": "string",
+                "description": "Contenido completo del archivo.",
+            },
+        },
+        "required": ["path", "content"],
+    },
+    # YELLOW: escribir es irreversible, y se confirma con la RUTA a la vista — `path` está
+    # en `_DETAILS_ALLOWED_KEYS`, así que el modal dice dónde se va a escribir (CA-08).
+    # El contenido NO se muestra ni se audita: puede ser largo y puede traer secretos.
+    risk_level=RiskLevel.YELLOW,
+    invoke=_file_write_invoke,
+))
+
+
+def _file_edit_invoke(params: dict) -> str:
+    from core.workspace_files import editar
+
+    ruta = str(params.get("path") or "")
+    viejo = params.get("buscar")
+    nuevo = params.get("reemplazar")
+    if not viejo:
+        return f"Necesito el fragmento exacto que hay que reemplazar{vocative()}."
+    return _con_manejo("file_edit", lambda: editar(ruta, str(viejo), str(nuevo or "")))
+
+
+register_tool(ToolSpec(
+    name="file_edit",
+    description=(
+        "Reemplaza un fragmento exacto de un archivo por otro, sin tocar el resto. El "
+        "fragmento tiene que aparecer UNA sola vez: si aparece varias, agregá líneas de "
+        "contexto alrededor hasta que sea único. Leé el archivo con file_read antes, para "
+        "copiar el texto con su indentación exacta."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Archivo a editar, dentro de una carpeta habilitada.",
+            },
+            "buscar": {
+                "type": "string",
+                "description": "Fragmento exacto a reemplazar, tal cual está en el archivo.",
+            },
+            "reemplazar": {
+                "type": "string",
+                "description": "Texto que lo reemplaza. Vacío para borrar el fragmento.",
+            },
+        },
+        "required": ["path", "buscar"],
+    },
+    risk_level=RiskLevel.YELLOW,
+    invoke=_file_edit_invoke,
+))
+
+
+def _git_status_invoke(params: dict) -> str:
+    from core.workspace_git import estado
+
+    ruta = str(params.get("path") or "")
+    return _con_manejo("git_status", lambda: estado(ruta))
+
+
+register_tool(ToolSpec(
+    name="git_status",
+    description=(
+        "Muestra el estado git de un repositorio habilitado: rama actual y archivos "
+        "modificados o sin seguir. Con una sola carpeta habilitada no hace falta 'path'."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Carpeta del repositorio. Opcional si hay una sola habilitada.",
+            },
+        },
+    },
+    risk_level=RiskLevel.GREEN,
+    invoke=_git_status_invoke,
+))
+
+
+def _git_diff_invoke(params: dict) -> str:
+    from core.workspace_git import diff
+
+    ruta = str(params.get("path") or "")
+    archivo = str(params.get("archivo") or "")
+    return _con_manejo("git_diff", lambda: diff(ruta, archivo))
+
+
+register_tool(ToolSpec(
+    name="git_diff",
+    description=(
+        "Muestra los cambios sin confirmar de un repositorio habilitado, opcionalmente de "
+        "un solo archivo. Usala para ver qué se cambió antes de resumirlo o de proponer un "
+        "mensaje de commit."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Carpeta del repositorio. Opcional si hay una sola habilitada.",
+            },
+            "archivo": {
+                "type": "string",
+                "description": "Acotar el diff a este archivo. Opcional.",
+            },
+        },
+    },
+    risk_level=RiskLevel.GREEN,
+    invoke=_git_diff_invoke,
+))
+
+
+def _git_log_invoke(params: dict) -> str:
+    from core.workspace_git import log
+
+    ruta = str(params.get("path") or "")
+    cantidad = _entero(params, "cantidad")
+    return _con_manejo("git_log", lambda: log(ruta, 10 if cantidad is None else cantidad))
+
+
+register_tool(ToolSpec(
+    name="git_log",
+    description=(
+        "Muestra los últimos commits de un repositorio habilitado, con hash corto, fecha, "
+        "autor y título. Usala para saber en qué se viene trabajando."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Carpeta del repositorio. Opcional si hay una sola habilitada.",
+            },
+            "cantidad": {
+                "type": "integer",
+                "description": "Cuántos commits mostrar (por defecto 10, máximo 50).",
+            },
+        },
+    },
+    risk_level=RiskLevel.GREEN,
+    invoke=_git_log_invoke,
 ))
