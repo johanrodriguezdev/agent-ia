@@ -37,7 +37,13 @@ def test_mapeo_modo_a_tools_segun_arquitectura_026():
     que incluía `info_skill` por error)."""
     por_id = {m.id: m for m in listar_modos()}
 
-    assert por_id["codigo"].tool_names == ("EXECUTE_CODE",)
+    # REQ-029/CA-15 — el modo "codigo" pasó a ofrecer primero las 8 herramientas de
+    # repositorio (archivos + git) y dejó `EXECUTE_CODE` al final: en este modo lo
+    # habitual es trabajar sobre un repo que ya existe, no generar un script suelto.
+    assert por_id["codigo"].tool_names == (
+        "file_search", "file_read", "file_list", "file_edit", "file_write",
+        "git_status", "git_diff", "git_log", "EXECUTE_CODE",
+    )
     assert por_id["investigacion"].tool_names == (
         "web_search", "web_read", "wikipedia_search", "BROWSE_WEB",
     )
