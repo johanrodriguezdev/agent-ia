@@ -156,3 +156,137 @@ def _atomic_write(raices: List[str]) -> None:
             os.remove(tmp_path)
         except OSError as e2:
             logger.debug(f"quedó un temporal sin borrar: {e2}")
+
+
+# ─────────────────────────────────────────────
+#  REQ-030 — habilitar carpetas por instrucción, no editando el JSON a mano
+# ─────────────────────────────────────────────
+
+class RaizRechazada(Exception):
+    """La carpeta pedida no puede habilitarse. El mensaje explica por qué, en castellano."""
+
+
+#: Carpetas que no se habilitan **aunque el humano confirme el modal**. Habilitar la raíz de
+#: un disco o una carpeta del sistema equivale a no tener confinamiento: bastaría un "sí"
+#: distraído para que las 8 herramientas de REQ-029 alcancen el disco entero. Que la decisión
+#: pase por una confirmación no alcanza como control cuando el resultado es irreversible en
+#: la práctica: quien confirma no ve las consecuencias, ve una ruta.
+_NOMBRES_DE_SISTEMA = frozenset({
+    "windows", "program files", "program files (x86)", "programdata",
+    "system32", "syswow64", "$recycle.bin",
+})
+#: `appdata` estuvo en esa lista y se sacó: ahí viven las carpetas temporales del sistema
+#: (`AppData\\Local\\Temp`), así que bloquearla entera rompía cualquier prueba con `tmp_path`
+#: y cualquier proyecto que alguien tenga ahí. Lo que sí se bloquea es la carpeta personal
+#: ENTERA (ver `_es_carpeta_personal_entera`), que es el caso realmente peligroso: contiene
+#: AppData, `.ssh`, `.aws` y todo lo demás de una sola vez.
+
+
+def _es_carpeta_de_sistema(real: str) -> bool:
+    """Return True si algún segmento de la ruta es una carpeta de sistema conocida."""
+    partes = [p for p in os.path.normcase(real).replace("\\", "/").split("/") if p]
+    return any(p in _NOMBRES_DE_SISTEMA for p in partes)
+
+
+def _es_carpeta_personal_entera(real: str) -> bool:
+    """Return True si la ruta es la carpeta personal del usuario, o la que las contiene.
+
+    Habilitar `C:\\Users\\alguien` es casi tan amplio como habilitar el disco: adentro están
+    `.ssh`, `.aws`, los perfiles del navegador y AppData. Se bloquea la carpeta EN SÍ, no lo
+    que hay dentro: `Documents\\repos` sigue siendo perfectamente habilitable.
+    """
+    try:
+        personal = os.path.realpath(os.path.expanduser("~"))
+    except (OSError, ValueError) as e:
+        logger.warning(f"no se pudo resolver la carpeta personal: {e}")
+        return False
+    normal = os.path.normcase(real)
+    return normal in (os.path.normcase(personal), os.path.normcase(os.path.dirname(personal)))
+
+
+def _es_raiz_de_unidad(real: str) -> bool:
+    """Return True si la ruta es la raíz de un disco (`C:\\`, `/`)."""
+    return os.path.dirname(real) == real
+
+
+def _normalizada(ruta: str) -> str:
+    return os.path.normcase(os.path.realpath(os.path.expanduser(str(ruta or "").strip())))
+
+
+def agregar_raiz(carpeta: str) -> str:
+    """Habilita `carpeta` para las herramientas de repositorio. Return la ruta real.
+
+    Levanta `RaizRechazada` con el motivo en castellano si no corresponde habilitarla. Es
+    idempotente: pedir una que ya estaba no duplica ni falla.
+    """
+    texto = str(carpeta or "").strip()
+    if not texto:
+        raise RaizRechazada("No me dijiste qué carpeta habilitar.")
+    try:
+        real = os.path.realpath(os.path.expanduser(texto))
+    except (OSError, ValueError) as e:
+        logger.warning(f"no se pudo resolver la carpeta a habilitar {carpeta!r}: {e}")
+        raise RaizRechazada(f"No pude resolver la ruta «{carpeta}».") from e
+
+    if not os.path.isdir(real):
+        raise RaizRechazada(f"«{carpeta}» no es una carpeta que exista en este equipo.")
+    if _es_raiz_de_unidad(real):
+        raise RaizRechazada(
+            f"«{real}» es la raíz de un disco entero, y habilitarla dejaría el confinamiento "
+            f"sin sentido. Elegí la carpeta del proyecto, no el disco."
+        )
+    if _es_carpeta_de_sistema(real):
+        raise RaizRechazada(
+            f"«{real}» está dentro de una carpeta del sistema y no se habilita."
+        )
+    if _es_carpeta_personal_entera(real):
+        raise RaizRechazada(
+            f"«{real}» es tu carpeta personal entera, y adentro están tus llaves y perfiles. "
+            f"Elegí la carpeta del proyecto: por ejemplo la de Documentos donde tengas el repo."
+        )
+
+    from core.workspace_files import es_codigo_de_orion
+
+    if es_codigo_de_orion(real):
+        logger.critical(
+            f"Intento de habilitar el código de O.R.I.O.N. como carpeta de trabajo: {real!r}. "
+            f"Bloqueado en código (REQ-029/CA-03); modify_source_code es 🔴 RED."
+        )
+        raise RaizRechazada(
+            "Esa es la carpeta de mi propio código, y no puedo trabajar sobre ella: "
+            "modificarlo es una acción de riesgo alto que no se autoriza por esta vía."
+        )
+
+    actuales = cargar_raices()
+    if any(os.path.normcase(r) == os.path.normcase(real) for r in actuales):
+        logger.info(f"La carpeta ya estaba habilitada, no se duplica: {real}")
+        return real
+
+    guardar_raices(actuales + [real])
+    logger.warning(f"Carpeta habilitada para las herramientas de repositorio: {real}")
+    return real
+
+
+def quitar_raiz(carpeta: str) -> str:
+    """Deshabilita `carpeta`. Return la ruta real quitada.
+
+    Levanta `RaizRechazada` si no estaba habilitada — decirle "listo" a alguien que se
+    equivocó de carpeta le haría creer que cerró un acceso que sigue abierto.
+    """
+    texto = str(carpeta or "").strip()
+    if not texto:
+        raise RaizRechazada("No me dijiste qué carpeta quitar.")
+
+    objetivo = _normalizada(texto)
+    actuales = cargar_raices()
+    coincidencias = [r for r in actuales if os.path.normcase(r) == objetivo]
+    quedan = [r for r in actuales if os.path.normcase(r) != objetivo]
+    if not coincidencias:
+        raise RaizRechazada(f"«{carpeta}» no estaba habilitada, así que no hay nada que quitar.")
+
+    guardar_raices(quedan)
+    # Se devuelve la ruta TAL COMO estaba guardada, no la normalizada: `normcase()` la pasa a
+    # minúsculas en Windows, y esta ruta termina en la frase que lee el usuario.
+    real = coincidencias[0]
+    logger.warning(f"Carpeta deshabilitada para las herramientas de repositorio: {real}")
+    return real

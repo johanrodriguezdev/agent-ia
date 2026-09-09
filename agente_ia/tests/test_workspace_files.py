@@ -489,3 +489,43 @@ def test_buscar_sigue_entrando_por_un_enlace_que_apunta_adentro(tmp_path, repo, 
         pytest.skip("este sistema no permite crear enlaces de directorio sin privilegios")
 
     assert "MARCA_INTERNA" in wf.buscar("MARCA_INTERNA", raices=raices)
+
+
+# ───────── REQ-030: la búsqueda no abre archivos de credenciales (hallazgo C) ─────────
+# Leer un archivo significa mandarlo al proveedor del modelo. Que una clave privada aparezca
+# sola porque alguien buscó una palabra que estaba adentro no es la decisión de nadie.
+
+def test_la_busqueda_no_lee_archivos_de_credenciales(repo, raices):
+    aguja = "CADENA_BUSCADA_REQ030"
+    with open(os.path.join(repo, "codigo.py"), "w", encoding="utf-8") as f:
+        f.write(f"variable = '{aguja}'\n")
+    for secreto in (".env", "id_rsa", "clave.pem"):
+        with open(os.path.join(repo, secreto), "w", encoding="utf-8") as f:
+            f.write(f"{aguja}=valor-que-no-debe-salir\n")
+
+    salida = wf.buscar(aguja, raices=raices)
+
+    assert "codigo.py" in salida, "lo normal se sigue encontrando"
+    assert "valor-que-no-debe-salir" not in salida
+    for secreto in (".env", "id_rsa", "clave.pem"):
+        assert f"{secreto}:" not in salida
+
+
+def test_la_busqueda_avisa_cuantos_secretos_salteo(repo, raices):
+    """Saltearlos en silencio dejaría al modelo concluyendo que el dato no existe."""
+    aguja = "OTRA_CADENA_REQ030"
+    with open(os.path.join(repo, ".env"), "w", encoding="utf-8") as f:
+        f.write(f"{aguja}=x\n")
+
+    salida = wf.buscar(aguja, raices=raices)
+
+    assert "credenciales" in salida
+
+
+def test_file_read_si_lee_un_secreto_si_se_lo_piden_por_su_nombre(repo, raices):
+    """Pedir `.env` por su nombre SÍ es una decisión de alguien. Lo que se corta es que
+    aparezca solo en una búsqueda amplia."""
+    with open(os.path.join(repo, ".env"), "w", encoding="utf-8") as f:
+        f.write("CLAVE=valor\n")
+
+    assert "CLAVE=valor" in wf.leer(".env", raices=raices)

@@ -29,6 +29,7 @@ cambiar un symlink en el medio—. Quien pueda hacer eso ya tiene acceso de escr
 máquina, así que no es el vector que este REQ existe para cerrar.
 """
 
+import fnmatch
 import logging
 import os
 from typing import List, Optional, Tuple
@@ -100,6 +101,37 @@ def _dentro_de(candidata_norm: str, contenedor: str) -> bool:
 def _es_instalacion(candidata_norm: str) -> bool:
     """Return True si la ruta cae dentro del directorio de instalación de O.R.I.O.N."""
     return _dentro_de(candidata_norm, os.path.realpath(_INSTALACION))
+
+
+def es_codigo_de_orion(ruta: str) -> bool:
+    """Return True si `ruta` cae dentro del directorio de instalación de O.R.I.O.N.
+
+    Pública para que `workspace_config.agregar_raiz()` pueda rechazar la carpeta del propio
+    agente ANTES de escribirla en la configuración, en vez de habilitarla y que después
+    cada operación falle una por una.
+    """
+    try:
+        return _es_instalacion(os.path.normcase(os.path.realpath(ruta)))
+    except (OSError, ValueError) as e:
+        logger.warning(f"no se pudo resolver {ruta!r} para compararla con la instalación: {e}")
+        return True  # ante la duda, se trata como código propio: es el lado restrictivo
+
+
+#: Nombres que no se abren durante una búsqueda amplia (REQ-030, hallazgo C de
+#: `security-audit-029.md`). Leer un archivo significa mandarlo al proveedor del modelo, y
+#: que una clave privada aparezca sola porque alguien buscó una palabra que estaba adentro
+#: no es una decisión de nadie. `file_read` los sigue leyendo si se los pide por su nombre:
+#: eso sí es una decisión.
+_ARCHIVOS_DE_SECRETOS = (
+    ".env", ".env.*", "*.pem", "*.key", "*.pfx", "*.p12", "*.ppk", "*.jks",
+    "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", ".netrc", "credentials.json",
+    "service-account*.json", "*.keystore",
+)
+
+
+def _es_archivo_de_secretos(nombre: str) -> bool:
+    minuscula = nombre.lower()
+    return any(fnmatch.fnmatch(minuscula, patron) for patron in _ARCHIVOS_DE_SECRETOS)
 
 
 def _confinado(ruta: str, raices: List[str]) -> bool:
@@ -425,6 +457,7 @@ def buscar(patron: str, ruta: str = "", raices: Optional[List[str]] = None,
 
     resultados: List[str] = []
     archivos_vistos = 0
+    secretos_salteados = 0
     corte = False
     for base in bases:
         for carpeta, subdirs, archivos in os.walk(base):
@@ -437,6 +470,10 @@ def buscar(patron: str, ruta: str = "", raices: Optional[List[str]] = None,
                 if archivos_vistos >= _MAX_ARCHIVOS_ESCANEADOS or len(resultados) >= tope:
                     corte = True
                     break
+                if _es_archivo_de_secretos(nombre):
+                    secretos_salteados += 1
+                    logger.debug(f"búsqueda: salteado por ser archivo de credenciales: {nombre}")
+                    continue
                 completo = os.path.join(carpeta, nombre)
                 archivos_vistos += 1
                 resultados.extend(
@@ -447,9 +484,18 @@ def buscar(patron: str, ruta: str = "", raices: Optional[List[str]] = None,
         if corte:
             break
 
+    aviso_secretos = ""
+    if secretos_salteados:
+        aviso_secretos = (
+            f"\n[{secretos_salteados} archivo(s) de credenciales no se leyeron: .env, claves "
+            f"privadas y similares. Si de verdad necesitás uno, pedilo por su nombre.]"
+        )
     if not resultados:
-        return f"No encontré «{aguja}» en ninguna de las carpetas habilitadas."
+        return (
+            f"No encontré «{aguja}» en ninguna de las carpetas habilitadas." + aviso_secretos
+        )
     salida = f"Coincidencias de «{aguja}» ({len(resultados)}):\n" + "\n".join(resultados)
+    salida += aviso_secretos
     if corte:
         salida += f"\n[Búsqueda recortada en {tope} resultados. Acotá el texto o la ruta.]"
     return salida

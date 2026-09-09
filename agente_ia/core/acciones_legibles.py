@@ -60,6 +60,11 @@ _DESCRIPCIONES: Dict[str, str] = {
     # listar, buscar, git status/diff/log) nunca preguntan, así que no necesitan traducción.
     "file_write": "cree o reescriba un archivo del repositorio",
     "file_edit": "cambie un fragmento de un archivo del repositorio",
+    # REQ-030 — la frase dice "para trabajar" a propósito: quien confirma tiene que
+    # entender que está dando permiso permanente sobre esa carpeta, no autorizando una
+    # operación suelta.
+    "workspace_add_folder": "habilite una carpeta para trabajar con sus archivos",
+    "workspace_remove_folder": "deje de tener acceso a una carpeta de trabajo",
 
     # ── Código y habilidades ──
     "EXECUTE_CODE": "ejecute un programa que acabo de escribir",

@@ -156,3 +156,124 @@ def test_guardar_no_persiste_entradas_invalidas(archivo_aislado, tmp_path):
 def test_guardar_lista_vacia_deja_al_agente_sin_nada(archivo_aislado):
     workspace_config.guardar_raices([])
     assert workspace_config.cargar_raices() == []
+
+
+# ─────────────────────────── REQ-030: habilitar por instrucción ───────────────────────────
+# El agente no puede darse permisos solos: `workspace_add_folder` es 🟡 y solo de escritorio
+# (eso se fija en test_workspace_tools_seguridad.py). Acá se fija la otra mitad — QUÉ carpetas
+# no se habilitan aunque el humano confirme el modal distraído.
+
+def _instalacion() -> str:
+    """La carpeta de O.R.I.O.N., derivada del módulo y no escrita a mano."""
+    return os.path.dirname(os.path.dirname(os.path.abspath(workspace_config.__file__)))
+
+
+def test_agregar_una_carpeta_la_habilita_y_la_persiste(tmp_path):
+    proyecto = tmp_path / "mi-repo"
+    proyecto.mkdir()
+
+    real = workspace_config.agregar_raiz(str(proyecto))
+
+    assert workspace_config.cargar_raices() == [real]
+
+
+def test_agregar_la_misma_carpeta_dos_veces_no_duplica(tmp_path):
+    """Pedir de nuevo lo que ya está no puede fallar ni dejar la lista con dos entradas: el
+    usuario diría "trabajá sobre este repo" otra vez sin acordarse."""
+    proyecto = tmp_path / "mi-repo"
+    proyecto.mkdir()
+
+    primero = workspace_config.agregar_raiz(str(proyecto))
+    segundo = workspace_config.agregar_raiz(str(proyecto))
+
+    assert primero == segundo
+    assert workspace_config.cargar_raices() == [primero]
+
+
+def test_no_se_habilita_la_raiz_de_un_disco(tmp_path):
+    raiz = os.path.abspath(os.sep)
+    with pytest.raises(workspace_config.RaizRechazada):
+        workspace_config.agregar_raiz(raiz)
+    assert workspace_config.cargar_raices() == []
+
+
+def test_no_se_habilita_una_carpeta_del_sistema():
+    windir = os.environ.get("WINDIR")
+    if not windir or not os.path.isdir(windir):
+        pytest.skip("sin carpeta de Windows en este sistema")
+    with pytest.raises(workspace_config.RaizRechazada):
+        workspace_config.agregar_raiz(windir)
+
+
+def test_no_se_habilita_la_carpeta_personal_entera():
+    """Adentro están `.ssh`, `.aws` y los perfiles del navegador: habilitarla es casi tan
+    amplio como habilitar el disco."""
+    with pytest.raises(workspace_config.RaizRechazada):
+        workspace_config.agregar_raiz(os.path.expanduser("~"))
+
+
+def test_una_carpeta_dentro_de_la_personal_si_se_habilita(tmp_path):
+    """La contracara: lo que se bloquea es la carpeta personal EN SÍ, no todo lo que hay
+    dentro. `Documentos/repos` tiene que poder habilitarse."""
+    proyecto = tmp_path / "documentos" / "repos" / "proyecto"
+    proyecto.mkdir(parents=True)
+
+    assert workspace_config.agregar_raiz(str(proyecto))
+
+
+def test_no_se_habilita_el_codigo_del_propio_agente():
+    """`modify_source_code` es 🔴 y lo sigue siendo: no se puede llegar a él por la puerta
+    de atrás de habilitar su carpeta como espacio de trabajo."""
+    with pytest.raises(workspace_config.RaizRechazada):
+        workspace_config.agregar_raiz(_instalacion())
+
+
+def test_no_se_habilita_una_subcarpeta_del_codigo_del_agente():
+    with pytest.raises(workspace_config.RaizRechazada):
+        workspace_config.agregar_raiz(os.path.join(_instalacion(), "core"))
+
+
+def test_no_se_habilita_una_carpeta_que_no_existe(tmp_path):
+    with pytest.raises(workspace_config.RaizRechazada):
+        workspace_config.agregar_raiz(str(tmp_path / "no-existe"))
+
+
+def test_una_carpeta_rechazada_no_queda_escrita(tmp_path, archivo_aislado):
+    """Lo importante no es solo que levante: es que no deje rastro. Una raíz rechazada que
+    igual se persistiera quedaría habilitada en el próximo arranque."""
+    with pytest.raises(workspace_config.RaizRechazada):
+        workspace_config.agregar_raiz(os.path.abspath(os.sep))
+
+    assert not archivo_aislado.exists()
+    assert workspace_config.cargar_raices() == []
+
+
+def test_quitar_una_carpeta_la_deshabilita(tmp_path):
+    proyecto = tmp_path / "mi-repo"
+    proyecto.mkdir()
+    real = workspace_config.agregar_raiz(str(proyecto))
+
+    quitada = workspace_config.quitar_raiz(str(proyecto))
+
+    assert quitada == real, "tiene que devolver la ruta como estaba guardada, no en minúsculas"
+    assert workspace_config.cargar_raices() == []
+
+
+def test_quitar_una_que_no_estaba_avisa_en_vez_de_decir_listo(tmp_path):
+    """Decirle "listo" a alguien que se equivocó de carpeta le haría creer que cerró un
+    acceso que sigue abierto."""
+    with pytest.raises(workspace_config.RaizRechazada):
+        workspace_config.quitar_raiz(str(tmp_path / "nunca-estuvo"))
+
+
+def test_quitar_una_no_toca_las_demas(tmp_path):
+    uno = tmp_path / "repo-uno"
+    dos = tmp_path / "repo-dos"
+    uno.mkdir()
+    dos.mkdir()
+    workspace_config.agregar_raiz(str(uno))
+    real_dos = workspace_config.agregar_raiz(str(dos))
+
+    workspace_config.quitar_raiz(str(uno))
+
+    assert workspace_config.cargar_raices() == [real_dos]

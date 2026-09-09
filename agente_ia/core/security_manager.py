@@ -147,6 +147,11 @@ DESKTOP_ONLY_ACTIONS: set[str] = {
     "git_status",
     "git_diff",
     "git_log",
+    # REQ-030 — habilitar o quitar una carpeta de trabajo es, literalmente, decidir hasta
+    # dónde llegan las 8 de arriba. Tiene que pedirse delante del computador, nunca por un
+    # mensaje remoto.
+    "workspace_add_folder",
+    "workspace_remove_folder",
 }
 
 _CHANNEL_STR_MAP: Dict[str, ChannelType] = {
