@@ -625,3 +625,74 @@ def editar(ruta: str, buscar_texto: str, reemplazar_texto: str,
 
     logger.info(f"Edité {real!r}: 1 reemplazo")
     return f"Edité {_relativa(real, activas)}: reemplacé la única coincidencia."
+
+
+#: Profundidad por defecto del árbol. Tres niveles alcanzan para entender la forma de un
+#: proyecto (raíz, paquetes, módulos) sin traerse el contenido entero.
+_PROFUNDIDAD_ARBOL = 3
+#: Tope de líneas del árbol. Un repo grande tiene decenas de miles de archivos y volcarlos
+#: se come el turno del modelo sin decirle nada que no sepa.
+_MAX_LINEAS_ARBOL = 400
+
+
+def arbol(ruta: str = "", profundidad: int = _PROFUNDIDAD_ARBOL,
+          raices: Optional[List[str]] = None) -> str:
+    """Devuelve la estructura de una carpeta habilitada, con sangría, hasta `profundidad`.
+
+    Sirve para orientarse en un repositorio ajeno sin gastar veinte llamadas listando
+    carpeta por carpeta, que es lo que había que hacer antes con `listar()`. Se saltean las
+    mismas carpetas de ruido que en `buscar()` (`node_modules`, `.git`, `__pycache__`...):
+    no es seguridad, es no llenar la respuesta con dependencias de terceros.
+    """
+    activas = raices_efectivas(raices)
+    if not activas:
+        return (
+            "No hay ninguna carpeta habilitada para trabajar con archivos. El usuario tiene "
+            "que habilitar una antes de que yo pueda mirar un proyecto."
+        )
+
+    try:
+        niveles = max(1, min(int(profundidad), 8))
+    except (TypeError, ValueError):
+        niveles = _PROFUNDIDAD_ARBOL
+
+    base = resolver(ruta, activas) if str(ruta or "").strip() else activas[0]
+    if not os.path.isdir(base):
+        base = os.path.dirname(base)
+
+    lineas: List[str] = [f"{base}"]
+    recortado = _recorrer_arbol(base, "", niveles, lineas, activas)
+
+    if recortado:
+        lineas.append(f"  ... (árbol recortado en {_MAX_LINEAS_ARBOL} líneas; pedí una "
+                      f"subcarpeta o menos profundidad)")
+    return "\n".join(lineas)
+
+
+def _recorrer_arbol(carpeta: str, sangria: str, niveles: int, lineas: List[str],
+                    raices: List[str]) -> bool:
+    """Llena `lineas` recursivamente. Return True si se llegó al tope."""
+    if niveles <= 0:
+        return False
+    try:
+        entradas = sorted(os.scandir(carpeta), key=lambda e: (not e.is_dir(), e.name.lower()))
+    except OSError as e:
+        logger.debug(f"no se pudo listar {carpeta!r} para el árbol: {e}")
+        return False
+
+    for entrada in entradas:
+        if len(lineas) >= _MAX_LINEAS_ARBOL:
+            return True
+        if entrada.name in _DIRS_IGNORADOS or entrada.name.startswith("."):
+            continue
+        # Un enlace que sale de la raíz no se recorre, por lo mismo que en `buscar()`: el
+        # árbol visita rutas que nadie pidió.
+        if entrada.is_dir() and not _confinado(entrada.path, raices):
+            continue
+        if entrada.is_dir():
+            lineas.append(f"{sangria}  {entrada.name}/")
+            if _recorrer_arbol(entrada.path, sangria + "  ", niveles - 1, lineas, raices):
+                return True
+        else:
+            lineas.append(f"{sangria}  {entrada.name}")
+    return False

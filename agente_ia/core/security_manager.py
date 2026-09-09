@@ -152,6 +152,11 @@ DESKTOP_ONLY_ACTIONS: set[str] = {
     # mensaje remoto.
     "workspace_add_folder",
     "workspace_remove_folder",
+    # REQ-032 — ejecutar un comando en la carpeta del proyecto y mirar su estructura.
+    # Ejecutar desde un canal remoto es exactamente lo que el modelo de canales existe para
+    # impedir, y el arbol es una lectura del disco: los dos, solo delante del computador.
+    "project_run",
+    "project_tree",
 }
 
 _CHANNEL_STR_MAP: Dict[str, ChannelType] = {

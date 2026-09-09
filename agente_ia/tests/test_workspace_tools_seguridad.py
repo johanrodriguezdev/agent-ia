@@ -51,9 +51,15 @@ NIVELES_REQ030 = {
     "workspace_remove_folder": RiskLevel.YELLOW,
 }
 
+#: REQ-032 — ejecutar en la carpeta del proyecto y ver su estructura.
+NIVELES_REQ032 = {
+    "project_run": RiskLevel.YELLOW,
+    "project_tree": RiskLevel.GREEN,
+}
+
 #: Las 10 juntas. Las pruebas de canal recorren todas; las que fijan el alcance de REQ-029
 #: (el modo "codigo") siguen usando solo las 8 de v1.
-TODAS = {**NIVELES_ESPERADOS, **NIVELES_REQ030}
+TODAS = {**NIVELES_ESPERADOS, **NIVELES_REQ030, **NIVELES_REQ032}
 
 TODOS_LOS_CANALES = [
     ChannelType.DESKTOP, ChannelType.TELEGRAM, ChannelType.DISCORD, ChannelType.VOICE,
@@ -105,7 +111,7 @@ def test_ca09_las_8_estan_en_el_registro_y_no_tienen_camino_propio():
 
 # ─────────────────────────── CA-06: los 7 canales ───────────────────────────
 
-def test_ca06_desktop_only_actions_son_las_8_de_req029_mas_las_2_de_req030():
+def test_ca06_desktop_only_actions_son_exactamente_las_declaradas():
     """El conjunto exacto, no "al menos": una herramienta de archivos que se cuele fuera de
     esta tabla queda alcanzable desde Telegram sin que nadie lo note."""
     assert DESKTOP_ONLY_ACTIONS == set(TODAS)

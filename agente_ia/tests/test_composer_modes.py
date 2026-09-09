@@ -40,8 +40,12 @@ def test_mapeo_modo_a_tools_segun_arquitectura_026():
     # REQ-029/CA-15 — el modo "codigo" pasó a ofrecer primero las 8 herramientas de
     # repositorio (archivos + git) y dejó `EXECUTE_CODE` al final: en este modo lo
     # habitual es trabajar sobre un repo que ya existe, no generar un script suelto.
+    # REQ-032 — se suman las dos que cierran el ciclo de desarrollo: ver la forma del
+    # proyecto antes de tocarlo, y correrlo despues de tocarlo.
     assert por_id["codigo"].tool_names == (
+        "project_tree",
         "file_search", "file_read", "file_list", "file_edit", "file_write",
+        "project_run",
         "git_status", "git_diff", "git_log", "EXECUTE_CODE",
     )
     assert por_id["investigacion"].tool_names == (

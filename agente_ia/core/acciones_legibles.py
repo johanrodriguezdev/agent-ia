@@ -68,6 +68,9 @@ _DESCRIPCIONES: Dict[str, str] = {
     # REQ-031 — la frase dice "mande datos" a propósito: lo que hay que entender al
     # confirmar es que algo sale del equipo hacia afuera, no que se hace una petición.
     "http_request": "llame a un servicio de internet y le mande datos",
+    # REQ-032 — la frase nombra la carpeta a proposito: lo que hay que entender al
+    # confirmar es que algo se va a EJECUTAR en tu proyecto, no que se abre una app.
+    "project_run": "ejecute un comando dentro de la carpeta del proyecto",
 
     # ── Código y habilidades ──
     "EXECUTE_CODE": "ejecute un programa que acabo de escribir",

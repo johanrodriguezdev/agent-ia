@@ -62,7 +62,13 @@ _MODOS: Tuple[ModoComposer, ...] = (
         # buscar y leer antes que escribir, porque editar sin haber leído es adivinar.
         # `presupuesto=40` (REQ-027) no se toca: editar un repo son ~20 pasos.
         tool_names=(
+            # REQ-032 — el orden sigue el de un trabajo real: primero entender la forma del
+            # proyecto, despues leer, despues cambiar, y despues COMPROBAR corriendolo.
+            # `project_run` va detras de las escrituras porque correr sin haber cambiado
+            # nada es gastar una vuelta.
+            "project_tree",
             "file_search", "file_read", "file_list", "file_edit", "file_write",
+            "project_run",
             "git_status", "git_diff", "git_log", "EXECUTE_CODE",
         ),
         presupuesto=40,
