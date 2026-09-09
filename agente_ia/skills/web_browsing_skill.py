@@ -1,10 +1,11 @@
+import logging
 import re
-import urllib.request
-import urllib.error
 from typing import Dict, List, Tuple, Any
 from skills.base_skill import BaseSkill
 from ai.llm_provider import generate_response
 from core.address import vocative, vocative_start
+
+logger = logging.getLogger(__name__)
 
 class WebBrowsingSkill(BaseSkill):
     @property
@@ -50,15 +51,19 @@ class WebBrowsingSkill(BaseSkill):
             return f"{vocative_start()}necesito que me proporcione una URL válida (http:// o https://) en su mensaje para poder entrar y leerla."
             
         try:
-            req = urllib.request.Request(
-                url, 
-                data=None, 
-                headers={
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
-                }
-            )
-            response = urllib.request.urlopen(req, timeout=15)
-            html = response.read().decode('utf-8', errors='ignore')
+            # REQ-031 — mismo guard que `leer_pagina()`. Acá además importa que el
+            # esquema quede validado: `urlopen()` entiende `file://`, así que un `url` que
+            # llegara por un camino que no fuera `extract_params()` podía terminar leyendo
+            # un archivo del disco. Hoy no es alcanzable, pero el execute() no se defendía
+            # solo, y esa es la clase de suposición que envejece mal.
+            from core.http_seguro import DestinoBloqueado, pedir
+
+            try:
+                respuesta = pedir(url, timeout=15)
+            except DestinoBloqueado as e:
+                logger.info(f"navegación rechazada por destino no permitido: {e}")
+                return str(e)
+            html = respuesta.texto
             
             # Limpiar HTML y extraer solo texto
             try:
@@ -97,7 +102,11 @@ class WebBrowsingSkill(BaseSkill):
             
             return f"*Crawler Web Activado* 🌐\n\n{ai_response}"
             
-        except urllib.error.URLError as e:
-            return f"{vocative_start()}los sistemas de red bloquearon la petición o no pude acceder a la página web: {e}"
         except Exception as e:
-            return f"Fallo en mi sistema de navegación web: {e}"
+            # El detalle al log, una frase al canal. Mismo criterio que REQ-024 y REQ-025:
+            # `str(e)` de un fallo de red puede traer rutas internas del disco o la URL
+            # entera con sus parámetros, y este skill es alcanzable desde Telegram. La rama
+            # de `urllib.error.URLError` se fue con el `urlopen()`: ahora la petición la
+            # hace `core/http_seguro.py`, que levanta otras excepciones.
+            logger.error(f"fallo navegando '{url[:80]}': {type(e).__name__}: {e}")
+            return f"{vocative_start()}no pude acceder a esa página."

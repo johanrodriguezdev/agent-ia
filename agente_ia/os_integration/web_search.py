@@ -125,28 +125,36 @@ def leer_pagina(url: str, max_chars: int = MAX_CHARS_PAGINA) -> str:
         return "Solo puedo leer direcciones que empiecen por http:// o https://."
 
     try:
-        import requests
+        import requests  # noqa: F401 — lo usa `core.http_seguro`; se chequea acá para el aviso claro
         from bs4 import BeautifulSoup
     except ImportError as e:
         logger.error(f"Falta una dependencia para leer páginas: {e}")
         return "No tengo instalado lo necesario para leer páginas web."
 
+    # REQ-031 — el destino se valida antes de conectarse, y en cada redirección. Antes acá
+    # había un `requests.get()` pelado: alcanzaba con pedir `http://127.0.0.1:3000` o
+    # `http://192.168.1.1` para que el agente leyera un servicio interno y devolviera el
+    # contenido al chat. Y como `web_read` es verde, eso era alcanzable desde Telegram.
+    from core.http_seguro import DestinoBloqueado, pedir
+
     try:
-        respuesta = requests.get(
-            url, timeout=TIMEOUT,
-            headers={"User-Agent": "Mozilla/5.0 (compatible; asistente personal)"},
-        )
-        respuesta.raise_for_status()
+        respuesta = pedir(url, timeout=TIMEOUT)
+    except DestinoBloqueado as e:
+        logger.info(f"lectura de página rechazada por destino no permitido: {e}")
+        return str(e)
     except Exception as e:
         logger.warning(f"No se pudo descargar '{url[:80]}': {e}")
         return f"No pude abrir esa página: {type(e).__name__}."
 
-    tipo = respuesta.headers.get("Content-Type", "")
+    if respuesta.status >= 400:
+        return f"Esa página respondió con un error {respuesta.status}."
+
+    tipo = respuesta.content_type
     if "html" not in tipo and "text" not in tipo:
         return f"Esa dirección no es una página de texto (es {tipo or 'de tipo desconocido'})."
 
     try:
-        sopa = BeautifulSoup(respuesta.text, "html.parser")
+        sopa = BeautifulSoup(respuesta.texto, "html.parser")
         for etiqueta in sopa(["script", "style", "nav", "footer", "header", "aside", "form"]):
             etiqueta.decompose()
         texto = sopa.get_text("\n")

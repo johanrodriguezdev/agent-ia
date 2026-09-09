@@ -65,6 +65,9 @@ _DESCRIPCIONES: Dict[str, str] = {
     # operación suelta.
     "workspace_add_folder": "habilite una carpeta para trabajar con sus archivos",
     "workspace_remove_folder": "deje de tener acceso a una carpeta de trabajo",
+    # REQ-031 — la frase dice "mande datos" a propósito: lo que hay que entender al
+    # confirmar es que algo sale del equipo hacia afuera, no que se hace una petición.
+    "http_request": "llame a un servicio de internet y le mande datos",
 
     # ── Código y habilidades ──
     "EXECUTE_CODE": "ejecute un programa que acabo de escribir",
