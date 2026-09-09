@@ -167,3 +167,61 @@ def test_mensaje_de_confirmacion_xss_no_ejecuta_queda_como_texto_literal(ready_w
         "return el ? el.textContent : null;})()",
     )
     assert text == payload
+
+
+# ---------------------------------------------------------------------------
+# REQ-012 — el saludo mira el reloj mientras la app sigue abierta
+# ---------------------------------------------------------------------------
+
+def test_el_saludo_se_actualiza_cuando_cambia_la_franja_horaria(ready_window, qtbot):
+    """La app arranca con Windows y vive en la bandeja: se queda abierta cruzando el
+    mediodía y la noche. El saludo se calculaba una sola vez al cargar la página, así que a
+    las nueve de la noche seguía diciendo "Buenos días" (bug original de REQ-012, escrito
+    contra la GUI que se eliminó en REQ-015 y renacido igual en el webview).
+
+    No se puede adelantar el reloj del sistema en un test, pero sí fingir la hora que lee la
+    página; `__ORION_REFRESCAR_SALUDO__` es lo mismo que dispara el timer de un minuto.
+    """
+    _window, page = ready_window
+    original = _run_js_sync(page, "String(Date.prototype.getHours)")
+
+    try:
+        _run_js_sync(page, "Date.prototype.getHours = () => 8;"
+                           " window.__ORION_REFRESCAR_SALUDO__(); true;")
+        qtbot.wait(30)
+        manana = _run_js_sync(page, "document.getElementById('empty-state-greeting').textContent")
+
+        _run_js_sync(page, "Date.prototype.getHours = () => 21;"
+                           " window.__ORION_REFRESCAR_SALUDO__(); true;")
+        qtbot.wait(30)
+        noche = _run_js_sync(page, "document.getElementById('empty-state-greeting').textContent")
+    finally:
+        _run_js_sync(page, f"Date.prototype.getHours = {original};")
+
+    assert manana == "Buenos días"
+    assert noche == "Buenas noches"
+
+
+def test_el_saludo_no_se_repinta_si_la_franja_no_cambio(ready_window, qtbot):
+    """Repintar el mismo texto cada minuto no se ve, pero pisa la selección de quien justo
+    estaba copiando. Se detecta con un hijo vacío: sobrevive solo si nadie reescribió el
+    contenido del nodo."""
+    _window, page = ready_window
+    original = _run_js_sync(page, "String(Date.prototype.getHours)")
+
+    try:
+        _run_js_sync(page, "Date.prototype.getHours = () => 21;"
+                           " window.__ORION_REFRESCAR_SALUDO__(); true;")
+        qtbot.wait(30)
+        _run_js_sync(page, "document.getElementById('empty-state-greeting')"
+                           ".appendChild(document.createElement('b')); true;")
+
+        _run_js_sync(page, "window.__ORION_REFRESCAR_SALUDO__(); true;")
+        qtbot.wait(30)
+        sobrevivio = _run_js_sync(
+            page, "!!document.getElementById('empty-state-greeting').querySelector('b')"
+        )
+    finally:
+        _run_js_sync(page, f"Date.prototype.getHours = {original};")
+
+    assert sobrevivio is True

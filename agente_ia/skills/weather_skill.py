@@ -2,6 +2,7 @@ import re
 import urllib.request
 import urllib.parse
 from typing import Dict, List, Tuple, Any
+import config_manager
 from skills.base_skill import BaseSkill
 
 class WeatherSkill(BaseSkill):
@@ -38,7 +39,12 @@ class WeatherSkill(BaseSkill):
 
     def execute(self, intent: str, params: Dict[str, Any]) -> str:
         if intent == "GET_WEATHER":
-            city = params.get("city", "")
+            # Sin ciudad dicha en la frase, la del usuario (REQ-012). Antes se caia
+            # directo a la geolocalizacion por IP, que con un VPN o segun el proveedor
+            # devuelve otra ciudad: preguntar "como esta el clima" contestaba por un lugar
+            # donde el usuario no esta, teniendo su ciudad ya configurada y sin usarla.
+            # Si no configuro ninguna, sigue el fallback por IP de siempre.
+            city = params.get("city", "") or config_manager.get_weather_city()
             city_path = urllib.parse.quote_plus(city) if city else ""
             try:
                 # Usa Wttr.in con el formato 3 (Solo línea de texto corta)
