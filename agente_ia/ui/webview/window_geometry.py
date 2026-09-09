@@ -52,3 +52,29 @@ def fit_size_to_screen(
     y = screen_y + (screen_h - height) // 2
 
     return width, height, x, y
+
+
+def resolver_maximizado(
+    minimizada: bool,
+    maximizada: bool,
+    maximizada_al_minimizar: bool,
+) -> Tuple[bool, bool]:
+    """Decide que hacer con el estado maximizado ante un cambio de estado de la ventana.
+
+    Devuelve `(recordar, reafirmar)`: que hay que recordar para el proximo cambio de
+    estado, y si hace falta volver a maximizar la ventana.
+
+    Windows restaura esta ventana (frameless + `QWebEngineView`) PERDIENDO el estado
+    maximizado: al volver de minimizada el rectangulo sigue siendo el de pantalla completa,
+    pero Qt reporta `isMaximized() == False`. Como el frontend dibuja el gutter de 10px y
+    las esquinas redondeadas segun ese estado (`layout.css`, `data-maximized`), la app se
+    veia encogida dentro de una ventana que no habia cambiado de tamano. Verificado con una
+    replica aislada: sin `QWebEngineView` el estado sobrevive, con el se pierde.
+
+    Por eso se recuerda si estaba maximizada al minimizar y se reafirma al restaurar. Una
+    ventana que estaba en tamano normal nunca se maximiza sola: `recordar` solo se enciende
+    si de verdad estaba maximizada al momento de minimizarse.
+    """
+    if minimizada:
+        return maximizada, False
+    return False, (maximizada_al_minimizar and not maximizada)
