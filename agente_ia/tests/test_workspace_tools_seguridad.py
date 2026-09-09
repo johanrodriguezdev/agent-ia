@@ -43,6 +43,18 @@ NIVELES_ESPERADOS = {
     "git_log": RiskLevel.GREEN,
 }
 
+#: REQ-030 — las dos que deciden SOBRE QUE CARPETAS trabajan las 8 de arriba. Mismo
+#: tratamiento de canal: habilitar una carpeta por un mensaje remoto sería regalar el
+#: confinamiento entero.
+NIVELES_REQ030 = {
+    "workspace_add_folder": RiskLevel.YELLOW,
+    "workspace_remove_folder": RiskLevel.YELLOW,
+}
+
+#: Las 10 juntas. Las pruebas de canal recorren todas; las que fijan el alcance de REQ-029
+#: (el modo "codigo") siguen usando solo las 8 de v1.
+TODAS = {**NIVELES_ESPERADOS, **NIVELES_REQ030}
+
 TODOS_LOS_CANALES = [
     ChannelType.DESKTOP, ChannelType.TELEGRAM, ChannelType.DISCORD, ChannelType.VOICE,
     ChannelType.API, ChannelType.EMAIL, ChannelType.UNKNOWN,
@@ -70,12 +82,12 @@ def repo_habilitado(monkeypatch, tmp_path):
 
 # ─────────────────────────── CA-05: niveles ───────────────────────────
 
-@pytest.mark.parametrize("nombre,nivel", sorted(NIVELES_ESPERADOS.items()))
+@pytest.mark.parametrize("nombre,nivel", sorted(TODAS.items()))
 def test_ca05_nivel_registrado_en_security_manager(nombre, nivel):
     assert security_manager.classify_action_base(nombre) == nivel
 
 
-@pytest.mark.parametrize("nombre,nivel", sorted(NIVELES_ESPERADOS.items()))
+@pytest.mark.parametrize("nombre,nivel", sorted(TODAS.items()))
 def test_ca05_la_toolspec_declara_el_mismo_nivel(nombre, nivel):
     """Las 8 se registran en dos lugares (`security_manager` y la `ToolSpec`). Un
     desacuerdo entre ambos degradaría el nivel en silencio: acá se fija que coincidan."""
@@ -88,16 +100,18 @@ def test_ca09_las_8_estan_en_el_registro_y_no_tienen_camino_propio():
     """CA-09 — se ejecutan por `execute_tool()`, que es el gate. Estar en `_REGISTRY` es
     la condición para eso: un tool que no está ahí no se puede invocar."""
     registradas = set(tool_registry.list_tool_names())
-    assert set(NIVELES_ESPERADOS) <= registradas
+    assert set(TODAS) <= registradas
 
 
 # ─────────────────────────── CA-06: los 7 canales ───────────────────────────
 
-def test_ca06_desktop_only_actions_son_exactamente_las_8():
-    assert DESKTOP_ONLY_ACTIONS == set(NIVELES_ESPERADOS)
+def test_ca06_desktop_only_actions_son_las_8_de_req029_mas_las_2_de_req030():
+    """El conjunto exacto, no "al menos": una herramienta de archivos que se cuele fuera de
+    esta tabla queda alcanzable desde Telegram sin que nadie lo note."""
+    assert DESKTOP_ONLY_ACTIONS == set(TODAS)
 
 
-@pytest.mark.parametrize("nombre", sorted(NIVELES_ESPERADOS))
+@pytest.mark.parametrize("nombre", sorted(TODAS))
 @pytest.mark.parametrize("canal", TODOS_LOS_CANALES)
 def test_ca06_ninguna_es_alcanzable_fuera_del_escritorio(nombre, canal):
     """Las 8 × los 7 canales. Sin esto, `file_read` es verde y un mensaje de Telegram se
@@ -106,7 +120,7 @@ def test_ca06_ninguna_es_alcanzable_fuera_del_escritorio(nombre, canal):
     assert permitida is (canal is ChannelType.DESKTOP)
 
 
-@pytest.mark.parametrize("nombre", sorted(NIVELES_ESPERADOS))
+@pytest.mark.parametrize("nombre", sorted(TODAS))
 @pytest.mark.parametrize(
     "canal",
     [c for c in TODOS_LOS_CANALES if c is not ChannelType.DESKTOP],
@@ -117,13 +131,13 @@ def test_ca06_require_confirmation_las_deniega_fuera_del_escritorio(nombre, cana
     assert security_manager.require_confirmation(nombre, canal) is False
 
 
-@pytest.mark.parametrize("nombre", sorted(NIVELES_ESPERADOS))
+@pytest.mark.parametrize("nombre", sorted(TODAS))
 def test_ca06_el_motivo_de_la_denegacion_se_explica(nombre):
     motivo = security_manager.explain_denial(nombre, ChannelType.TELEGRAM)
     assert "delante del computador" in motivo
 
 
-@pytest.mark.parametrize("nombre", sorted(NIVELES_ESPERADOS))
+@pytest.mark.parametrize("nombre", sorted(TODAS))
 def test_ca06_no_se_le_ofrecen_al_modelo_fuera_del_escritorio(nombre):
     """No es el control de seguridad —ese es `is_action_allowed()`—, pero ofrecerle a
     Telegram una herramienta que se le va a denegar solo le hace gastar una vuelta."""
@@ -133,7 +147,7 @@ def test_ca06_no_se_le_ofrecen_al_modelo_fuera_del_escritorio(nombre):
 
 def test_ca06_si_se_le_ofrecen_en_el_escritorio():
     ofrecidas = {t["name"] for t in tool_registry.catalogo_para_modelo(ChannelType.DESKTOP)}
-    assert set(NIVELES_ESPERADOS) <= ofrecidas
+    assert set(TODAS) <= ofrecidas
 
 
 # ─────────────────────────── CA-07: solo resta, nunca suma ───────────────────────────
@@ -187,7 +201,7 @@ def test_ca07_email_sigue_sin_ejecutar_nada():
     """EMAIL tiene lista vacía desde REQ-006 y sigue teniéndola: la tabla nueva no le
     devuelve nada."""
     assert CHANNEL_ALLOWED_LEVELS[ChannelType.EMAIL] == []
-    for nombre in NIVELES_ESPERADOS:
+    for nombre in TODAS:
         assert security_manager.is_action_allowed(nombre, ChannelType.EMAIL) is False
 
 

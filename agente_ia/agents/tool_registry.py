@@ -1502,3 +1502,89 @@ register_tool(ToolSpec(
     risk_level=RiskLevel.GREEN,
     invoke=_git_log_invoke,
 ))
+
+
+
+# ─────────────────────────────────────────────
+#  REQ-030 — qué carpetas puede tocar, dicho al agente
+# ─────────────────────────────────────────────
+#
+#  Sin esto, REQ-029 quedaba encendido solo por un JSON escrito a mano. Este proyecto es un
+#  asistente, no una app de formularios: la forma natural de darle una carpeta es decírsela.
+#  Las dos son YELLOW y solo de escritorio — habilitar una carpeta es decidir hasta dónde
+#  llegan las 8 herramientas de repositorio, y esa decisión se toma delante del computador.
+
+def _workspace_add_invoke(params: dict) -> str:
+    from core.workspace_config import RaizRechazada, agregar_raiz
+
+    ruta = str(params.get("path") or "")
+    try:
+        real = agregar_raiz(ruta)
+    except RaizRechazada as e:
+        logger.warning(f"'workspace_add_folder' rechazada: {e}")
+        return str(e)
+    except OSError as e:
+        logger.error(f"'workspace_add_folder' falló al guardar: {e}")
+        return "No pude guardar la carpeta habilitada."
+    return (
+        f"Listo: ya puedo leer y editar archivos dentro de «{real}». "
+        f"Para dejar de tener acceso, pedímelo y la quito."
+    )
+
+
+register_tool(ToolSpec(
+    name="workspace_add_folder",
+    description=(
+        "Habilita una carpeta del computador para que puedas leer, buscar y editar sus "
+        "archivos y consultar su git. Usala cuando el usuario te diga que trabajes sobre un "
+        "proyecto o repositorio que todavía no tenés habilitado. El permiso queda guardado."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Carpeta a habilitar, con su ruta completa.",
+            },
+        },
+        "required": ["path"],
+    },
+    risk_level=RiskLevel.YELLOW,
+    invoke=_workspace_add_invoke,
+))
+
+
+def _workspace_remove_invoke(params: dict) -> str:
+    from core.workspace_config import RaizRechazada, quitar_raiz
+
+    ruta = str(params.get("path") or "")
+    try:
+        real = quitar_raiz(ruta)
+    except RaizRechazada as e:
+        logger.warning(f"'workspace_remove_folder' rechazada: {e}")
+        return str(e)
+    except OSError as e:
+        logger.error(f"'workspace_remove_folder' falló al guardar: {e}")
+        return "No pude quitar la carpeta habilitada."
+    return f"Listo: ya no tengo acceso a «{real}»."
+
+
+register_tool(ToolSpec(
+    name="workspace_remove_folder",
+    description=(
+        "Deja de tener acceso a una carpeta habilitada. Usala cuando el usuario te diga que "
+        "ya no trabajes sobre ese proyecto."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Carpeta a quitar, con su ruta completa.",
+            },
+        },
+        "required": ["path"],
+    },
+    risk_level=RiskLevel.YELLOW,
+    invoke=_workspace_remove_invoke,
+))
