@@ -169,6 +169,10 @@ class Bridge(QObject):
     chips_loaded = pyqtSignal(str)                   # json: {modes: [...], quick_actions: [...]} (REQ-026)
     error_occurred = pyqtSignal(str)
     window_maximized_changed = pyqtSignal(bool)
+    #: REQ-033 — estado del modo autonomía, como JSON. La ventana lo muestra mientras esté
+    #: encendido: Johan eligió que no expire solo, así que la mitigación es que sea
+    #: imposible no verlo.
+    autonomy_changed = pyqtSignal(str)
 
     # ------------------------------------------------------------ Python → JS (REQ-016)
     tasks_loaded = pyqtSignal(str)                   # json: lista cruda de task_manager.list_all_tasks()
@@ -300,6 +304,7 @@ class Bridge(QObject):
             "quick_actions": _build_quick_actions_payload(),
         }))
         self.theme_changed.emit(resolve_theme_name(config_manager.get_ui_theme()))
+        self._emitir_autonomia()
         # El estado de la ventana también: `window_maximized_changed` solo se emite cuando
         # el estado CAMBIA, así que una página recién cargada —el arranque con geometría
         # maximizada guardada, o una recarga tras un crash del render— no sabía que estaba
@@ -1685,6 +1690,69 @@ class Bridge(QObject):
             logger.warning("start_move(): windowHandle() no disponible todavía")
             return
         window_handle.startSystemMove()
+
+    # ------------------------------------------------------------ modo autonomía (REQ-033)
+    def _emitir_autonomia(self) -> None:
+        from core.autonomy import estado
+
+        try:
+            self.autonomy_changed.emit(json.dumps(estado()))
+        except Exception as e:
+            logger.error(f"no se pudo emitir el estado de autonomía: {e}")
+
+    @pyqtSlot(str, str)
+    def set_autonomy_mode(self, nivel: str, pin: str) -> None:
+        """Enciende o apaga el modo autonomía. Lo llama la pantalla de Configuración.
+
+        Es deliberado que esto **no** sea una `ToolSpec`: si el agente pudiera encender su
+        propia autonomía, bastaría una instrucción inyectada en una página que esté leyendo
+        para que se suelte solo. Se enciende desde la pantalla, que es un acto del humano.
+        """
+        from core.autonomy import (NIVEL_NORMAL, NIVEL_TOTAL, NIVELES_VALIDOS,
+                                   guardar_modo, preparar_rama)
+        from core.security_manager import security_manager
+
+        if nivel not in NIVELES_VALIDOS:
+            logger.warning(f"set_autonomy_mode: nivel desconocido {nivel!r}, se ignora")
+            self.error_occurred.emit("Ese nivel de autonomía no existe.")
+            return
+
+        if nivel == NIVEL_TOTAL:
+            if not security_manager.has_pin():
+                self.error_occurred.emit(
+                    "Para el nivel total hace falta un PIN maestro configurado "
+                    "(ORION_AUTH_PIN). Sin PIN no habría nada que verificar."
+                )
+                return
+            if not security_manager.verify_pin(pin or ""):
+                logger.warning("PIN incorrecto al intentar encender el modo autonomía total")
+                self.error_occurred.emit("PIN incorrecto.")
+                return
+
+        rama = ""
+        if nivel == NIVEL_TOTAL:
+            try:
+                rama, _anterior = preparar_rama()
+            except RuntimeError as e:
+                self.error_occurred.emit(str(e))
+                return
+
+        try:
+            guardar_modo(nivel, rama)
+        except (ValueError, OSError) as e:
+            logger.error(f"no se pudo guardar el modo autonomía: {e}")
+            self.error_occurred.emit("No pude guardar el cambio.")
+            return
+
+        self._emitir_autonomia()
+        if nivel == NIVEL_NORMAL:
+            self.notice_shown.emit("info", "Modo autonomía apagado: vuelvo a preguntar antes de actuar.")
+        else:
+            self.notice_shown.emit(
+                "info",
+                f"Modo autonomía encendido ({nivel})."
+                + (f" Trabajo sobre la rama {rama}." if rama else ""),
+            )
 
     @pyqtSlot()
     def window_minimize(self) -> None:

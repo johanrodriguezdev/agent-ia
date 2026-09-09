@@ -134,6 +134,22 @@ def _es_archivo_de_secretos(nombre: str) -> bool:
     return any(fnmatch.fnmatch(minuscula, patron) for patron in _ARCHIVOS_DE_SECRETOS)
 
 
+def _autonomia_total() -> bool:
+    """Return True si el humano encendió el nivel total del modo autonomía (REQ-033).
+
+    Es lo único que abre la carpeta de O.R.I.O.N., que en cualquier otro caso se rechaza en
+    código. Se consulta acá y no se cachea: apagar el modo tiene que tener efecto en la
+    siguiente operación, no en el siguiente arranque.
+    """
+    try:
+        from core.autonomy import puede_tocar_su_propio_codigo
+
+        return puede_tocar_su_propio_codigo()
+    except Exception as e:  # ante cualquier duda, el lado restrictivo
+        logger.warning(f"no se pudo leer el modo autonomía, se asume apagado: {e}")
+        return False
+
+
 def _confinado(ruta: str, raices: List[str]) -> bool:
     """Return True si `ruta` sigue cayendo dentro de alguna raíz, resolviéndola antes.
 
@@ -152,7 +168,7 @@ def _confinado(ruta: str, raices: List[str]) -> bool:
     except (OSError, ValueError) as e:
         logger.debug(f"no se pudo resolver {ruta!r} durante el recorrido: {e}")
         return False
-    if _es_instalacion(real_norm):
+    if _es_instalacion(real_norm) and not _autonomia_total():
         return False
     return any(_dentro_de(real_norm, os.path.realpath(raiz)) for raiz in raices)
 
@@ -213,6 +229,14 @@ def resolver(ruta: str, raices: List[str]) -> str:
 
         # Primero la instalación: un intento de tocar el código de O.R.I.O.N. se registra
         # SIEMPRE, esté o no dentro de una raíz habilitada.
+        if _es_instalacion(real_norm) and _autonomia_total():
+            # REQ-033 — el humano encendió el nivel total con el PIN maestro y hay rama de
+            # git. Se registra SIEMPRE con `critical`: que el agente toque su propio código
+            # tiene que quedar en el log aunque esté autorizado.
+            logger.critical(
+                f"Acceso al código de O.R.I.O.N. PERMITIDO por el modo autonomía total: {ruta!r}"
+            )
+            return real
         if _es_instalacion(real_norm):
             logger.critical(
                 f"Intento de acceso al código de O.R.I.O.N. bloqueado: {ruta!r}. "

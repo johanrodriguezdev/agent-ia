@@ -13,6 +13,7 @@ import {
   onConversationListUpdated, onConversationCleared, onConversationRemoved,
   onTurnsLoaded, onMessageAppended, onTypingStarted, onTypingStopped, onProgressUpdated,
   onConfirmationRequested, onFileAttached, onErrorOccurred, onWindowMaximizedChanged,
+  onAutonomyChanged,
   onTasksLoaded, onProjectsLoaded, onProjectConversationsLoaded, onProjectRemoved,
   onSecurityOverridesLoaded, onSecurityOverrideSaved, onSecurityOverrideSaveRejected,
   onEmailCapabilitiesLoaded, onEmailCapabilitySaved, onEmailCapabilitySaveRejected,
@@ -38,7 +39,7 @@ import {
 } from "./composer.js";
 import { initTheme, applyTheme } from "./theme.js";
 import { showConfirmModal } from "./confirm_modal.js";
-import { initWindowChrome, setMaximizedState } from "./window_chrome.js";
+import { initWindowChrome, setAutonomyIndicator, setMaximizedState } from "./window_chrome.js";
 import { openTasksPanel, renderTasks } from "./tasks_panel.js";
 import {
   toggleTerminalPanel, escribirSalida, manejarEstadoTerminal, renderTerminalTabs,
@@ -55,7 +56,7 @@ import {
   openSettingsPanel, renderSecurityOverrides, handleSecurityOverrideSaved,
   handleSecurityOverrideRejected, renderProfile, handleProfileSaved,
   renderEmailCapabilities, handleEmailCapabilitySaved, handleEmailCapabilityRejected,
-  renderTaskModels, renderConnections,
+  renderTaskModels, renderConnections, renderAutonomy,
 } from "./settings_panel.js";
 
 const GREETINGS_BY_HOUR = [
@@ -190,6 +191,13 @@ async function bootstrap() {
     if (capa) capa.hidden = !activo;
   });
   onWindowMaximizedChanged(setMaximizedState);
+  // REQ-033 — el estado del modo autonomía va a dos lugares: la insignia de la barra, que
+  // no se puede perder de vista, y la pantalla de Configuración si está abierta.
+  onAutonomyChanged((json) => {
+    const estado = JSON.parse(json);
+    setAutonomyIndicator(estado);
+    renderAutonomy(estado);
+  });
 
   // REQ-016: herramientas de la barra superior (Tareas/Flujos/Proyectos) + señales de
   // datos de sus modales. Antes eran botones con emoji dentro del sidebar.

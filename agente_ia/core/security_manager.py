@@ -544,6 +544,20 @@ class SecurityManager:
                 logger.warning(f"Acción '{action_name}' no permitida en canal {channel.value}")
                 self._log_audit(action_name, channel, "bloqueada_canal", user_id, details)
                 return False
+            # REQ-033 — el modo autonomía aprueba las acciones de trabajo sin preguntar.
+            # Va DESPUÉS del chequeo de canal a propósito: la autonomía NO le da permisos a
+            # un canal que no los tenía; solo se saltea la pregunta donde la acción ya estaba
+            # permitida. Un mensaje de Telegram no hereda nada de esto.
+            from core import autonomy
+
+            if autonomy.aprueba_sin_preguntar(action_name, channel):
+                self._log_audit(action_name, channel, "aprobada_por_autonomia", user_id, details)
+                logger.warning(
+                    f"Acción amarilla '{action_name}' aprobada SIN preguntar por el modo "
+                    f"autonomía ('{autonomy.modo_actual()}') en {channel.value}. {details}"
+                )
+                return True
+
             # En español llano, no con el nombre interno de la función. Pedirle permiso a
             # alguien en un idioma que no habla no es pedirle permiso: o dice que sí a
             # ciegas, o dice que no por las dudas. El DETALLE concreto sigue yendo —es lo
@@ -572,6 +586,20 @@ class SecurityManager:
         if level == RiskLevel.RED:
             self._log_audit(action_name, channel, "intento_rojo", user_id, details)
             logger.warning(f"Intento de acción roja '{action_name}' desde {channel.value}")
+            # REQ-033 — el nivel total del modo autonomía autoriza SOLO `modify_source_code`,
+            # solo en el escritorio. El PIN maestro ya se pidió al encender el modo: pedirlo
+            # otra vez a las 3 de la mañana es pedírselo a nadie. Los otros nueve rojos de
+            # REQ-005 no pasan por acá ni con la autonomía encendida.
+            from core import autonomy
+
+            if autonomy.aprueba_rojo(action_name, channel):
+                self._log_audit(action_name, channel, "autorizada_rojo_autonomia", user_id, details)
+                logger.critical(
+                    f"Acción ROJA '{action_name}' autorizada por el modo autonomía TOTAL "
+                    f"en {channel.value}. {details}"
+                )
+                return True
+
             if channel == ChannelType.DESKTOP and self.has_pin():
                 from core.acciones_legibles import pregunta as _pregunta_roja
 
