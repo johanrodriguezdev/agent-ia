@@ -247,7 +247,17 @@ def agregar_raiz(carpeta: str) -> str:
 
     from core.workspace_files import es_codigo_de_orion
 
-    if es_codigo_de_orion(real):
+    from core.autonomy import puede_tocar_su_propio_codigo
+
+    if es_codigo_de_orion(real) and puede_tocar_su_propio_codigo():
+        # REQ-033 — con el nivel total encendido, su propia carpeta se puede habilitar como
+        # espacio de trabajo: es la única forma de que pueda buscar y recorrer su código,
+        # no solo abrir archivos sueltos por ruta.
+        logger.critical(
+            f"Carpeta de O.R.I.O.N. habilitada como espacio de trabajo por el modo "
+            f"autonomía total: {real!r}"
+        )
+    elif es_codigo_de_orion(real):
         logger.critical(
             f"Intento de habilitar el código de O.R.I.O.N. como carpeta de trabajo: {real!r}. "
             f"Bloqueado en código (REQ-029/CA-03); modify_source_code es 🔴 RED."

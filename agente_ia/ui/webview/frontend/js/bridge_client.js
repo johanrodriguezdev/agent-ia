@@ -85,6 +85,10 @@ export function onFileAttached(cb) { _bridge.file_attached.connect(cb); }
 export function onChipsLoaded(cb) { _bridge.chips_loaded.connect(cb); }
 export function onErrorOccurred(cb) { _bridge.error_occurred.connect(cb); }
 export function onWindowMaximizedChanged(cb) { _bridge.window_maximized_changed.connect(cb); }
+// REQ-033 — el modo autonomia. `setAutonomyMode` es lo unico que lo enciende: no existe
+// ninguna herramienta del agente que llegue aca, a proposito.
+export function setAutonomyMode(nivel, pin) { _bridge.set_autonomy_mode(nivel, pin || ""); }
+export function onAutonomyChanged(cb) { _bridge.autonomy_changed.connect(cb); }
 
 // ------------------------------------------------------------ Python → JS (REQ-016)
 export function onTasksLoaded(cb) { _bridge.tasks_loaded.connect(cb); }

@@ -29,6 +29,7 @@ import {
   requestEmailCapabilities, saveEmailCapability,
   requestTaskModels, saveTaskModels,
   requestConnections, saveConnection, clearConnection,
+  setAutonomyMode,
 } from "./bridge_client.js";
 import { icon } from "./icons.js";
 
@@ -182,6 +183,7 @@ function renderActiveSection() {
     content.appendChild(buildConnectionsCard(null));
     requestConnections();
   } else {
+    content.appendChild(buildAutonomyCard());
     content.appendChild(buildSecurityCard());
     content.appendChild(buildEmailCapabilitiesCard());
     requestSecurityOverrides();   // CA-19: carga perezosa, solo acá
@@ -724,4 +726,111 @@ export function renderConnections(payload) {
   const nueva = buildConnectionsCard(payload);
   if (anterior) anterior.replaceWith(nueva);
   else content.appendChild(nueva);
+}
+
+// ---------------------------------------------------------------- modo autonomía (REQ-033)
+//
+// Va dentro de "Seguridad" y no en una sección propia porque es exactamente eso: cuánto
+// puede hacer el agente sin preguntar. Tres niveles, y el tercero pide el PIN maestro — el
+// mecanismo que `security_manager` ya tenía previsto para lo rojo y nunca se había usado.
+
+const NIVELES_AUTONOMIA = [
+  {
+    id: "normal",
+    label: "Normal",
+    detalle: "Pregunta antes de escribir un archivo, editarlo o ejecutar algo. Es el estado de fábrica.",
+  },
+  {
+    id: "proyectos",
+    label: "Trabajar sin preguntar en mis proyectos",
+    detalle: "Escribe, edita y ejecuta dentro de las carpetas habilitadas sin interrumpir. "
+           + "Sigue preguntando para todo lo demás: apagar el equipo, mandar mensajes, habilitar otra carpeta.",
+  },
+  {
+    id: "total",
+    label: "Total: además puede mejorar su propio código",
+    detalle: "Lo anterior, y además puede modificar el código de O.R.I.O.N. Pide el PIN maestro "
+           + "y trabaja sobre una rama de git aparte, para que puedas ver el diff y volver atrás.",
+  },
+];
+
+function buildAutonomyCard() {
+  const card = document.createElement("div");
+  card.className = "settings-card";
+
+  const cardTitle = document.createElement("div");
+  cardTitle.className = "settings-card-title";
+  cardTitle.textContent = "Modo autonomía";
+
+  const aviso = document.createElement("div");
+  aviso.className = "settings-row-description";
+  aviso.textContent = "Nada de esto alcanza a Telegram, Discord, voz ni correo: el modo vive "
+                    + "en este equipo. Queda encendido hasta que lo apagues.";
+
+  const lista = document.createElement("div");
+  lista.id = "autonomy-options";
+  for (const nivel of NIVELES_AUTONOMIA) lista.appendChild(buildAutonomyRow(nivel));
+
+  const estado = document.createElement("div");
+  estado.id = "autonomy-state";
+  estado.className = "settings-row-description";
+
+  card.append(cardTitle, aviso, lista, estado);
+  return card;
+}
+
+function buildAutonomyRow(nivel) {
+  const fila = document.createElement("div");
+  fila.className = "settings-row";
+  fila.dataset.nivel = nivel.id;
+
+  const texto = document.createElement("div");
+  texto.className = "settings-row-text";
+  const titulo = document.createElement("div");
+  titulo.className = "settings-row-label";
+  titulo.textContent = nivel.label;
+  const detalle = document.createElement("div");
+  detalle.className = "settings-row-description";
+  detalle.textContent = nivel.detalle;
+  texto.append(titulo, detalle);
+
+  const boton = document.createElement("button");
+  boton.type = "button";
+  boton.className = "settings-row-action";
+  boton.textContent = "Activar";
+  boton.addEventListener("click", () => activarNivel(nivel.id));
+
+  fila.append(texto, boton);
+  return fila;
+}
+
+function activarNivel(nivel) {
+  // El PIN se pide EN EL MOMENTO de encender, una sola vez. Durante la noche no vuelve a
+  // aparecer: esa es toda la idea del modo.
+  let pin = "";
+  if (nivel === "total") {
+    pin = window.prompt("PIN maestro para autorizar que modifique su propio código:") || "";
+    if (!pin) return;
+  }
+  setAutonomyMode(nivel, pin);
+}
+
+export function renderAutonomy(estado) {
+  const lista = document.getElementById("autonomy-options");
+  if (lista) {
+    for (const fila of lista.children) {
+      const activo = fila.dataset.nivel === estado.nivel;
+      const boton = fila.querySelector("button");
+      if (boton) {
+        boton.textContent = activo ? "Activo" : "Activar";
+        boton.disabled = activo;
+      }
+    }
+  }
+  const linea = document.getElementById("autonomy-state");
+  if (linea) {
+    linea.textContent = estado.activo
+      ? `Encendido desde ${estado.desde}` + (estado.rama ? ` sobre la rama ${estado.rama}.` : ".")
+      : "";
+  }
 }

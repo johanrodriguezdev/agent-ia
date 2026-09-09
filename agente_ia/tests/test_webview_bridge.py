@@ -1190,3 +1190,115 @@ def test_bridge_expone_cada_comando_del_contrato(bridge, slot_name):
 @pytest.mark.parametrize("signal_name", _EXPECTED_SIGNALS)
 def test_bridge_expone_cada_evento_del_contrato(bridge, signal_name):
     assert hasattr(bridge, signal_name), f"falta la señal '{signal_name}'"
+
+
+# ---------------------------------------------------------------------------
+# REQ-033: el interruptor del modo autonomía
+#
+# Se prueba desde el bridge y no solo desde `core/autonomy.py` porque el primer intento de
+# este slot usaba `security_manager` sin importarlo: compilaba perfecto y habría reventado
+# con NameError la primera vez que alguien tocara el interruptor. `py_compile` no ve eso;
+# un test que llama al slot, sí.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def autonomia_aislada(monkeypatch, tmp_path):
+    """El archivo real del usuario no se toca en ningún test."""
+    import core.autonomy as autonomy
+
+    monkeypatch.setattr(autonomy, "ARCHIVO_AUTONOMIA", str(tmp_path / "autonomy_mode.json"))
+    return autonomy
+
+
+def test_encender_el_nivel_proyectos_lo_guarda_y_lo_anuncia(bridge, qtbot, autonomia_aislada):
+    with qtbot.waitSignal(bridge.autonomy_changed, timeout=1000) as senal:
+        bridge.set_autonomy_mode("proyectos", "")
+
+    assert autonomia_aislada.modo_actual() == "proyectos"
+    assert json.loads(senal.args[0])["activo"] is True
+
+
+def test_apagarlo_vuelve_a_normal(bridge, qtbot, autonomia_aislada):
+    bridge.set_autonomy_mode("proyectos", "")
+
+    bridge.set_autonomy_mode("normal", "")
+
+    assert autonomia_aislada.modo_actual() == "normal"
+
+
+def test_un_nivel_inventado_no_cambia_nada(bridge, qtbot, autonomia_aislada):
+    with qtbot.waitSignal(bridge.error_occurred, timeout=1000):
+        bridge.set_autonomy_mode("dios", "")
+
+    assert autonomia_aislada.modo_actual() == "normal"
+
+
+def test_el_nivel_total_sin_pin_configurado_no_se_enciende(bridge, qtbot, autonomia_aislada,
+                                                          monkeypatch):
+    """Sin PIN no hay nada que verificar: encenderlo igual sería teatro."""
+    from core.security_manager import security_manager
+
+    monkeypatch.setattr(security_manager, "has_pin", lambda: False)
+
+    with qtbot.waitSignal(bridge.error_occurred, timeout=1000) as senal:
+        bridge.set_autonomy_mode("total", "1234")
+
+    assert autonomia_aislada.modo_actual() == "normal"
+    assert "PIN" in senal.args[0]
+
+
+def test_el_nivel_total_con_pin_incorrecto_no_se_enciende(bridge, qtbot, autonomia_aislada,
+                                                         monkeypatch):
+    from core.security_manager import security_manager
+
+    monkeypatch.setattr(security_manager, "has_pin", lambda: True)
+    monkeypatch.setattr(security_manager, "verify_pin", lambda pin: False)
+
+    with qtbot.waitSignal(bridge.error_occurred, timeout=1000):
+        bridge.set_autonomy_mode("total", "mal")
+
+    assert autonomia_aislada.modo_actual() == "normal"
+
+
+def test_el_nivel_total_sin_repositorio_git_no_se_enciende(bridge, qtbot, autonomia_aislada,
+                                                           monkeypatch):
+    """La rama es la red que hace reversible que toque su propio código. Sin ella, no."""
+    from core.security_manager import security_manager
+
+    monkeypatch.setattr(security_manager, "has_pin", lambda: True)
+    monkeypatch.setattr(security_manager, "verify_pin", lambda pin: True)
+    monkeypatch.setattr(
+        "core.autonomy.preparar_rama",
+        lambda: (_ for _ in ()).throw(RuntimeError("no es un repositorio git")),
+    )
+
+    with qtbot.waitSignal(bridge.error_occurred, timeout=1000):
+        bridge.set_autonomy_mode("total", "correcto")
+
+    assert autonomia_aislada.modo_actual() == "normal"
+
+
+def test_el_nivel_total_con_pin_y_rama_se_enciende(bridge, qtbot, autonomia_aislada, monkeypatch):
+    from core.security_manager import security_manager
+
+    monkeypatch.setattr(security_manager, "has_pin", lambda: True)
+    monkeypatch.setattr(security_manager, "verify_pin", lambda pin: True)
+    monkeypatch.setattr("core.autonomy.preparar_rama", lambda: ("autonomia/prueba", "main"))
+
+    with qtbot.waitSignal(bridge.autonomy_changed, timeout=1000) as senal:
+        bridge.set_autonomy_mode("total", "correcto")
+
+    assert autonomia_aislada.modo_actual() == "total"
+    estado = json.loads(senal.args[0])
+    assert estado["rama"] == "autonomia/prueba"
+
+
+def test_encender_la_autonomia_no_es_una_herramienta_del_agente():
+    """La regla que sostiene el resto: si el agente pudiera encender su propia autonomía,
+    bastaría una instrucción inyectada en una página para que se suelte solo."""
+    import agents.tool_registry as tool_registry
+
+    nombres = tool_registry.list_tool_names()
+    assert not [n for n in nombres if "autonom" in n.lower()], (
+        "no puede existir una tool que encienda el modo autonomía"
+    )
