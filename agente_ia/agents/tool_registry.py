@@ -1588,3 +1588,97 @@ register_tool(ToolSpec(
     risk_level=RiskLevel.YELLOW,
     invoke=_workspace_remove_invoke,
 ))
+
+
+# ─────────────────────────────────────────────
+#  REQ-031 — llamar a una API, no solo leer páginas
+# ─────────────────────────────────────────────
+#
+#  `web_read` abre una página y es verde. Esto es lo otro: mandarle datos a un servicio. Es
+#  YELLOW porque tiene efectos del otro lado, y porque amarillo además la deja fuera de todos
+#  los canales remotos. El destino pasa por `core/http_seguro.py`, igual que la lectura.
+
+#: Cuánto del cuerpo se le devuelve al modelo. El tope de descarga real está en
+#: `http_seguro.MAX_BYTES`; esto es lo que entra en la conversación sin comerse el turno.
+_MAX_RESPUESTA_HTTP = 8000
+
+
+def _http_request_invoke(params: dict) -> str:
+    import json as _json
+
+    from core.http_seguro import DestinoBloqueado, pedir
+    from core.mcp_client import expandir_secreto
+
+    url = str(params.get("url") or "").strip()
+    if not url:
+        return f"Necesito la dirección a la que querés que llame{vocative()}."
+
+    cabeceras_crudas = params.get("headers") or {}
+    if not isinstance(cabeceras_crudas, dict):
+        return "Las cabeceras tienen que venir como pares de clave y valor."
+    # `${MI_TOKEN}` se resuelve contra el entorno (el mismo mecanismo que ya usan los
+    # módulos de correo): así una credencial no viaja literal en la conversación ni queda
+    # escrita en el log de auditoría.
+    cabeceras = {str(k): str(expandir_secreto(v)) for k, v in cabeceras_crudas.items()}
+
+    cuerpo = params.get("body")
+    if isinstance(cuerpo, (dict, list)):
+        cuerpo = _json.dumps(cuerpo, ensure_ascii=False)
+        cabeceras.setdefault("Content-Type", "application/json")
+    elif cuerpo is not None:
+        cuerpo = str(cuerpo)
+
+    try:
+        respuesta = pedir(url, metodo=str(params.get("method") or "GET"),
+                          headers=cabeceras, cuerpo=cuerpo)
+    except DestinoBloqueado as e:
+        logger.warning(f"'http_request' rechazada: {e}")
+        return str(e)
+    except OSError as e:
+        logger.error(f"'http_request' no pudo conectarse: {e}")
+        return f"No pude conectarme a esa dirección: {type(e).__name__}."
+    except Exception as e:
+        logger.error(f"'http_request' falló: {type(e).__name__}: {e}")
+        return "No pude completar esa llamada."
+
+    cuerpo_texto = respuesta.texto[:_MAX_RESPUESTA_HTTP]
+    avisos = ""
+    if len(respuesta.texto) > _MAX_RESPUESTA_HTTP:
+        avisos += f"\n[Respuesta recortada a {_MAX_RESPUESTA_HTTP} caracteres.]"
+    if respuesta.truncada:
+        avisos += "\n[El servidor mandó más de lo que descargo; se cortó ahí.]"
+    return f"HTTP {respuesta.status} desde {respuesta.url_final}\n\n{cuerpo_texto}{avisos}"
+
+
+register_tool(ToolSpec(
+    name="http_request",
+    description=(
+        "Llama a una API por HTTP: podés elegir el método, mandar cabeceras y un cuerpo. "
+        "Usala para servicios que necesitan algo más que abrir una página (para leer una "
+        "página está web_read). Si una cabecera lleva credencial, escribí "
+        "${NOMBRE_DE_LA_VARIABLE} en vez del token: se resuelve contra el entorno del equipo."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "url": {"type": "string", "description": "Dirección http(s) del servicio."},
+            "method": {
+                "type": "string",
+                "description": "GET, POST, PUT, PATCH, DELETE o HEAD. Por defecto GET.",
+            },
+            "headers": {
+                "type": "object",
+                "description": "Cabeceras. Para credenciales usá ${NOMBRE_DE_LA_VARIABLE}.",
+            },
+            "body": {
+                "type": "string",
+                "description": "Cuerpo de la petición. Un objeto se manda como JSON.",
+            },
+        },
+        "required": ["url"],
+    },
+    # YELLOW: manda datos afuera y tiene efectos del otro lado. La confirmación muestra la
+    # URL —`url` ya está en `_DETAILS_ALLOWED_KEYS`—, que es lo que hay que ver para decidir.
+    risk_level=RiskLevel.YELLOW,
+    invoke=_http_request_invoke,
+))
