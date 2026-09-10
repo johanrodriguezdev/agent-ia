@@ -2102,3 +2102,114 @@ register_tool(ToolSpec(
     risk_level=RiskLevel.GREEN,
     invoke=_project_stop_invoke,
 ))
+
+
+# ---------------------------------------------------------------------------
+# REQ-038 — el navegador: ver la página y actuar sobre ella por el nombre de
+# cada cosa, en vez de estimar coordenadas sobre una captura.
+# ---------------------------------------------------------------------------
+
+def _browser_open_invoke(params: dict) -> str:
+    from os_integration.navegador import abrir
+
+    url = str(params.get("url") or "").strip()
+    if not url:
+        return f"Necesito la dirección que querés que abra{vocative()}."
+    return _con_manejo("browser_open", lambda: abrir(url))
+
+
+register_tool(ToolSpec(
+    name="browser_open",
+    description=(
+        "Abre una dirección web en el navegador del usuario y espera a poder LEER la "
+        "página. Te dice cuántos elementos quedaron disponibles para actuar; a partir de "
+        "ahí usá 'browser_page' para ver qué hay y 'browser_act' para pulsar o escribir. "
+        "Es la puerta de entrada a cualquier trámite web de varios pasos."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "url": {"type": "string", "description": "Dirección a abrir."},
+        },
+        "required": ["url"],
+    },
+    # GREEN: abrir una dirección es lo mismo que ya hacen `open_url` y `search_google`, y
+    # el usuario ve la página aparecer. Lo que se haga DESPUÉS sobre ella es `browser_act`,
+    # que sí es amarillo.
+    risk_level=RiskLevel.GREEN,
+    invoke=_browser_open_invoke,
+))
+
+
+def _browser_page_invoke(params: dict) -> str:
+    from os_integration.navegador import resumen_de_pagina
+
+    try:
+        maximo = int(params.get("maximo") or 40)
+    except (TypeError, ValueError):
+        maximo = 40
+    return _con_manejo("browser_page", lambda: resumen_de_pagina(max(1, min(maximo, 200))))
+
+
+register_tool(ToolSpec(
+    name="browser_page",
+    description=(
+        "Cuenta qué hay en la página que el usuario tiene abierta: enlaces, campos y "
+        "botones, con su nombre real. Es lo que te permite decidir el siguiente paso de un "
+        "trámite sin adivinar. Si no ves lo que buscás, pedí más elementos con 'maximo' o "
+        "desplazá la página antes."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "maximo": {
+                "type": "integer",
+                "description": "Cuántos elementos listar (por defecto 40).",
+            },
+        },
+    },
+    # GREEN: mira, no toca. Mismo criterio que `pc_look`, que ya lee la ventana activa.
+    risk_level=RiskLevel.GREEN,
+    invoke=_browser_page_invoke,
+))
+
+
+def _browser_act_invoke(params: dict) -> str:
+    from os_integration.navegador import accionar
+
+    objetivo = str(params.get("objetivo") or "").strip()
+    if not objetivo:
+        return f"Necesito el nombre de lo que querés que pulse en la página{vocative()}."
+    texto = params.get("texto")
+    texto = str(texto) if texto not in (None, "") else None
+    return _con_manejo("browser_act", lambda: accionar(objetivo, texto))
+
+
+register_tool(ToolSpec(
+    name="browser_act",
+    description=(
+        "Hace clic en un elemento de la página POR SU NOMBRE —el que devuelve "
+        "'browser_page'—, y si le pasás 'texto', lo escribe ahí. Encadenando llamadas se "
+        "completa un formulario o un trámite entero. No uses coordenadas: el nombre se "
+        "resuelve contra la página viva en el momento del clic."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "objetivo": {
+                "type": "string",
+                "description": "Nombre del enlace, botón o campo, tal como lo ves en la página.",
+            },
+            "texto": {
+                "type": "string",
+                "description": "Qué escribir ahí. Vacío para solo hacer clic.",
+            },
+        },
+        "required": ["objetivo"],
+    },
+    # YELLOW: actúa sobre la sesión del usuario, con sus cuentas abiertas. Un clic puede
+    # comprar, borrar o enviar. Mismo nivel que `pc_click` y `pc_type`, y la confirmación
+    # muestra el objetivo y el texto (`_DETAILS_ALLOWED_KEYS`) para que el sí no sea a ciegas.
+    risk_level=RiskLevel.YELLOW,
+    invoke=_browser_act_invoke,
+))
