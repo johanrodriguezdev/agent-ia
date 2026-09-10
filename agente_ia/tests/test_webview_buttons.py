@@ -937,3 +937,37 @@ def test_todo_boton_con_id_del_html_tiene_su_manejador(ventana):
         "cambió el inventario de botones del HTML: agregá el nuevo a un test de este "
         "archivo antes de tocar esta lista"
     )
+
+
+# ---------------------------------------------------------------------------
+# REQ-037: el panel de Flujos vacío nombra al agente como lo llamó el usuario
+#
+# Reportado por Johan: "cuando presiono sobre el botón de Flujos me dice pedíselo a
+# O.R.I.O.N hablando". El nombre estaba escrito a mano, así que quien renombró a su agente
+# leía un nombre que nunca puso.
+# ---------------------------------------------------------------------------
+
+def test_el_panel_de_flujos_vacio_usa_el_nombre_que_puso_el_usuario(ventana, qtbot):
+    window, page, _ = ventana
+
+    # Se renombra al agente como lo hace la app de verdad: `profile_loaded` es lo que
+    # llega al guardar el perfil. Esto prueba la mitad de fondo del bug — que el nombre
+    # nuevo se propague a los paneles SIN reiniciar. Antes la variable global se quedaba
+    # con el nombre del arranque y solo se repintaban tres nodos a mano.
+    window.bridge.profile_loaded.emit(json.dumps({
+        "agent_name": "VIERNES", "agent_pronunciation": "viernes",
+        "display_name": "Johan", "user_title": "",
+    }))
+    _esperar(qtbot, 300)
+
+    _click(page, "document.getElementById('flows-btn')")
+    _esperar(qtbot, 400)
+    window.bridge.flows_loaded.emit("[]")
+    _esperar(qtbot, 300)
+
+    texto = _run_js(page, "(function(){var e=document.querySelector('#panel-modal-root .panel-empty');"
+                          "return e ? e.textContent : null;})()")
+
+    assert texto, "el panel vacío no mostró ningún mensaje"
+    assert "VIERNES" in texto, f"no usó el nombre del usuario: {texto!r}"
+    assert "O.R.I.O.N" not in texto

@@ -244,9 +244,8 @@ def resolver(ruta: str, raices: List[str]) -> str:
                 f"aunque se agregue como carpeta habilitada; modify_source_code es 🔴 RED."
             )
             raise RutaFueraDeRaiz(
-                "Esa ruta está dentro del código de O.R.I.O.N., y no puedo tocar mi propio "
-                "código: modificarlo es una acción de riesgo alto que no se autoriza por "
-                "esta vía."
+                "Esa ruta está dentro de mi propio código, y no puedo tocarlo: "
+                "modificarlo es una acción de riesgo alto que no se autoriza por esta vía."
             )
 
         for raiz in raices:
