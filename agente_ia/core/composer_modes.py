@@ -66,7 +66,7 @@ _MODOS: Tuple[ModoComposer, ...] = (
             # proyecto, despues leer, despues cambiar, y despues COMPROBAR corriendolo.
             # `project_run` va detras de las escrituras porque correr sin haber cambiado
             # nada es gastar una vuelta.
-            "project_tree",
+            "project_tree", "code_search",
             "file_search", "file_read", "file_list", "file_edit", "file_write",
             "project_run",
             "git_status", "git_diff", "git_log", "EXECUTE_CODE",

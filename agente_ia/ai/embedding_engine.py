@@ -40,3 +40,22 @@ def create_embedding(text: str) -> list[float]:
     # encode as numpy array para eficiencia, luego convertimos a list nativa.
     embedding = model.encode(text, convert_to_numpy=True)
     return embedding.tolist()
+
+
+def create_embeddings(texts: list[str], batch_size: int = 32) -> list[list[float]]:
+    """Crea los embeddings de varios textos de una vez. Return uno por cada entrada.
+
+    Existe para el índice de código (REQ-034): indexar un repositorio son miles de
+    fragmentos, y llamar `create_embedding()` uno por uno desperdicia la mayor parte del
+    tiempo en encender y apagar el modelo para cada texto. En lote, el modelo aprovecha la
+    vectorización y la diferencia es de un orden de magnitud.
+
+    Con la lista vacía devuelve lista vacía sin cargar el modelo: indexar un repositorio
+    donde no cambió nada no tiene por qué costar los segundos de carga.
+    """
+    if not texts:
+        return []
+    model = get_model()
+    matriz = model.encode(texts, convert_to_numpy=True, batch_size=batch_size,
+                          show_progress_bar=False)
+    return [vector.tolist() for vector in matriz]
