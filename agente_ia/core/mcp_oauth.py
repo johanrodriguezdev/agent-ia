@@ -261,7 +261,12 @@ class _RecolectorDeCodigo(BaseHTTPRequestHandler):
         self.server.error = (parametros.get("error") or [None])[0]
 
         if self.server.codigo:
-            cuerpo = "<h2>Listo</h2><p>Ya podés volver a O.R.I.O.N. y cerrar esta pestaña.</p>"
+            # REQ-037 — el nombre que eligió el usuario, no uno fijo. Esta página la ve en
+            # el navegador al terminar de autorizar un servidor MCP.
+            from config_manager import get_agent_name
+
+            cuerpo = (f"<h2>Listo</h2><p>Ya podés volver a {get_agent_name()} y cerrar esta "
+                      f"pestaña.</p>")
         else:
             cuerpo = f"<h2>No se pudo autorizar</h2><p>{self.server.error or 'sin detalle'}</p>"
         datos = f"<html><meta charset='utf-8'><body>{cuerpo}</body></html>".encode("utf-8")

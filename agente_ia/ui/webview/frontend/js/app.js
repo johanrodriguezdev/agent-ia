@@ -40,6 +40,7 @@ import {
 import { initTheme, applyTheme } from "./theme.js";
 import { showConfirmModal } from "./confirm_modal.js";
 import { initWindowChrome, setAutonomyIndicator, setMaximizedState } from "./window_chrome.js";
+import { fijarNombreDelAgente } from "./agente.js";
 import { openTasksPanel, renderTasks } from "./tasks_panel.js";
 import {
   toggleTerminalPanel, escribirSalida, manejarEstadoTerminal, renderTerminalTabs,
@@ -91,6 +92,10 @@ function setAgentIdentity(name) {
   // cuando el usuario lo cambia en Configuración, `profile_loaded` trae el nombre nuevo y
   // esta misma función lo repinta sin reiniciar.
   const agentName = (name || window.__ORION_AGENT_NAME__ || "ORION").trim();
+  // REQ-037 — se publica para todo el resto de la interfaz. Antes esta función repintaba
+  // tres nodos y nada más, así que un panel que quisiera nombrar al agente tenía que
+  // escribirlo a mano — y quedaba con el nombre viejo al renombrarlo.
+  fijarNombreDelAgente(agentName);
   const upper = agentName.toUpperCase();
 
   document.getElementById("agent-name-label").textContent = upper;

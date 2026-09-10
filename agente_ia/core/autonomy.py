@@ -240,8 +240,8 @@ def preparar_rama() -> "tuple[str, str]":
     codigo, _ = _git("rev-parse", "--is-inside-work-tree")
     if codigo != 0:
         raise RuntimeError(
-            "La carpeta de O.R.I.O.N. no es un repositorio git, así que no puedo garantizar "
-            "que sus cambios sean reversibles. Sin eso no enciendo el nivel total."
+            "Mi propia carpeta no es un repositorio git, así que no puedo garantizar que mis "
+            "cambios sean reversibles. Sin eso no enciendo el nivel total."
         )
 
     codigo, anterior = _git("rev-parse", "--abbrev-ref", "HEAD")

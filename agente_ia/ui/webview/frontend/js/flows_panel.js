@@ -16,6 +16,7 @@ import {
   requestFlows, runFlow, cancelFlow, requestDeleteFlow, removeFlowStep,
 } from "./bridge_client.js";
 import { icon } from "./icons.js";
+import { nombreDelAgente } from "./agente.js";
 
 let _panelOpen = false;
 
@@ -88,7 +89,9 @@ export function renderFlows(flujos) {
   if (!flujos || flujos.length === 0) {
     const empty = document.createElement("div");
     empty.className = "panel-empty";
-    empty.textContent = "Todavía no tenés ningún flujo. Pedíselo a O.R.I.O.N. hablando.";
+    // REQ-037 — el nombre lo eligió el usuario: acá decía "O.R.I.O.N." escrito a mano, y
+    // quien renombró a su agente leía un nombre que nunca puso.
+    empty.textContent = `Todavía no tenés ningún flujo. Pedíselo a ${nombreDelAgente()} hablando.`;
     list.appendChild(empty);
     return;
   }

@@ -44,7 +44,9 @@ const PROFILE_FIELDS = [
     key: "agent_name",
     label: "Nombre del agente",
     hint: "Cómo se llama tu asistente. Aparece en la ventana y en la bandeja del sistema.",
-    placeholder: "O.R.I.O.N",
+    // REQ-037 — sin nombre de ejemplo: sugerir "O.R.I.O.N" en el campo donde el usuario
+    // elige cómo llamarlo es empujarlo a un nombre que no es suyo.
+    placeholder: "Cómo querés llamarlo",
   },
   {
     key: "agent_pronunciation",
@@ -749,7 +751,7 @@ const NIVELES_AUTONOMIA = [
   {
     id: "total",
     label: "Total: además puede mejorar su propio código",
-    detalle: "Lo anterior, y además puede modificar el código de O.R.I.O.N. Pide el PIN maestro "
+    detalle: "Lo anterior, y además puede modificar su propio código. Pide el PIN maestro "
            + "y trabaja sobre una rama de git aparte, para que puedas ver el diff y volver atrás.",
   },
 ];
