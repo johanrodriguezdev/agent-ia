@@ -119,7 +119,11 @@ def test_ningun_canal_remoto_hereda_la_autonomia(canal):
 
 
 @pytest.mark.parametrize("accion", ["shutdown", "delete_task", "pc_type", "terminal_run_command",
-                                    "http_request", "workspace_add_folder"])
+                                    "http_request", "workspace_add_folder",
+                                    # REQ-035: borrar y mover se deshacen con git SOLO si el
+                                    # archivo estaba versionado, y eso no lo sabe nadie a las
+                                    # 3 de la mañana. Se confirman siempre.
+                                    "file_delete", "file_move"])
 def test_las_amarillas_que_no_son_de_trabajo_siguen_preguntando(accion):
     """"Trabajar sin preguntar" es sobre CÓDIGO. Apagar el equipo, mandar un mensaje o
     habilitar otra carpeta no son parte de lo que se autorizó."""

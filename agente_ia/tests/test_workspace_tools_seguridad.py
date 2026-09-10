@@ -63,9 +63,23 @@ NIVELES_REQ034 = {
     "code_search": RiskLevel.GREEN,
 }
 
+#: REQ-035 — borrar y mover. Amarillas, y fuera de la lista blanca del modo autonomia.
+NIVELES_REQ035 = {
+    "file_delete": RiskLevel.YELLOW,
+    "file_move": RiskLevel.YELLOW,
+}
+
+#: REQ-036 — procesos en segundo plano. Solo arrancar uno es amarillo.
+NIVELES_REQ036 = {
+    "project_start": RiskLevel.YELLOW,
+    "project_output": RiskLevel.GREEN,
+    "project_stop": RiskLevel.GREEN,
+}
+
 #: Las 10 juntas. Las pruebas de canal recorren todas; las que fijan el alcance de REQ-029
 #: (el modo "codigo") siguen usando solo las 8 de v1.
-TODAS = {**NIVELES_ESPERADOS, **NIVELES_REQ030, **NIVELES_REQ032, **NIVELES_REQ034}
+TODAS = {**NIVELES_ESPERADOS, **NIVELES_REQ030, **NIVELES_REQ032, **NIVELES_REQ034,
+         **NIVELES_REQ035, **NIVELES_REQ036}
 
 TODOS_LOS_CANALES = [
     ChannelType.DESKTOP, ChannelType.TELEGRAM, ChannelType.DISCORD, ChannelType.VOICE,

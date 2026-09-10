@@ -602,3 +602,90 @@ def test_el_arbol_no_se_va_por_un_enlace_que_sale_de_la_raiz(tmp_path, repo, rai
     salida = wf.arbol(profundidad=5, raices=raices)
 
     assert "secreto.txt" not in salida
+
+
+# ───────── REQ-035: borrar y mover, la parte del refactor que faltaba ─────────
+
+def test_borrar_un_archivo_de_la_raiz(repo, raices):
+    objetivo = os.path.join(repo, "sobrante.txt")
+    with open(objetivo, "w", encoding="utf-8") as f:
+        f.write("ya no se usa")
+
+    salida = wf.borrar("sobrante.txt", raices=raices)
+
+    assert not os.path.exists(objetivo)
+    assert "Borré" in salida
+
+
+def test_no_borra_carpetas_enteras(repo, raices):
+    """Una carpeta entera es un riesgo de otra magnitud: no entra por esta vía."""
+    carpeta = os.path.join(repo, "src")
+
+    salida = wf.borrar("src", raices=raices)
+
+    assert os.path.isdir(carpeta), "la carpeta tiene que seguir ahí"
+    assert "carpeta" in salida
+
+
+def test_borrar_algo_que_no_existe_lo_dice_sin_reventar(repo, raices):
+    assert "no existe" in wf.borrar("fantasma.txt", raices=raices)
+
+
+def test_no_borra_fuera_de_las_carpetas_habilitadas(tmp_path, repo, raices):
+    afuera = tmp_path / "privado_borrado.txt"
+    afuera.write_text("no me toques", encoding="utf-8")
+
+    with pytest.raises(RutaFueraDeRaiz):
+        wf.borrar(str(afuera), raices=raices)
+
+    assert afuera.exists(), "no puede haberlo borrado"
+
+
+def test_mover_renombra_un_archivo(repo, raices):
+    with open(os.path.join(repo, "viejo.py"), "w", encoding="utf-8") as f:
+        f.write("x = 1\n")
+
+    wf.mover("viejo.py", "nuevo.py", raices=raices)
+
+    assert not os.path.exists(os.path.join(repo, "viejo.py"))
+    assert os.path.exists(os.path.join(repo, "nuevo.py"))
+
+
+def test_mover_crea_la_carpeta_de_destino_si_falta(repo, raices):
+    with open(os.path.join(repo, "suelto.py"), "w", encoding="utf-8") as f:
+        f.write("x = 1\n")
+
+    wf.mover("suelto.py", "paquete/modulos/suelto.py", raices=raices)
+
+    assert os.path.exists(os.path.join(repo, "paquete", "modulos", "suelto.py"))
+
+
+def test_mover_no_pisa_un_archivo_que_ya_existe(repo, raices):
+    for nombre, contenido in (("uno.py", "soy uno"), ("dos.py", "soy dos")):
+        with open(os.path.join(repo, nombre), "w", encoding="utf-8") as f:
+            f.write(contenido)
+
+    salida = wf.mover("uno.py", "dos.py", raices=raices)
+
+    assert "ya existe" in salida
+    with open(os.path.join(repo, "dos.py"), encoding="utf-8") as f:
+        assert f.read() == "soy dos", "no se puede haber perdido el destino"
+
+
+def test_no_mueve_un_archivo_fuera_de_las_carpetas_habilitadas(tmp_path, repo, raices):
+    """Validar solo el origen dejaría sacar un archivo de donde estaba protegido."""
+    with open(os.path.join(repo, "secreto_interno.py"), "w", encoding="utf-8") as f:
+        f.write("datos")
+
+    with pytest.raises(RutaFueraDeRaiz):
+        wf.mover("secreto_interno.py", str(tmp_path / "afuera.py"), raices=raices)
+
+    assert os.path.exists(os.path.join(repo, "secreto_interno.py"))
+
+
+def test_no_trae_un_archivo_de_afuera_hacia_adentro(tmp_path, repo, raices):
+    afuera = tmp_path / "ajeno.py"
+    afuera.write_text("de otro lado", encoding="utf-8")
+
+    with pytest.raises(RutaFueraDeRaiz):
+        wf.mover(str(afuera), "adoptado.py", raices=raices)

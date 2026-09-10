@@ -1629,8 +1629,12 @@ def _http_request_invoke(params: dict) -> str:
         cuerpo = str(cuerpo)
 
     try:
+        # `permitir_interno=True`: esta herramienta es amarilla, solo de escritorio, y
+        # confirma cada llamada mostrando la URL. Sin esto, el agente no puede probar el
+        # servidor de desarrollo que el mismo acaba de levantar con project_start, que es
+        # justo la mitad de un flujo de desarrollo. `web_read` sigue con el bloqueo absoluto.
         respuesta = pedir(url, metodo=str(params.get("method") or "GET"),
-                          headers=cabeceras, cuerpo=cuerpo)
+                          headers=cabeceras, cuerpo=cuerpo, permitir_interno=True)
     except DestinoBloqueado as e:
         logger.warning(f"'http_request' rechazada: {e}")
         return str(e)
@@ -1841,11 +1845,31 @@ def _code_search_invoke(params: dict) -> str:
     cantidad = _entero(params, "top_k")
 
     def _correr() -> str:
+        from core.code_index import indexar
+
         carpeta = carpeta_de_trabajo(str(params.get("path") or ""))
+
+        # REQ-035 — el índice se mantiene solo. Comprobar que nada cambió cuesta centésimas
+        # (medido: 0.07s para 47 archivos), así que pedirle al usuario que se acuerde de
+        # reindexar era trasladarle un trabajo que la máquina hace sola. Con un tope corto:
+        # si el repositorio es enorme y falta mucho, se busca con lo que hay y se avisa.
+        aviso = ""
+        try:
+            refresco = indexar(carpeta, tope_segundos=20)
+            if refresco.archivos_nuevos or refresco.archivos_actualizados or refresco.archivos_borrados:
+                aviso = (f"\n\n[Actualicé el índice antes de buscar: "
+                         f"{refresco.archivos_nuevos} nuevos, "
+                         f"{refresco.archivos_actualizados} cambiados, "
+                         f"{refresco.archivos_borrados} borrados.]")
+            if not refresco.completo:
+                aviso += (f"\n\n[Faltan {refresco.pendientes} archivos por indexar: corré "
+                          f"code_index para terminar y volvé a buscar.]")
+        except Exception as e:
+            logger.warning(f"no se pudo refrescar el índice antes de buscar: {e}")
+
         resultados = buscar_semantico(consulta, carpeta, top_k=8 if cantidad is None else cantidad)
         if not resultados:
-            return (f"No encontré nada parecido a «{consulta}». Si el proyecto no está "
-                    f"indexado todavía, corré code_index primero.")
+            return (f"No encontré nada parecido a «{consulta}»." + aviso)
 
         lineas = [f"Lo más parecido a «{consulta}»:"]
         for r in resultados:
@@ -1855,7 +1879,7 @@ def _code_search_invoke(params: dict) -> str:
             if len(fragmento) > 400:
                 fragmento = fragmento[:400] + " ..."
             lineas.append(f"\n{donde}{simbolo} (parecido {r.puntaje:.2f})\n{fragmento}")
-        return "\n".join(lineas)
+        return "\n".join(lineas) + aviso
 
     return _con_manejo("code_search", _correr)
 
@@ -1889,4 +1913,192 @@ register_tool(ToolSpec(
     },
     risk_level=RiskLevel.GREEN,
     invoke=_code_search_invoke,
+))
+
+
+# ─────────────────────────────────────────────
+#  REQ-035 — borrar y mover, la parte del refactor que faltaba
+# ─────────────────────────────────────────────
+
+def _file_delete_invoke(params: dict) -> str:
+    from core.workspace_files import borrar
+
+    ruta = str(params.get("path") or "")
+    if not ruta:
+        return f"Necesito qué archivo borrar{vocative()}."
+    return _con_manejo("file_delete", lambda: borrar(ruta))
+
+
+register_tool(ToolSpec(
+    name="file_delete",
+    description=(
+        "Borra un archivo de un repositorio habilitado. Usala cuando un archivo quedó sin "
+        "uso después de un refactor. Solo archivos sueltos, no carpetas enteras."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Archivo a borrar."},
+        },
+        "required": ["path"],
+    },
+    risk_level=RiskLevel.YELLOW,
+    invoke=_file_delete_invoke,
+))
+
+
+def _file_move_invoke(params: dict) -> str:
+    from core.workspace_files import mover
+
+    origen = str(params.get("origen") or params.get("from") or "")
+    destino = str(params.get("destino") or params.get("to") or "")
+    if not origen or not destino:
+        return f"Necesito el archivo de origen y a dónde moverlo{vocative()}."
+    return _con_manejo("file_move", lambda: mover(origen, destino))
+
+
+register_tool(ToolSpec(
+    name="file_move",
+    description=(
+        "Mueve o renombra un archivo dentro de un repositorio habilitado. Los dos extremos "
+        "tienen que estar en carpetas habilitadas. Usala para renombrar un módulo o "
+        "reorganizar carpetas en un refactor."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "origen": {"type": "string", "description": "Archivo que se mueve."},
+            "destino": {"type": "string", "description": "Ruta nueva, con el nombre nuevo."},
+        },
+        "required": ["origen", "destino"],
+    },
+    risk_level=RiskLevel.YELLOW,
+    invoke=_file_move_invoke,
+))
+
+
+# ─────────────────────────────────────────────
+#  REQ-036 — procesos que no terminan: levantar, mirar y bajar
+# ─────────────────────────────────────────────
+
+def _project_start_invoke(params: dict) -> str:
+    from core.workspace_procesos import describir, iniciar
+
+    comando = str(params.get("command") or "").strip()
+    if not comando:
+        return f"Necesito qué programa querés dejar corriendo{vocative()}."
+
+    def _correr() -> str:
+        import time
+
+        vivo = iniciar(comando, str(params.get("path") or ""))
+        # Un segundo de gracia: la mayoría de los servidores fallan al arrancar (puerto
+        # ocupado, import roto) y ese error aparece enseguida. Devolverlo en el acto ahorra
+        # una vuelta entera de "arrancó bien" seguida de "no, estaba muerto".
+        time.sleep(1.0)
+        return describir(vivo, ultimas=20)
+
+    return _con_manejo("project_start", _correr)
+
+
+register_tool(ToolSpec(
+    name="project_start",
+    description=(
+        "Deja un programa corriendo EN SEGUNDO PLANO dentro de un proyecto habilitado: un "
+        "servidor de desarrollo, un watcher, una cola. A diferencia de project_run, no espera "
+        "a que termine — te devuelve un identificador para mirar su salida con project_output "
+        "y bajarlo con project_stop. Usala cuando el comando no termina solo."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "command": {"type": "string", "description": "El comando a dejar corriendo."},
+            "path": {
+                "type": "string",
+                "description": "Carpeta del proyecto. Opcional si hay una sola habilitada.",
+            },
+        },
+        "required": ["command"],
+    },
+    risk_level=RiskLevel.YELLOW,
+    invoke=_project_start_invoke,
+))
+
+
+def _project_output_invoke(params: dict) -> str:
+    from core.workspace_procesos import describir, listar, obtener
+
+    identificador = str(params.get("id") or "").strip()
+    lineas = _entero(params, "lineas")
+
+    def _correr() -> str:
+        if not identificador:
+            vivos = listar()
+            if not vivos:
+                return "No hay ningún proceso corriendo en segundo plano."
+            return "\n\n".join(describir(v, ultimas=10) for v in vivos)
+
+        vivo = obtener(identificador)
+        if vivo is None:
+            return f"No tengo ningún proceso «{identificador}»."
+        return describir(vivo, ultimas=40 if lineas is None else lineas)
+
+    return _con_manejo("project_output", _correr)
+
+
+register_tool(ToolSpec(
+    name="project_output",
+    description=(
+        "Muestra la salida de un programa que dejaste corriendo con project_start, y si "
+        "está vivo o ya terminó. Sin identificador, lista todos los que hay corriendo. Usala "
+        "para leer el log del servidor después de pegarle."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "id": {
+                "type": "string",
+                "description": "Identificador que devolvió project_start. Sin él, lista todos.",
+            },
+            "lineas": {
+                "type": "integer",
+                "description": "Cuántas líneas del final mostrar (por defecto 40).",
+            },
+        },
+    },
+    # GREEN: es la salida de un proceso que el propio agente levantó con un comando ya
+    # confirmado. `project_run` devuelve su salida sin pedir un permiso aparte; partir el
+    # arranque de la lectura no puede agregar una confirmación que la versión síncrona no
+    # tiene.
+    risk_level=RiskLevel.GREEN,
+    invoke=_project_output_invoke,
+))
+
+
+def _project_stop_invoke(params: dict) -> str:
+    from core.workspace_procesos import detener
+
+    identificador = str(params.get("id") or "").strip()
+    if not identificador:
+        return f"Necesito el identificador del proceso que querés detener{vocative()}."
+    return _con_manejo("project_stop", lambda: detener(identificador))
+
+
+register_tool(ToolSpec(
+    name="project_stop",
+    description=(
+        "Detiene un programa que dejaste corriendo con project_start. Bajá el servidor "
+        "cuando terminaste: no queda corriendo solo porque sí."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "id": {"type": "string", "description": "Identificador del proceso."},
+        },
+        "required": ["id"],
+    },
+    # GREEN: solo puede detener procesos que el propio agente levantó, y detenerlos es lo
+    # ordenado. Pedir confirmación para limpiar sería premiar dejar basura corriendo.
+    risk_level=RiskLevel.GREEN,
+    invoke=_project_stop_invoke,
 ))

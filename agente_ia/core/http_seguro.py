@@ -92,11 +92,19 @@ def _direcciones_de(host: str, puerto: int) -> list:
     return [entrada[4][0] for entrada in info]
 
 
-def validar_url(url: str) -> str:
+def validar_url(url: str, permitir_interno: bool = False) -> str:
     """Return la URL si se puede pedir. Levanta `DestinoBloqueado` con el motivo si no.
 
     Se rechaza si **cualquiera** de las IPs a las que resuelve el nombre es interna: un
     dominio puede devolver varias, y alcanzar con una para que la conexión termine adentro.
+
+    `permitir_interno` existe para un caso concreto y acotado (REQ-036): probar el servidor
+    de desarrollo que el propio agente acaba de levantar. Lo usa **solo** `http_request`,
+    que es 🟡 amarilla, solo de escritorio, y confirma **cada llamada mostrando la URL** —
+    o sea que un humano ve `http://localhost:3000/api` antes de que ocurra. `web_read`, que
+    es verde y alcanzable desde Telegram, nunca lo activa: ahí el bloqueo es absoluto,
+    porque es el camino por el que un mensaje remoto o una inyección podrían pedir una
+    dirección interna sin que nadie lo vea.
     """
     texto = str(url or "").strip()
     if not texto:
@@ -119,6 +127,12 @@ def validar_url(url: str) -> str:
         except ValueError:
             logger.warning(f"dirección irreconocible al resolver '{host}': {direccion!r}")
             raise DestinoBloqueado(f"No pude verificar a dónde apunta «{host}».")
+        if _es_interna(ip) and permitir_interno:
+            logger.warning(
+                f"Destino interno PERMITIDO en una llamada confirmada por el humano: "
+                f"'{host}' -> {ip}. Solo `http_request` puede pedir esto."
+            )
+            continue
         if _es_interna(ip):
             logger.warning(
                 f"Destino interno bloqueado: '{host}' resuelve a {ip}. Pedir direcciones de "
@@ -139,6 +153,7 @@ def pedir(
     cuerpo: Optional[Any] = None,
     timeout: int = TIMEOUT_SEGUNDOS,
     max_bytes: int = MAX_BYTES,
+    permitir_interno: bool = False,
 ) -> Respuesta:
     """Hace la petición validando el destino en cada redirección. Return `Respuesta`.
 
@@ -156,7 +171,7 @@ def pedir(
     cabeceras = {"User-Agent": "Mozilla/5.0 (compatible; asistente personal)"}
     cabeceras.update({str(k): str(v) for k, v in (headers or {}).items()})
 
-    actual = validar_url(url)
+    actual = validar_url(url, permitir_interno)
     for salto in range(MAX_REDIRECCIONES + 1):
         # `allow_redirects=False` es el punto: cada salto vuelve a pasar por `validar_url()`.
         respuesta = requests.request(
@@ -168,7 +183,7 @@ def pedir(
             respuesta.close()
             if not destino:
                 raise DestinoBloqueado("El servidor redirigió a ninguna parte.")
-            actual = validar_url(requests.compat.urljoin(actual, destino))
+            actual = validar_url(requests.compat.urljoin(actual, destino), permitir_interno)
             logger.debug(f"redirección {salto + 1} → {actual}")
             continue
 
