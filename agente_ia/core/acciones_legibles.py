@@ -46,6 +46,12 @@ _DESCRIPCIONES: Dict[str, str] = {
     "pc_scroll": "desplace la pantalla",
     "pc_enable_tree": "lea lo que hay en pantalla",
 
+    # ── Navegador (REQ-038) ──
+    # No dice "haga clic en la página" a secas: lo que se autoriza es actuar DENTRO de la
+    # sesión del usuario, con sus cuentas abiertas. El objetivo concreto lo agrega
+    # `format_details` a partir del parámetro `objetivo`.
+    "browser_act": "haga clic o escriba dentro de la página abierta",
+
     # ── Terminal ──
     "terminal_open": "abra una terminal",
     "terminal_run_command": "ejecute un comando en la terminal",

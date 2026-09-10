@@ -204,6 +204,10 @@ _DETAILS_ALLOWED_KEYS = (
     # Autorizar un `file_write` sin ver la ruta sería autorizar a ciegas, exactamente el
     # mismo motivo por el que `command` está en esta lista.
     "ruta",
+    # REQ-038 — sobre qué se va a pulsar dentro de una página, y qué se va a escribir ahí.
+    # Un "sí" a «hacer clic en la página» sin ver que el objetivo es «Eliminar cuenta» no
+    # es una autorización, y el texto tecleado puede terminar en un campo público.
+    "objetivo", "texto",
 )
 
 # Un `task`/`raw_text` puede traer código largo: se trunca para que el prompt siga siendo
