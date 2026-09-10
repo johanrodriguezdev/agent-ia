@@ -244,8 +244,21 @@ class MainWindow(QMainWindow):
         # el panel se terminan con él. Una shell viva sin ventana que la muestre es
         # exactamente lo que el gate de `terminal_open` intenta evitar.
         QApplication.instance().aboutToQuit.connect(self._close_terminal)
+        # REQ-036 — y los procesos en segundo plano que haya levantado el agente. Un
+        # servidor huerfano ocupando el puerto 3000 despues de cerrar el asistente es
+        # exactamente lo que nadie quiere estar depurando.
+        QApplication.instance().aboutToQuit.connect(self._cerrar_procesos)
         QApplication.instance().aboutToQuit.connect(self._guardar_geometria)
         QApplication.instance().aboutToQuit.connect(clear_notifier)
+
+    def _cerrar_procesos(self) -> None:
+        """Best-effort: nunca bloquea el quit()."""
+        try:
+            from core.workspace_procesos import cerrar_todos
+
+            cerrar_todos()
+        except Exception as e:
+            logger.warning(f"no se pudieron cerrar los procesos en segundo plano: {e}")
 
     def _close_terminal(self) -> None:
         """Best-effort: nunca bloquea el quit()."""

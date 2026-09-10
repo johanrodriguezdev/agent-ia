@@ -71,6 +71,13 @@ _DESCRIPCIONES: Dict[str, str] = {
     # REQ-032 — la frase nombra la carpeta a proposito: lo que hay que entender al
     # confirmar es que algo se va a EJECUTAR en tu proyecto, no que se abre una app.
     "project_run": "ejecute un comando dentro de la carpeta del proyecto",
+    # REQ-035 — las dos del refactor. "borre" y "mueva" en castellano llano: lo que hay que
+    # entender al confirmar es que un archivo va a dejar de estar donde estaba.
+    "file_delete": "borre un archivo del repositorio",
+    "file_move": "mueva o renombre un archivo del repositorio",
+    # REQ-036 — la unica amarilla de las tres: leer la salida y detener lo que el propio
+    # agente levanto no necesitan permiso aparte.
+    "project_start": "deje corriendo un programa del proyecto en segundo plano",
 
     # ── Código y habilidades ──
     "EXECUTE_CODE": "ejecute un programa que acabo de escribir",

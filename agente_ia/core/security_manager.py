@@ -161,6 +161,13 @@ DESKTOP_ONLY_ACTIONS: set[str] = {
     # lectura masiva del disco, asi que vive donde viven las otras: solo escritorio.
     "code_index",
     "code_search",
+    # REQ-035 — borrar y mover archivos del proyecto.
+    "file_delete",
+    "file_move",
+    # REQ-036 — procesos en segundo plano: levantar un servidor, mirarlo y bajarlo.
+    "project_start",
+    "project_output",
+    "project_stop",
 }
 
 _CHANNEL_STR_MAP: Dict[str, ChannelType] = {

@@ -263,9 +263,37 @@ def test_http_request_manda_un_objeto_como_json(monkeypatch):
     assert capturado["headers"].get("Content-Type") == "application/json"
 
 
-def test_http_request_devuelve_el_motivo_en_vez_de_reventar_si_el_destino_es_interno():
-    """Un destino bloqueado tiene que volver como frase para el modelo, no como excepción
-    que corte el turno."""
-    salida = _spec_http().invoke({"url": "http://127.0.0.1:8080/interno"})
+def test_http_request_si_puede_pegarle_al_servidor_local(monkeypatch):
+    """REQ-036 — cambio deliberado sobre REQ-031: `http_request` SÍ alcanza direcciones
+    internas, porque es amarilla, solo de escritorio, y confirma cada llamada mostrando la
+    URL. Sin esto, el agente no puede probar el servidor de desarrollo que él mismo acaba de
+    levantar con `project_start`, que es la mitad de un flujo de desarrollo."""
+    llamadas = []
 
-    assert "interna" in salida or "propia máquina" in salida
+    def _request(metodo, url, **kwargs):
+        llamadas.append(url)
+        return _RespuestaFalsa(contenido=b"hola desde el server")
+
+    monkeypatch.setattr("requests.request", _request)
+
+    salida = _spec_http().invoke({"url": "http://127.0.0.1:8080/api/salud"})
+
+    assert llamadas == ["http://127.0.0.1:8080/api/salud"]
+    assert "hola desde el server" in salida
+
+
+def test_web_read_sigue_sin_poder_leer_direcciones_internas():
+    """La contracara, y es la que importa: el camino VERDE —alcanzable desde Telegram y por
+    una inyección en una página— mantiene el bloqueo absoluto."""
+    from os_integration.web_search import leer_pagina
+
+    salida = leer_pagina("http://127.0.0.1:8080/panel-interno")
+
+    assert "propia máquina" in salida or "interna" in salida
+
+
+def test_un_destino_que_no_responde_vuelve_como_frase_y_no_como_excepcion():
+    """Un fallo de conexión no puede cortar el turno del modelo."""
+    salida = _spec_http().invoke({"url": "http://127.0.0.1:9/no-hay-nadie"})
+
+    assert "No pude conectarme" in salida

@@ -720,3 +720,74 @@ def _recorrer_arbol(carpeta: str, sangria: str, niveles: int, lineas: List[str],
         else:
             lineas.append(f"{sangria}  {entrada.name}")
     return False
+
+
+# ─────────────────────────────────────────────
+#  REQ-035 — borrar y mover: la parte del refactor que faltaba
+# ─────────────────────────────────────────────
+#
+#  Renombrar un módulo, partir un archivo en dos, sacar el que quedó sin uso: eso es
+#  refactorizar, y sin estas dos el agente podía escribir código nuevo pero no reorganizar
+#  el que ya estaba. Las dos son 🟡 y —a diferencia de escribir y editar— **quedan fuera de
+#  la lista blanca del modo autonomía**: se pueden deshacer con git solo si el archivo
+#  estaba versionado, y eso no lo sabe nadie a las 3 de la mañana.
+
+def borrar(ruta: str, raices: Optional[List[str]] = None) -> str:
+    """Borra un archivo de una carpeta habilitada. Return qué pasó, en una frase.
+
+    Solo archivos: una carpeta entera es un riesgo de otra magnitud y no entra por acá.
+    """
+    activas = raices_efectivas(raices)
+    real = resolver(ruta, activas)
+
+    if os.path.isdir(real):
+        return (f"«{ruta}» es una carpeta, y no borro carpetas enteras por esta vía: "
+                f"pedímelo archivo por archivo si es lo que querés.")
+    if not os.path.exists(real):
+        return f"«{ruta}» no existe, así que no hay nada que borrar."
+
+    try:
+        os.remove(real)
+    except OSError as e:
+        logger.error(f"no se pudo borrar {real!r}: {e}")
+        return f"No pude borrar «{ruta}»: {e.strerror or 'error del sistema de archivos'}."
+
+    logger.warning(f"Archivo borrado por el agente: {real}")
+    return f"Borré {_relativa(real, activas)}."
+
+
+def mover(origen: str, destino: str, raices: Optional[List[str]] = None) -> str:
+    """Mueve o renombra un archivo. Los DOS extremos tienen que estar habilitados.
+
+    Validar solo el origen dejaría mover un archivo fuera de las carpetas permitidas, que es
+    una forma elegante de sacar algo de donde estaba protegido.
+    """
+    activas = raices_efectivas(raices)
+    real_origen = resolver(origen, activas)
+    real_destino = resolver(destino, activas)
+
+    if not os.path.exists(real_origen):
+        return f"«{origen}» no existe."
+    if os.path.isdir(real_origen):
+        return f"«{origen}» es una carpeta, y por esta vía muevo archivos, no carpetas."
+    if os.path.exists(real_destino):
+        return (f"«{destino}» ya existe. Elegí otro nombre o borralo antes, para que no se "
+                f"pierda algo sin querer.")
+
+    padre = os.path.dirname(real_destino)
+    if padre and not os.path.isdir(padre):
+        resolver(padre, activas)   # el destino tiene que caer dentro igual que el origen
+        try:
+            os.makedirs(padre, exist_ok=True)
+        except OSError as e:
+            logger.error(f"no se pudo crear {padre!r}: {e}")
+            return f"No pude crear la carpeta de destino: {e.strerror or 'error'}."
+
+    try:
+        os.replace(real_origen, real_destino)
+    except OSError as e:
+        logger.error(f"no se pudo mover {real_origen!r} a {real_destino!r}: {e}")
+        return f"No pude mover «{origen}»: {e.strerror or 'error del sistema de archivos'}."
+
+    logger.warning(f"Archivo movido por el agente: {real_origen} -> {real_destino}")
+    return f"Moví {_relativa(real_origen, activas)} a {_relativa(real_destino, activas)}."

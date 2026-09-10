@@ -58,6 +58,12 @@ NIVELES_VALIDOS = (NIVEL_NORMAL, NIVEL_PROYECTOS, NIVEL_TOTAL)
 #: no son parte del trabajo que se autorizó.
 ACCIONES_DE_TRABAJO = frozenset({
     "file_write", "file_edit", "project_run",
+    # REQ-036 — levantar un servidor es la misma clase de accion que correr las pruebas: un
+    # comando dentro de una carpeta habilitada. Sin esto, "levanta el server y corre las
+    # pruebas de integracion" se frenaria en el primer paso justo la noche que no hay nadie.
+    # Borrar y mover archivos NO estan: se deshacen con git solo si el archivo estaba
+    # versionado, y eso no lo sabe nadie a las 3 de la manana.
+    "project_start",
 })
 
 #: Lo único rojo que el nivel total desbloquea. Los otros nueve de REQ-005 siguen bloqueados
