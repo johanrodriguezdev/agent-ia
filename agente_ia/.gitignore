@@ -98,3 +98,13 @@ descargas_correo/
 # Interruptores de escritura de correo (core/email_capabilities.py). Configuracion de
 # seguridad de UNA maquina, decidida por el usuario. No se versiona.
 email_capabilities.json
+
+# Estado local del usuario, nunca del repositorio (REQ-029/030/033).
+# code_workspaces.json    -> rutas ABSOLUTAS de las carpetas de este equipo
+# autonomy_mode.json      -> hasta donde puede actuar el agente en ESTA maquina
+# security_overrides.json -> los niveles de riesgo que subio este usuario (REQ-019)
+# Commitear cualquiera de los tres publicaria la configuracion de una maquina y, peor,
+# se la aplicaria a otra al clonar: los permisos de un equipo no son los de otro.
+code_workspaces.json
+autonomy_mode.json
+security_overrides.json
