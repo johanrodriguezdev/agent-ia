@@ -157,6 +157,10 @@ DESKTOP_ONLY_ACTIONS: set[str] = {
     # impedir, y el arbol es una lectura del disco: los dos, solo delante del computador.
     "project_run",
     "project_tree",
+    # REQ-034 — el indice de codigo: leer un repositorio entero y buscar dentro. Es una
+    # lectura masiva del disco, asi que vive donde viven las otras: solo escritorio.
+    "code_index",
+    "code_search",
 }
 
 _CHANNEL_STR_MAP: Dict[str, ChannelType] = {

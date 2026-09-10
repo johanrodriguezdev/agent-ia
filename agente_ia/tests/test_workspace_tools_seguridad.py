@@ -57,9 +57,15 @@ NIVELES_REQ032 = {
     "project_tree": RiskLevel.GREEN,
 }
 
+#: REQ-034 — el indice semantico de codigo. Las dos son lecturas.
+NIVELES_REQ034 = {
+    "code_index": RiskLevel.GREEN,
+    "code_search": RiskLevel.GREEN,
+}
+
 #: Las 10 juntas. Las pruebas de canal recorren todas; las que fijan el alcance de REQ-029
 #: (el modo "codigo") siguen usando solo las 8 de v1.
-TODAS = {**NIVELES_ESPERADOS, **NIVELES_REQ030, **NIVELES_REQ032}
+TODAS = {**NIVELES_ESPERADOS, **NIVELES_REQ030, **NIVELES_REQ032, **NIVELES_REQ034}
 
 TODOS_LOS_CANALES = [
     ChannelType.DESKTOP, ChannelType.TELEGRAM, ChannelType.DISCORD, ChannelType.VOICE,

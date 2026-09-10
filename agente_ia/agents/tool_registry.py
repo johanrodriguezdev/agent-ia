@@ -1770,3 +1770,123 @@ register_tool(ToolSpec(
     risk_level=RiskLevel.YELLOW,
     invoke=_project_run_invoke,
 ))
+
+
+# ─────────────────────────────────────────────
+#  REQ-034 — entender un repositorio grande sin leerlo entero
+# ─────────────────────────────────────────────
+
+def _code_index_invoke(params: dict) -> str:
+    from core.code_index import estado as estado_indice
+    from core.code_index import indexar
+    from core.workspace_run import carpeta_de_trabajo
+
+    def _correr() -> str:
+        carpeta = carpeta_de_trabajo(str(params.get("path") or ""))
+        resultado = indexar(carpeta)
+        actual = estado_indice(carpeta)
+
+        partes = []
+        if resultado.archivos_nuevos:
+            partes.append(f"{resultado.archivos_nuevos} archivos nuevos")
+        if resultado.archivos_actualizados:
+            partes.append(f"{resultado.archivos_actualizados} actualizados")
+        if resultado.archivos_borrados:
+            partes.append(f"{resultado.archivos_borrados} borrados")
+        if resultado.archivos_sin_cambios:
+            partes.append(f"{resultado.archivos_sin_cambios} sin cambios")
+        detalle = ", ".join(partes) if partes else "no había nada que hacer"
+
+        texto = (f"Índice de «{carpeta}»: {detalle} ({resultado.segundos}s). "
+                 f"En total tengo {actual['archivos']} archivos y {actual['fragmentos']} "
+                 f"fragmentos indexados.")
+        if not resultado.completo:
+            texto += (f" Quedan {resultado.pendientes} archivos por indexar: volvé a "
+                      f"llamarme para seguir donde quedé.")
+        return texto
+
+    return _con_manejo("code_index", _correr)
+
+
+register_tool(ToolSpec(
+    name="code_index",
+    description=(
+        "Construye o actualiza el índice de un repositorio habilitado para poder buscar por "
+        "significado con code_search. Es incremental: la segunda vez solo mira lo que cambió. "
+        "Corré esto ANTES de la primera búsqueda en un proyecto, y de nuevo si hiciste muchos "
+        "cambios. En un repositorio grande puede tardar y avisarte que quedan archivos: si "
+        "pasa, volvé a llamarla."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Carpeta del proyecto. Opcional si hay una sola habilitada.",
+            },
+        },
+    },
+    risk_level=RiskLevel.GREEN,
+    invoke=_code_index_invoke,
+))
+
+
+def _code_search_invoke(params: dict) -> str:
+    from core.code_index import buscar as buscar_semantico
+    from core.workspace_run import carpeta_de_trabajo
+
+    consulta = str(params.get("query") or "").strip()
+    if not consulta:
+        return f"Necesito qué querés buscar{vocative()}."
+    cantidad = _entero(params, "top_k")
+
+    def _correr() -> str:
+        carpeta = carpeta_de_trabajo(str(params.get("path") or ""))
+        resultados = buscar_semantico(consulta, carpeta, top_k=8 if cantidad is None else cantidad)
+        if not resultados:
+            return (f"No encontré nada parecido a «{consulta}». Si el proyecto no está "
+                    f"indexado todavía, corré code_index primero.")
+
+        lineas = [f"Lo más parecido a «{consulta}»:"]
+        for r in resultados:
+            donde = f"{r.ruta}:{r.linea_inicio}-{r.linea_fin}"
+            simbolo = f" [{r.simbolo}]" if r.simbolo else ""
+            fragmento = r.texto.strip()
+            if len(fragmento) > 400:
+                fragmento = fragmento[:400] + " ..."
+            lineas.append(f"\n{donde}{simbolo} (parecido {r.puntaje:.2f})\n{fragmento}")
+        return "\n".join(lineas)
+
+    return _con_manejo("code_search", _correr)
+
+
+register_tool(ToolSpec(
+    name="code_search",
+    description=(
+        "Busca en un repositorio POR SIGNIFICADO, no por texto exacto: sirve para preguntas "
+        "como «dónde está la lógica de facturación» aunque el código diga «billing» y nunca "
+        "la palabra factura. Para buscar una palabra literal —un nombre de función que ya "
+        "sabés— usá file_search, que es exacta y no necesita índice. Requiere haber corrido "
+        "code_index antes."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Qué buscás, en lenguaje natural.",
+            },
+            "path": {
+                "type": "string",
+                "description": "Carpeta del proyecto. Opcional si hay una sola habilitada.",
+            },
+            "top_k": {
+                "type": "integer",
+                "description": "Cuántos resultados devolver (por defecto 8).",
+            },
+        },
+        "required": ["query"],
+    },
+    risk_level=RiskLevel.GREEN,
+    invoke=_code_search_invoke,
+))
