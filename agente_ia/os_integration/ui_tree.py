@@ -20,11 +20,22 @@ la máquina real:
     Chrome              77 elementos   0.12 s
     VS Code              7 elementos   0.02 s   <- casi nada
 
-VS Code, como cualquier aplicación Electron, esconde su interfaz tras una "Chrome Legacy
-Window" y no publica el árbol salvo que se active la accesibilidad. Pero eso no es un
-callejón sin salida: es un interruptor apagado. Encendido —ver `electron_a11y.py`— la misma
-ventana pasa de 7 elementos a 221 en 0.30 s. Por eso, cuando aquí no se ve nada, el mensaje
-no se limita a sugerir la visión: dice que se puede encender y cómo.
+De ahí se concluyó que VS Code, como toda aplicación Electron, escondía su interfaz y no
+publicaba el árbol salvo que se activara la accesibilidad en su configuración
+(`electron_a11y.py`).
+
+**Eso también era el medidor.** Vuelto a medir sobre la misma ventana de VS Code, sin
+ningún ajuste en su configuración —comprobado: `settings.json` no tiene
+`editor.accessibilitySupport`—:
+
+    recorriendo hijo por hijo        7 elementos
+    preguntándole a Windows      2.399 elementos
+
+VS Code publicaba su interfaz entera desde el principio. Lo que no llegaba era el
+recorrido. Es coherente con lo que el propio `electron_a11y.py` anotó al medirse: con el
+ajuste puesto contaba 8 elementos en vez de 7, o sea que el ajuste no cambiaba nada — y aun
+así se siguió recomendando. `pc_enable_tree` se deja porque puede servir en otra aplicación
+o en otra versión, pero ya no se ofrece como la explicación de por qué no se ve algo.
 
 De ahí las dos protecciones que lleva: un tope de tiempo, porque hay aplicaciones que tardan
 segundos en responder, y un tope de elementos, porque una hoja de cálculo grande tiene miles
