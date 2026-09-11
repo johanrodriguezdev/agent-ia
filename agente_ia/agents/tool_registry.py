@@ -2462,3 +2462,57 @@ register_tool(ToolSpec(
     risk_level=RiskLevel.YELLOW,
     invoke=_pc_act_invoke,
 ))
+
+
+def _pc_read_invoke(params: dict) -> str:
+    """Lee el texto DIBUJADO en pantalla con el OCR de Windows: local, sin modelo, sin red."""
+    from os_integration.ocr import disponible, leer_ventana
+
+    if not disponible():
+        return ("Este equipo no tiene el reconocimiento de texto de Windows disponible, así "
+                "que no puedo leer lo que hay dibujado. Usá 'pc_look' para mirar la captura.")
+
+    hwnd = None
+    if not params.get("toda_la_pantalla"):
+        try:
+            import ctypes
+
+            hwnd = ctypes.windll.user32.GetForegroundWindow() or None
+        except Exception as e:
+            logger.debug(f"no se pudo tomar la ventana activa para el OCR: {e}")
+
+    texto = _con_manejo("pc_read", lambda: leer_ventana(hwnd))
+    if not texto or not texto.strip():
+        return ("No reconocí texto en lo que hay en pantalla. Si es una imagen sin letras o "
+                "el texto es muy pequeño, 'pc_look' puede describirla.")
+    tope = 6000
+    if len(texto) > tope:
+        texto = texto[:tope] + "\n\n[...cortado]"
+    return f"Texto leído de la pantalla (por OCR: puede tener errores de lectura):\n\n{texto}"
+
+
+register_tool(ToolSpec(
+    name="pc_read",
+    description=(
+        "Lee el texto que hay DIBUJADO en la ventana activa —o en toda la pantalla— con el "
+        "reconocimiento de texto de Windows. Úsala cuando 'pc_look' o 'browser_text' no "
+        "encuentren controles ni texto: un mapa, un gráfico, un lienzo, un vídeo con "
+        "subtítulos, una imagen con texto, un escritorio remoto, un juego. No necesita "
+        "modelo con visión ni internet. Lo que devuelve es lo que se ve, con posibles "
+        "errores de lectura: no sirve para saber dónde pulsar, sirve para saber qué dice."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "toda_la_pantalla": {
+                "type": "boolean",
+                "description": "True para leer la pantalla completa en vez de la ventana activa.",
+            },
+        },
+    },
+    # GREEN: mira, no toca. Mismo criterio que `pc_look` y `pc_screenshot`. Lo que se lee
+    # ya está en la pantalla del usuario; que no salga de ahí depende de a quién se le
+    # cuente, y eso lo decide el canal como con cualquier lectura.
+    risk_level=RiskLevel.GREEN,
+    invoke=_pc_read_invoke,
+))

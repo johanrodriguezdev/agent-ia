@@ -83,15 +83,23 @@ En secuencia, esas mismas cinco páginas habrían sido 5 vueltas del bucle.
   instrucciones**. Es contenido escrito por terceros y entra al contexto del modelo: está
   fijado por test.
 
-## Lo que NO hace
-- **No detecta que dos fuentes son la misma en idiomas distintos.** La Wikipedia inglesa y
-  la española del mismo artículo pasan como fuentes separadas; la comparación es por
-  palabras y no las comparten.
-- **No juzga la calidad de una fuente.** No sabe si un dominio es un medio serio o un blog.
-  Da el dominio y la fecha para que el modelo —y el usuario— lo valoren.
-- **No lee páginas que exigen sesión** ni las que piden captcha.
-- **No guarda el informe solo.** Si Johan quiere el resultado en un archivo, se escribe con
-  `file_write`, que es 🟡 y confinado a las carpetas de trabajo.
+## Tercera entrega (2026-09-11) — lo que "no hacía", cerrado
+
+Johan pidió cerrar la lista de lo que seguía sin poder. Tres de cuatro se cerraron en código;
+el cuarto (Firefox) exige abrir ventanas en su equipo mientras lo está usando, y eso no.
+
+| Antes | Ahora |
+|---|---|
+| La misma fuente en dos idiomas contaba como dos | Mismo sitio (`wikipedia.org` para `es.` y `en.`) y las mismas cifras —años, montos, porcentajes, que no cambian con el idioma— = una sola. Solo dentro del mismo sitio, a propósito: dos periódicos que publican las mismas cifras sí son dos medios |
+| Una página con sesión era "no pude" | Se detecta el muro (401/403, formulario de acceso con poco texto, redirección a `login`) y se dice el camino: abrirla en el navegador del usuario, donde la sesión ya está, y leerla con `browser_text` |
+| Un PDF escaneado era ilegible | Se dibujan sus páginas (PyMuPDF) y se reconocen con el OCR de Windows |
+
+## Lo que sigue sin hacer
+- **Firefox no está medido.** No está instalado, y medirlo es instalarlo y abrirle ventanas
+  en el equipo de Johan. Se hace cuando él no esté delante.
+- **No resuelve captchas.** Y no lo va a hacer: están para impedir exactamente esto.
+- **No juzga la calidad de una fuente.** Da el dominio y la fecha para que el modelo —y el
+  usuario— lo valoren.
 
 ## Los PDF de la web, que sí se cerraron
 

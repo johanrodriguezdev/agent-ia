@@ -778,8 +778,20 @@ def texto_de_pagina(maximo_caracteres: int = MAX_CARACTERES_DE_TEXTO) -> str:
 
     texto = _limpiar_texto(texto)
     if not texto:
-        return (f"«{titulo}» no publica texto que yo pueda leer. Si es una imagen, un vídeo o "
-                f"un lienzo dibujado, puedo mirarla con una captura.")
+        # Un mapa, un lienzo, un vídeo con subtítulos: no hay árbol, pero hay píxeles. El
+        # OCR de Windows lee lo que está pintado, sin modelo y sin red. Se avisa que viene
+        # de ahí porque puede traer errores de lectura.
+        from os_integration.ocr import leer_ventana
+
+        _al_frente(hwnd)                 # se fotografía lo que se ve: mejor que sea la página
+        pintado = leer_ventana(hwnd)
+        if pintado:
+            if len(pintado) > tope:
+                pintado = pintado[:tope] + "\n\n[...cortado]"
+            return (f"«{titulo}» no publica texto, así que leí lo que hay dibujado en "
+                    f"pantalla (por OCR: puede tener errores de lectura):\n\n{pintado}")
+        return (f"«{titulo}» no publica texto que yo pueda leer, y tampoco hay texto dibujado "
+                f"que reconocer. Puedo mirarla con una captura si querés.")
 
     if len(texto) > tope:
         texto = texto[:tope] + f"\n\n[...cortado; la página sigue más allá de {tope} caracteres]"
