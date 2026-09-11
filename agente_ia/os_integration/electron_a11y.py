@@ -107,6 +107,16 @@ def parece_electron_sin_arbol(elementos: List, titulo: str = "") -> bool:
     Se exigen las dos cosas —el marcador y que haya muy poco— porque el marcador sigue
     presente cuando el árbol SÍ está poblado: con el flag activo VS Code seguía teniendo su
     «Chrome Legacy Window», solo que además tenía otros 220 controles.
+
+    **Y "que haya muy poco" ya casi no pasa** (2026-09-11). Las mediciones de este módulo se
+    hicieron recorriendo el árbol hijo por hijo, y ese recorrido no llegaba al contenido: se
+    quedaba sin profundidad. Preguntándole a Windows de una vez (`ui_tree`), el VS Code de
+    esta máquina publica 2.399 elementos **sin ningún ajuste en su configuración** —
+    comprobado, su `settings.json` no tiene `editor.accessibilitySupport`—. Así que esta
+    función devuelve False para VS Code, que es lo correcto: su árbol nunca estuvo apagado.
+
+    Se deja igual porque puede haber una aplicación Electron que de verdad no publique nada,
+    y entonces el diagnóstico sigue siendo el bueno.
     """
     if len(elementos) >= UMBRAL_ARBOL_VACIO:
         return False

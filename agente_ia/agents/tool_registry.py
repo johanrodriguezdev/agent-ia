@@ -1052,11 +1052,12 @@ def _pc_enable_tree_invoke(params: dict) -> str:
 register_tool(ToolSpec(
     name="pc_enable_tree",
     description=(
-        "Activa permanentemente el árbol de accesibilidad de una aplicación basada en "
-        "Electron (VS Code, Cursor, Windsurf), que por defecto no publica su interfaz. "
-        "Úsala cuando 'pc_find' informe de que la ventana no expone sus controles. Escribe "
-        "una línea en la configuración de la aplicación y requiere reiniciarla una vez; a "
-        "partir de ahí sus botones y campos se localizan con precisión exacta."
+        "Último recurso para una aplicación basada en Electron (VS Code, Cursor, Windsurf) "
+        "que NO publique su interfaz: escribe una línea en su configuración y hay que "
+        "reiniciarla. Úsala solo si 'pc_look' informa de que la ventana no expone sus "
+        "controles — y no la ofrezcas por las dudas: medido en esta máquina, VS Code "
+        "publica su interfaz entera sin ningún ajuste, así que pedirle al usuario que "
+        "cambie su configuración y reinicie el editor suele ser molestarlo para nada."
     ),
     parameters_schema={
         "type": "object",

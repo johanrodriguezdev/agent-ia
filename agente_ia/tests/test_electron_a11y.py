@@ -285,3 +285,29 @@ def test_describir_una_ventana_electron_deriva_al_diagnostico(home, monkeypatch)
     texto = ui_tree.describir_ventana_activa()
 
     assert "pc_enable_tree" in texto
+
+
+def test_vs_code_ya_no_se_diagnostica_como_arbol_apagado():
+    """Medido en esta máquina: VS Code publica 2.399 elementos sin tocar su configuración.
+
+    El "VS Code = 7 elementos" del que salió este módulo era el recorrido a mano, que se
+    quedaba sin profundidad. Con la lectura buena, la ventana tiene de sobra, y decirle al
+    usuario que cambie su configuración y reinicie el editor sería molestarlo para nada.
+    """
+    from os_integration.electron_a11y import parece_electron_sin_arbol
+    from os_integration.ui_tree import Elemento
+
+    muchos = [Elemento(nombre=f"Control {i}", tipo="ButtonControl", x=i, y=i)
+              for i in range(263)]
+
+    assert parece_electron_sin_arbol(muchos, "archivo.py - Visual Studio Code") is False
+
+
+def test_una_ventana_electron_de_verdad_muda_si_se_diagnostica():
+    """El diagnóstico sigue sirviendo donde corresponde: una ventana que no publica nada."""
+    from os_integration.electron_a11y import parece_electron_sin_arbol
+    from os_integration.ui_tree import Elemento
+
+    casi_nada = [Elemento(nombre="Chrome Legacy Window", tipo="PaneControl", x=1, y=1)]
+
+    assert parece_electron_sin_arbol(casi_nada, "algo - Visual Studio Code") is True
