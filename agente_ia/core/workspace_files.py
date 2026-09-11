@@ -150,6 +150,23 @@ def _autonomia_total() -> bool:
         return False
 
 
+def _registrar(accion: str, ruta: str) -> None:
+    """Deja el cambio en el historial si el modo autonomía está encendido (REQ-033).
+
+    Se llama desde acá y no desde cada herramienta porque este módulo es el único sitio
+    donde una escritura ocurre de verdad: enganchado acá, ninguna vía nueva de escritura
+    puede olvidarse de dejar rastro.
+
+    Nunca levanta: que git falle no puede tumbar una escritura que ya se hizo bien.
+    """
+    try:
+        from core.autonomy import registrar_cambio
+
+        registrar_cambio(accion, ruta)
+    except Exception as e:
+        logger.warning(f"no se pudo registrar «{accion}» en el historial: {e}")
+
+
 def _confinado(ruta: str, raices: List[str]) -> bool:
     """Return True si `ruta` sigue cayendo dentro de alguna raíz, resolviéndola antes.
 
@@ -593,6 +610,7 @@ def escribir(ruta: str, contenido: str, raices: Optional[List[str]] = None) -> s
 
     verbo = "Reescribí" if existia else "Creé"
     logger.info(f"{verbo} {real!r} ({len(texto)} caracteres)")
+    _registrar("file_write", real)
     return (
         f"{verbo} {_relativa(real, activas)} ({len(texto)} caracteres, "
         f"{len(texto.splitlines())} líneas)."
@@ -647,6 +665,7 @@ def editar(ruta: str, buscar_texto: str, reemplazar_texto: str,
         return f"No pude guardar «{ruta}»: {e.strerror or 'error del sistema de archivos'}."
 
     logger.info(f"Edité {real!r}: 1 reemplazo")
+    _registrar("file_edit", real)
     return f"Edité {_relativa(real, activas)}: reemplacé la única coincidencia."
 
 
@@ -752,6 +771,7 @@ def borrar(ruta: str, raices: Optional[List[str]] = None) -> str:
         return f"No pude borrar «{ruta}»: {e.strerror or 'error del sistema de archivos'}."
 
     logger.warning(f"Archivo borrado por el agente: {real}")
+    _registrar("file_delete", real)
     return f"Borré {_relativa(real, activas)}."
 
 
@@ -789,4 +809,8 @@ def mover(origen: str, destino: str, raices: Optional[List[str]] = None) -> str:
         return f"No pude mover «{origen}»: {e.strerror or 'error del sistema de archivos'}."
 
     logger.warning(f"Archivo movido por el agente: {real_origen} -> {real_destino}")
+    # Los dos extremos: para git esto es un borrado y un alta, y confirmar solo uno dejaría
+    # el historial con un archivo duplicado o con uno que desapareció sin explicación.
+    _registrar("file_move", real_origen)
+    _registrar("file_move", real_destino)
     return f"Moví {_relativa(real_origen, activas)} a {_relativa(real_destino, activas)}."
