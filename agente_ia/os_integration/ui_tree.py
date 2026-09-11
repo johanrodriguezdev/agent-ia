@@ -123,6 +123,113 @@ def _recorrer(control, elementos: List[Elemento], ventana: str, limite_tiempo: f
         _recorrer(hijo, elementos, ventana, limite_tiempo, profundidad + 1)
 
 
+#: `TreeScope_Descendants` de UI Automation: una constante del sistema, no un número
+#: elegido acá.
+_TREE_DESCENDANTS = 4
+
+#: Tope por tipo de control al preguntar de una vez. Una hoja de cálculo tiene miles de
+#: celdas y una página web cientos de enlaces; pasarlos todos no ayuda a decidir.
+_MAX_POR_TIPO = 60
+
+
+def cliente_uia():
+    """Return el cliente `IUIAutomation`, o None si esta versión de la librería no lo expone.
+
+    Es API privada de `uiautomation` (`_AutomationClient`). Si una versión futura la mueve,
+    esto devuelve None y todo sigue funcionando por el recorrido a mano — más ciego, pero
+    sin romperse.
+    """
+    try:
+        from uiautomation.uiautomation import _AutomationClient
+
+        return _AutomationClient.instance().IUIAutomation
+    except Exception as e:
+        logger.warning(f"UI Automation no expone el cliente nativo: {e}")
+        return None
+
+
+def _preguntar_de_una_vez(ventana, titulo: str) -> List[Elemento]:
+    """Return los controles de la ventana pidiéndoselos a Windows en una sola consulta.
+
+    **Por qué existe.** El recorrido a mano (`_recorrer`) baja hijo por hijo y se detiene en
+    `MAX_PROFUNDIDAD`. Eso alcanza para un diálogo, y no alcanza para nada más: medido sobre
+    una ventana de Chrome con una página cargada, el recorrido devolvía **44 elementos de
+    3.467** —el 1,3 % de la ventana— porque el contenido cuelga más abajo de doce niveles.
+    No se cortaba por tiempo: se quedaba sin profundidad, que es peor, porque no había
+    ningún aviso de que faltaba algo.
+
+    `FindAll` no tiene ese límite: busca en todo el subárbol, dentro de Windows, y de paso
+    trae los nombres y las posiciones en la misma llamada en vez de un viaje por propiedad.
+    """
+    cliente = cliente_uia()
+    if cliente is None:
+        return []
+
+    import uiautomation as auto
+
+    # Todo el armado va dentro del `try`, no solo la consulta: cualquier cosa que no sea
+    # como se espera —una versión de la librería que renombre algo, una ventana que no
+    # responda— tiene que caer al recorrido a mano, no reventar la lectura de la pantalla.
+    try:
+        tipos = {}
+        condiciones = []
+        for nombre_tipo in list(TIPOS_INTERACTUABLES) + ["TextControl"]:
+            id_tipo = getattr(auto.ControlType, nombre_tipo, None)
+            if id_tipo is None:
+                continue
+            tipos[id_tipo] = nombre_tipo
+            condiciones.append(cliente.CreatePropertyCondition(
+                auto.PropertyId.ControlTypeProperty, id_tipo,
+            ))
+        if not condiciones:
+            return []
+
+        condicion = condiciones[0]
+        for otra in condiciones[1:]:
+            condicion = cliente.CreateOrCondition(condicion, otra)
+        cache = cliente.CreateCacheRequest()
+        cache.AddProperty(auto.PropertyId.NameProperty)
+        cache.AddProperty(auto.PropertyId.BoundingRectangleProperty)
+        cache.AddProperty(auto.PropertyId.ControlTypeProperty)
+        hallados = ventana.Element.FindAllBuildCache(_TREE_DESCENDANTS, condicion, cache)
+    except Exception as e:
+        logger.warning(f"no se pudo leer la ventana de una vez, se recorrerá a mano: {e}")
+        return []
+
+    elementos: List[Elemento] = []
+    por_tipo: dict = {}
+    vistos = set()
+    for i in range(hallados.Length):
+        if len(elementos) >= MAX_ELEMENTOS:
+            break
+        try:
+            elemento = hallados.GetElement(i)
+            nombre = (elemento.CachedName or "").strip()
+            rect = elemento.CachedBoundingRectangle
+            tipo = tipos.get(elemento.CachedControlType, "")
+        except Exception:
+            continue
+        if not nombre or not tipo or rect is None:
+            continue
+        if por_tipo.get(tipo, 0) >= _MAX_POR_TIPO:
+            continue
+        ancho, alto = rect.right - rect.left, rect.bottom - rect.top
+        # Un control invisible o sin área no se puede pulsar: ocupa sitio en la lista y
+        # confunde al modelo, que podría intentar hacerle clic.
+        if ancho <= 0 or alto <= 0:
+            continue
+        x, y = rect.left + ancho // 2, rect.top + alto // 2
+        if (nombre, x, y) in vistos:
+            continue
+        vistos.add((nombre, x, y))
+        por_tipo[tipo] = por_tipo.get(tipo, 0) + 1
+        elementos.append(Elemento(nombre=nombre, tipo=tipo, x=x, y=y, ventana=titulo))
+
+    # En orden de lectura: al modelo le sirve el orden visual, no el del árbol.
+    elementos.sort(key=lambda e: (e.y, e.x))
+    return elementos
+
+
 def leer_ventana_activa() -> Tuple[List[Elemento], str]:
     """Return los elementos de la ventana en primer plano y su título."""
     if not disponible():
@@ -137,8 +244,15 @@ def leer_ventana_activa() -> Tuple[List[Elemento], str]:
         logger.warning(f"No se pudo leer la ventana activa: {e}")
         return [], ""
 
-    elementos: List[Elemento] = []
     inicio = time.monotonic()
+    elementos = _preguntar_de_una_vez(ventana, titulo)
+    if elementos:
+        logger.info(f"[Árbol] '{titulo[:40]}': {len(elementos)} elementos en "
+                    f"{time.monotonic() - inicio:.2f}s")
+        return elementos, titulo
+
+    # Respaldo: recorrer a mano. Se usa si la librería no expone el cliente nativo o si la
+    # ventana no publica nada por esa vía.
     _recorrer(ventana, elementos, titulo, inicio + TIMEOUT_SEGUNDOS)
 
     transcurrido = time.monotonic() - inicio
