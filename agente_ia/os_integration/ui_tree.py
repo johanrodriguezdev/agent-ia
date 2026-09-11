@@ -29,6 +29,27 @@ no se limita a sugerir la visión: dice que se puede encender y cómo.
 De ahí las dos protecciones que lleva: un tope de tiempo, porque hay aplicaciones que tardan
 segundos en responder, y un tope de elementos, porque una hoja de cálculo grande tiene miles
 de celdas y ninguna es lo que se está buscando.
+
+**Lo que cambió después (2026-09-11): preguntar de una vez en vez de recorrer.**
+
+Las cifras de arriba se midieron recorriendo el árbol hijo por hijo, que es lo que hacía
+`_recorrer`. Ese recorrido tiene un límite que no se ve en ninguna de las dos protecciones:
+`MAX_PROFUNDIDAD`. El contenido de una ventana real cuelga más abajo de doce niveles, así
+que el recorrido no llegaba — y no se cortaba por tiempo, así que **no había ningún aviso de
+que faltara algo**. El agente simplemente decía que no encontraba lo que tenía delante.
+
+Medido sobre la misma ventana de Chrome con una página cargada:
+
+    recorriendo hijo por hijo       44 elementos
+    preguntándole a Windows      3.467 elementos
+
+`FindAll` busca en todo el subárbol, sin límite de profundidad, resuelto dentro de Windows,
+y de paso trae nombres y posiciones en la misma llamada en vez de un viaje por propiedad.
+El recorrido a mano queda de respaldo y se usa de verdad: si la librería no expone su
+cliente nativo, o si algo no es como se espera, se cae ahí en vez de reventar.
+
+Y el árbol no sirve solo para *mirar*: con él se puede **operar** un control sin el ratón
+(`operar()`), que no depende de qué ventana esté delante ni falla porque algo tape el punto.
 """
 
 import logging
@@ -56,6 +77,13 @@ TIPOS_INTERACTUABLES = frozenset({
     "ButtonControl", "MenuItemControl", "TabItemControl", "ListItemControl",
     "CheckBoxControl", "RadioButtonControl", "HyperlinkControl", "EditControl",
     "ComboBoxControl", "SplitButtonControl", "TreeItemControl", "MenuControl",
+    # `DocumentControl` es donde SE ESCRIBE en casi toda aplicación moderna. Sin él, el
+    # agente veía los 29 botones y pestañas del Bloc de notas de Windows 11 y no su área de
+    # texto, que se llama «Editor de texto» y es un DocumentControl: podía cerrarlo, pero no
+    # escribir en él. Medido abriéndolo, no supuesto.
+    "DocumentControl",
+    # Las filas de una lista de detalle: el Explorador de archivos y las tablas de Office.
+    "DataItemControl",
 })
 
 
@@ -230,6 +258,73 @@ def _preguntar_de_una_vez(ventana, titulo: str) -> List[Elemento]:
     return elementos
 
 
+def control_por_nombre(raiz, nombre: str, tipos: Optional[frozenset] = None):
+    """Return el control que se llama así dentro de `raiz`, o None.
+
+    Hace falta el control y no el `Elemento` porque con el control se puede *operar* —
+    pulsarlo, enfocarlo— y con unas coordenadas solo se puede acertar o fallar.
+
+    Es un solo sitio para las dos ventanas que importan: una aplicación cualquiera y el
+    documento de una página web. Mientras cada una buscaba por su cuenta, se quedaban con
+    nodos distintos que se llaman igual —el título de una sección y el enlace hacia ella—,
+    y se terminaba desplazando hasta uno para pulsar el otro.
+    """
+    cliente = cliente_uia()
+    if cliente is None or not nombre:
+        return None
+
+    import uiautomation as auto
+
+    aceptados = tipos if tipos is not None else TIPOS_INTERACTUABLES
+    try:
+        ids = {getattr(auto.ControlType, t) for t in aceptados
+               if hasattr(auto.ControlType, t)}
+        # `IgnoreCase` evita fallar por una mayúscula; si esta versión de la API no lo
+        # admite, se busca exacto, que sirve igual para los nombres que el modelo ya leyó.
+        try:
+            condicion = cliente.CreatePropertyConditionEx(
+                auto.PropertyId.NameProperty, nombre, 1,
+            )
+        except Exception:
+            condicion = cliente.CreatePropertyCondition(auto.PropertyId.NameProperty, nombre)
+        hallados = raiz.Element.FindAll(_TREE_DESCENDANTS, condicion)
+    except Exception as e:
+        logger.debug(f"no se pudo buscar «{nombre}» en la ventana: {e}")
+        return None
+
+    for i in range(hallados.Length):
+        try:
+            control = auto.Control.CreateControlFromElement(hallados.GetElement(i))
+            if ids and control.Element.CurrentControlType not in ids:
+                continue
+            rect = control.BoundingRectangle
+            if not rect or rect.width() <= 0 or rect.height() <= 0:
+                continue
+            return control
+        except Exception as e:
+            logger.debug(f"un candidato de «{nombre}» no se pudo leer: {e}")
+            continue
+    return None
+
+
+def patron(control, nombre: str):
+    """Return un patrón de UI Automation del control, o None si no lo tiene.
+
+    Los patrones son lo que permite *operar* un control sin el ratón. Cuando existe,
+    siempre es mejor que un clic por coordenadas: no depende de qué ventana esté delante,
+    no falla porque algo tape el punto, y no hay ventana de tiempo entre mirar y pulsar.
+    """
+    if control is None:
+        return None
+    try:
+        import uiautomation as auto
+
+        return control.GetPattern(getattr(auto.PatternId, nombre))
+    except Exception as e:
+        logger.debug(f"el control no expone {nombre}: {e}")
+        return None
+
+
 def leer_ventana_activa() -> Tuple[List[Elemento], str]:
     """Return los elementos de la ventana en primer plano y su título."""
     if not disponible():
@@ -328,3 +423,120 @@ def describir_ventana_activa(maximo: int = 25) -> str:
     if len(interactuables) > maximo:
         lineas.append(f"  ...y {len(interactuables) - maximo} más.")
     return "\n".join(lineas)
+
+
+def comprobar_escrito(control, texto: str) -> Optional[str]:
+    """Return un aviso si el campo NO quedó con lo que se quiso escribir, o None.
+
+    Escribir es simular un teclado, y eso puede salir mal de formas que no se notan: un
+    carácter que se pierde porque la ventana todavía se estaba acomodando, un campo que
+    reformatea lo que recibe. Si el control publica su contenido, comprobarlo cuesta una
+    consulta y convierte un "creo que lo escribí" en un "lo escribí" o en un aviso.
+
+    Si el control no publica nada, no se inventa un veredicto: se devuelve None.
+    """
+    if control is None or not texto:
+        return None
+
+    contenido = None
+    valor = patron(control, "ValuePattern")
+    if valor is not None:
+        try:
+            contenido = getattr(valor, "Value", None)
+        except Exception as e:
+            logger.debug(f"el campo no devolvió su contenido: {e}")
+    if contenido is None:
+        texto_patron = patron(control, "TextPattern")
+        if texto_patron is not None:
+            try:
+                contenido = texto_patron.DocumentRange.GetText(len(texto) + 200)
+            except Exception as e:
+                logger.debug(f"el campo no devolvió su texto: {e}")
+    if contenido is None:
+        return None
+
+    if texto.strip() in contenido:
+        return None
+    logger.warning(f"lo escrito no coincide: se quiso «{texto[:40]}» y quedó "
+                   f"«{contenido[:40]}»")
+    return (f" Ojo: el campo quedó con «{contenido.strip()[:60]}», que no es exactamente lo "
+            f"que quise escribir. Revisalo antes de seguir.")
+
+
+def operar(objetivo: str, texto: Optional[str] = None) -> str:
+    """Pulsa un control de la ventana activa POR SU NOMBRE, o escribe en él. Return qué pasó.
+
+    Es el equivalente de escritorio de lo que `navegador.accionar` hace en una página, y por
+    el mismo motivo: pulsar por el patrón del propio control no depende de qué ventana esté
+    delante, no falla porque algo tape el punto, y no hay ventana de tiempo entre mirar y
+    pulsar. Las coordenadas quedan de respaldo para lo que no exponga ningún patrón.
+
+    Antes esto costaba dos o tres llamadas —`pc_find`, `pc_click`, `pc_type`— y cada una
+    podía quedar desfasada de la anterior.
+    """
+    from automation.pc_controller import click_position, type_text
+
+    nombre = str(objetivo or "").strip()
+    if not nombre:
+        return "Necesito el nombre de lo que querés que pulse."
+    if not disponible():
+        return ("No puedo leer los controles de esta pantalla, así que no pulso a ciegas. "
+                "Mirá con 'pc_look' y usá las coordenadas con 'pc_click'.")
+
+    import uiautomation as auto
+
+    elemento, candidatos = buscar(nombre)
+    if elemento is None:
+        nombres = ", ".join(f"«{c.nombre}»" for c in candidatos[:8])
+        return (f"No encontré «{nombre}» en la ventana. Lo que sí hay: {nombres}"
+                if nombres else f"No encontré «{nombre}» en la ventana.")
+
+    try:
+        ventana = auto.GetForegroundControl()
+    except Exception as e:
+        logger.warning(f"no se pudo tomar la ventana activa para operar: {e}")
+        ventana = None
+
+    control = control_por_nombre(ventana, elemento.nombre) if ventana is not None else None
+
+    if texto is not None:
+        # Enfocar por el árbol y teclear. Se teclea de verdad —en vez de escribir el valor
+        # con `ValuePattern`— porque muchas aplicaciones escuchan las pulsaciones para
+        # validar o autocompletar, y un valor puesto de golpe no dispara nada de eso.
+        enfocado = False
+        try:
+            if control is not None:
+                control.SetFocus()
+                enfocado = True
+        except Exception as e:
+            logger.debug(f"no se pudo enfocar «{elemento.nombre}» por el árbol: {e}")
+        if not enfocado:
+            click_position(elemento.x, elemento.y)
+            time.sleep(0.3)
+        type_text(texto)
+        logger.info(f"[Pantalla] escribí en «{elemento.nombre}» ({elemento.tipo})")
+        aviso = comprobar_escrito(control, texto) or ""
+        return f"Escribí «{texto}» en «{elemento.nombre}».{aviso}"
+
+    invocar = patron(control, "InvokePattern")
+    if invocar is not None:
+        try:
+            invocar.Invoke()
+            logger.info(f"[Pantalla] invoqué «{elemento.nombre}» ({elemento.tipo})")
+            return f"Pulsé «{elemento.nombre}»."
+        except Exception as e:
+            logger.debug(f"Invoke() falló en «{elemento.nombre}», se pulsa a mano: {e}")
+
+    # Algunas cosas no se invocan, se seleccionan: una pestaña, un elemento de lista.
+    seleccionar = patron(control, "SelectionItemPattern")
+    if seleccionar is not None:
+        try:
+            seleccionar.Select()
+            logger.info(f"[Pantalla] seleccioné «{elemento.nombre}» ({elemento.tipo})")
+            return f"Seleccioné «{elemento.nombre}»."
+        except Exception as e:
+            logger.debug(f"Select() falló en «{elemento.nombre}», se pulsa a mano: {e}")
+
+    click_position(elemento.x, elemento.y)
+    logger.info(f"[Pantalla] clic en «{elemento.nombre}» ({elemento.tipo}) por coordenadas")
+    return f"Pulsé «{elemento.nombre}»."

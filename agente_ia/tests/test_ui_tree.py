@@ -445,3 +445,245 @@ def test_una_libreria_distinta_no_rompe_la_lectura_de_pantalla(monkeypatch):
     monkeypatch.setitem(__import__("sys").modules, "uiautomation", _Roto)
 
     assert ui_tree._preguntar_de_una_vez(_VentanaFalsa([]), "V") == []
+
+
+# ═════════════════════════════════════════════════════════════════════════
+#  Operar un control, no solo mirarlo
+# ═════════════════════════════════════════════════════════════════════════
+
+class _PatronFalso:
+    def __init__(self):
+        self.llamadas = []
+
+    def Invoke(self):
+        self.llamadas.append("Invoke")
+
+    def Select(self):
+        self.llamadas.append("Select")
+
+
+class _ControlFalso:
+    def __init__(self, fallar_foco=False):
+        self.enfocado = False
+        self._fallar = fallar_foco
+
+    def SetFocus(self):
+        if self._fallar:
+            raise RuntimeError("no se puede enfocar")
+        self.enfocado = True
+
+
+def _montar_operar(monkeypatch, elemento, control=None, patrones=None):
+    clics, escrito = [], []
+    monkeypatch.setattr(ui_tree, "disponible", lambda: True)
+    monkeypatch.setattr(ui_tree, "buscar", lambda o: (elemento, [elemento] if elemento else []))
+    monkeypatch.setattr(ui_tree, "control_por_nombre", lambda raiz, n, tipos=None: control)
+    monkeypatch.setattr(ui_tree, "patron",
+                        lambda c, n: (patrones or {}).get(n))
+    monkeypatch.setattr(ui_tree.time, "sleep", lambda _s: None)
+
+    import uiautomation as auto
+
+    monkeypatch.setattr(auto, "GetForegroundControl", lambda: object())
+
+    import automation.pc_controller as pc
+
+    monkeypatch.setattr(pc, "click_position", lambda x, y: clics.append((x, y)))
+    monkeypatch.setattr(pc, "type_text", lambda t: escrito.append(t))
+    return clics, escrito
+
+
+def test_se_pulsa_por_el_patron_y_no_por_coordenadas():
+    """Invocar el control no depende de dónde esté la ventana ni de que nada lo tape."""
+    import pytest as _pytest
+
+    mp = _pytest.MonkeyPatch()
+    try:
+        elemento = ui_tree.Elemento(nombre="Guardar", tipo="ButtonControl", x=50, y=60)
+        invocar = _PatronFalso()
+        clics, _ = _montar_operar(mp, elemento, _ControlFalso(), {"InvokePattern": invocar})
+
+        salida = ui_tree.operar("Guardar")
+
+        assert invocar.llamadas == ["Invoke"]
+        assert clics == []
+        assert "Guardar" in salida
+    finally:
+        mp.undo()
+
+
+def test_una_pestana_se_selecciona_en_vez_de_invocarse(monkeypatch):
+    """Hay cosas que no se pulsan: se seleccionan."""
+    elemento = ui_tree.Elemento(nombre="Hoja 2", tipo="TabItemControl", x=10, y=10)
+    seleccionar = _PatronFalso()
+    clics, _ = _montar_operar(monkeypatch, elemento, _ControlFalso(),
+                              {"SelectionItemPattern": seleccionar})
+
+    salida = ui_tree.operar("Hoja 2")
+
+    assert seleccionar.llamadas == ["Select"]
+    assert clics == []
+    assert "Hoja 2" in salida
+
+
+def test_sin_patron_se_pulsa_por_coordenadas(monkeypatch):
+    """El respaldo tiene que funcionar: hay controles que no exponen nada."""
+    elemento = ui_tree.Elemento(nombre="Raro", tipo="ButtonControl", x=120, y=340)
+    clics, _ = _montar_operar(monkeypatch, elemento, _ControlFalso(), {})
+
+    ui_tree.operar("Raro")
+
+    assert clics == [(120, 340)]
+
+
+def test_escribir_enfoca_el_campo_sin_hacer_clic(monkeypatch):
+    elemento = ui_tree.Elemento(nombre="Usuario", tipo="EditControl", x=10, y=10)
+    control = _ControlFalso()
+    clics, escrito = _montar_operar(monkeypatch, elemento, control, {})
+
+    ui_tree.operar("Usuario", "johan")
+
+    assert control.enfocado is True
+    assert escrito == ["johan"]
+    assert clics == []
+
+
+def test_si_no_se_puede_enfocar_se_hace_clic_antes_de_escribir(monkeypatch):
+    elemento = ui_tree.Elemento(nombre="Usuario", tipo="EditControl", x=33, y=44)
+    clics, escrito = _montar_operar(monkeypatch, elemento, _ControlFalso(fallar_foco=True), {})
+
+    ui_tree.operar("Usuario", "johan")
+
+    assert clics == [(33, 44)]
+    assert escrito == ["johan"]
+
+
+def test_lo_que_no_esta_no_se_pulsa(monkeypatch):
+    otros = [ui_tree.Elemento(nombre="Aceptar", tipo="ButtonControl", x=1, y=1)]
+    clics = []
+    monkeypatch.setattr(ui_tree, "disponible", lambda: True)
+    monkeypatch.setattr(ui_tree, "buscar", lambda o: (None, otros))
+
+    import automation.pc_controller as pc
+
+    monkeypatch.setattr(pc, "click_position", lambda x, y: clics.append((x, y)))
+
+    salida = ui_tree.operar("Suscribirse")
+
+    assert clics == []
+    assert "Aceptar" in salida
+
+
+def test_sin_objetivo_no_se_pulsa_nada():
+    assert "nombre" in ui_tree.operar("")
+
+
+def test_sin_arbol_no_se_pulsa_a_ciegas(monkeypatch):
+    monkeypatch.setattr(ui_tree, "disponible", lambda: False)
+    salida = ui_tree.operar("Aceptar")
+    assert "a ciegas" in salida
+
+
+def test_pc_act_registrada_y_amarilla():
+    from agents.tool_registry import get_tool
+    from core.security_manager import ChannelType, RiskLevel, security_manager
+
+    assert get_tool("pc_act") is not None
+    assert security_manager.classify_action("pc_act") == RiskLevel.YELLOW
+    assert not security_manager.is_action_allowed("pc_act", ChannelType.TELEGRAM)
+
+
+# ═════════════════════════════════════════════════════════════════════════
+#  Escribir lo que se quiso escribir
+# ═════════════════════════════════════════════════════════════════════════
+#
+# Medido en la máquina de Johan, que tiene el Bloqueo de mayúsculas puesto y teclado
+# latinoamericano: escribir "prueba del agente" en el Bloc de notas producía "PRUEBA DEL
+# AGENTE". Un formulario rellenado así está mal rellenado y el agente ni se entera.
+
+class _PatronValor:
+    def __init__(self, valor):
+        self.Value = valor
+
+
+def test_se_avisa_si_el_campo_no_quedo_como_se_queria(monkeypatch):
+    monkeypatch.setattr(ui_tree, "patron",
+                        lambda c, n: _PatronValor("PRUEBA DEL AGENTE") if n == "ValuePattern"
+                        else None)
+
+    aviso = ui_tree.comprobar_escrito(object(), "prueba del agente")
+
+    assert aviso is not None
+    assert "no es exactamente" in aviso
+
+
+def test_si_el_campo_quedo_bien_no_se_dice_nada(monkeypatch):
+    monkeypatch.setattr(ui_tree, "patron",
+                        lambda c, n: _PatronValor("prueba del agente") if n == "ValuePattern"
+                        else None)
+
+    assert ui_tree.comprobar_escrito(object(), "prueba del agente") is None
+
+
+def test_un_campo_que_no_publica_su_contenido_no_inventa_un_veredicto(monkeypatch):
+    """Decir "quedó mal" sin poder leerlo sería tan falso como decir que quedó bien."""
+    monkeypatch.setattr(ui_tree, "patron", lambda c, n: None)
+
+    assert ui_tree.comprobar_escrito(object(), "hola") is None
+
+
+def test_escribir_tildes_y_enes_no_depende_del_teclado(monkeypatch):
+    """Se inyecta el carácter, no se simula la tecla: la distribución no puede estropearlo."""
+    from automation import pc_controller
+
+    enviados = []
+
+    class _U32:
+        def SendInput(self, cuantos, arreglo, tamano):
+            enviados.append(arreglo[0].u.ki.wScan)
+            return cuantos
+
+    import ctypes
+
+    monkeypatch.setattr(ctypes, "windll", type("W", (), {"user32": _U32()})())
+    monkeypatch.setattr(pc_controller.time, "sleep", lambda _s: None)
+
+    assert pc_controller._escribir_unicode("añ") is True
+    # Dos eventos por carácter (pulsar y soltar), con el código del carácter de verdad.
+    assert enviados == [ord("a"), ord("a"), ord("ñ"), ord("ñ")]
+
+
+def test_el_salto_de_linea_se_manda_como_tecla(monkeypatch):
+    """Mandado como carácter Unicode, muchas aplicaciones lo ignoran o pintan un cuadrito."""
+    from automation import pc_controller
+
+    teclas = []
+
+    class _U32:
+        def SendInput(self, cuantos, arreglo, tamano):
+            teclas.append(arreglo[0].u.ki.wVk)
+            return cuantos
+
+    import ctypes
+
+    monkeypatch.setattr(ctypes, "windll", type("W", (), {"user32": _U32()})())
+    monkeypatch.setattr(pc_controller.time, "sleep", lambda _s: None)
+
+    pc_controller._escribir_unicode("\n")
+
+    assert teclas == [0x0D, 0x0D]        # VK_RETURN al pulsar y al soltar
+
+
+def test_si_windows_rechaza_una_tecla_se_dice_que_no_se_pudo(monkeypatch):
+    from automation import pc_controller
+
+    class _U32:
+        def SendInput(self, cuantos, arreglo, tamano):
+            return 0
+
+    import ctypes
+
+    monkeypatch.setattr(ctypes, "windll", type("W", (), {"user32": _U32()})())
+    monkeypatch.setattr(pc_controller.time, "sleep", lambda _s: None)
+
+    assert pc_controller._escribir_unicode("hola") is False

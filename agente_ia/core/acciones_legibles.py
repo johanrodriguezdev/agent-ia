@@ -45,6 +45,8 @@ _DESCRIPCIONES: Dict[str, str] = {
     "PC_SCROLL": "desplace la pantalla",
     "pc_scroll": "desplace la pantalla",
     "pc_enable_tree": "lea lo que hay en pantalla",
+    # El objetivo concreto lo agrega `format_details` desde el parámetro `objetivo`.
+    "pc_act": "pulse o escriba en algo de la ventana que tenés delante",
 
     # ── Navegador (REQ-038) ──
     # No dice "haga clic en la página" a secas: lo que se autoriza es actuar DENTRO de la
