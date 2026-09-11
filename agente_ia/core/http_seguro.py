@@ -61,6 +61,10 @@ class Respuesta:
     content_type: str = ""
     truncada: bool = False
     headers: Dict[str, str] = field(default_factory=dict)
+    #: El cuerpo sin decodificar. Hace falta para lo que no es texto —un PDF decodificado
+    #: como si fuera UTF-8 queda ilegible—, y cuesta lo mismo que ya se descargó: son los
+    #: mismos bytes, con el mismo tope de `MAX_BYTES`, no una segunda descarga.
+    crudo: bytes = b""
 
 
 def _es_interna(ip: "ipaddress.IPv4Address | ipaddress.IPv6Address") -> bool:
@@ -204,6 +208,7 @@ def pedir(
             content_type=respuesta.headers.get("Content-Type", ""),
             truncada=truncada,
             headers=dict(respuesta.headers),
+            crudo=crudo,
         )
 
     raise DestinoBloqueado(

@@ -345,3 +345,115 @@ def test_una_frase_repetida_no_se_paga_dos_veces():
     salida = investigacion._trozos_relevantes(texto, "precio envio paquetes", 900)
 
     assert salida.count("subio de precio") == 1
+
+
+# ------------------------------------------------------------------- PDFs de la web
+#
+# Media fuente autorizada vive en PDF —informes de un ministerio, papers, circulares— y
+# antes se descartaban por no ser HTML: el agente veía el enlace y no podía abrirlo.
+
+class _RespuestaFalsa:
+    def __init__(self, crudo=b"", content_type="application/pdf", truncada=False):
+        self.crudo = crudo
+        self.content_type = content_type
+        self.truncada = truncada
+        self.status = 200
+        self.texto = ""
+        self.url_final = "https://ejemplo.com/informe.pdf"
+        self.headers = {}
+
+
+def _lector_falso(monkeypatch, textos, titulo="", creado=""):
+    """Sustituye al lector de PyPDF2: lo que se prueba es el tratamiento del texto."""
+    import PyPDF2
+
+    class _Pagina:
+        def __init__(self, texto):
+            self._texto = texto
+
+        def extract_text(self):
+            return self._texto
+
+    class _Lector:
+        def __init__(self, _flujo):
+            self.pages = [_Pagina(x) for x in textos]
+            self.metadata = {"/Title": titulo, "/CreationDate": creado}
+
+    monkeypatch.setattr(PyPDF2, "PdfReader", _Lector)
+
+
+def test_un_pdf_de_la_web_se_lee(monkeypatch):
+    from os_integration.web_search import _extraer_pdf
+
+    _lector_falso(monkeypatch,
+                  ["Resultados del informe anual de la entidad para el periodo."],
+                  titulo="Informe anual 2026", creado="D:20260315000000")
+
+    pagina = _extraer_pdf(_RespuestaFalsa(b"%PDF-1.4"),
+                          "https://ejemplo.com/informe.pdf", 5000)
+
+    assert pagina["ok"] is True
+    assert "informe anual" in pagina["texto"]
+    assert pagina["titulo"] == "Informe anual 2026"
+    assert pagina["fecha"] == "20260315"
+
+
+def test_de_un_pdf_largo_se_leen_las_primeras_paginas(monkeypatch):
+    """Un informe oficial puede tener doscientas páginas y no caben en el contexto."""
+    from os_integration.web_search import MAX_PAGINAS_PDF, _extraer_pdf
+
+    _lector_falso(monkeypatch, [f"Pagina numero {i} del documento." for i in range(60)])
+
+    pagina = _extraer_pdf(_RespuestaFalsa(b"%PDF-1.4"), "https://x.com/a.pdf", 99999)
+
+    assert f"Pagina numero {MAX_PAGINAS_PDF - 1} " in pagina["texto"]
+    assert f"Pagina numero {MAX_PAGINAS_PDF} " not in pagina["texto"]
+
+
+def test_un_pdf_escaneado_lo_dice_en_vez_de_devolver_nada(monkeypatch):
+    """Un escaneo son imágenes: no hay texto que extraer, y hay que decirlo."""
+    from os_integration.web_search import _extraer_pdf
+
+    _lector_falso(monkeypatch, ["", "   ", ""])
+
+    pagina = _extraer_pdf(_RespuestaFalsa(b"%PDF-1.4"),
+                          "https://ejemplo.com/escaneo.pdf", 5000)
+
+    assert pagina["ok"] is False
+    assert "escaneo" in pagina["error"]
+
+
+def test_un_pdf_cortado_por_tamano_lo_avisa(monkeypatch):
+    from os_integration.web_search import _extraer_pdf
+
+    _lector_falso(monkeypatch, ["Texto del principio del documento descargado."])
+
+    pagina = _extraer_pdf(_RespuestaFalsa(b"%PDF-1.4", truncada=True),
+                          "https://x.com/a.pdf", 5000)
+
+    assert "se descargó solo el principio" in pagina["texto"]
+
+
+def test_un_pdf_roto_no_tumba_la_investigacion():
+    from os_integration.web_search import _extraer_pdf
+
+    pagina = _extraer_pdf(_RespuestaFalsa(b"esto no es un pdf"),
+                          "https://ejemplo.com/roto.pdf", 5000)
+
+    assert pagina["ok"] is False
+    assert "no entender" in pagina["error"]
+
+
+def test_el_pdf_entra_por_la_extension_aunque_el_servidor_mienta(monkeypatch):
+    """Hay servidores que sirven un PDF declarándolo `application/octet-stream`."""
+    from os_integration import web_search
+
+    llamado = {}
+    monkeypatch.setattr(web_search, "_extraer_pdf",
+                        lambda r, u, m: llamado.setdefault("si", True) or {"ok": True})
+    monkeypatch.setattr("core.http_seguro.pedir",
+                        lambda url, **kw: _RespuestaFalsa(b"x", "application/octet-stream"))
+
+    web_search.extraer_pagina("https://ejemplo.com/informe.PDF")
+
+    assert llamado.get("si") is True

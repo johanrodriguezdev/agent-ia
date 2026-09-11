@@ -89,10 +89,32 @@ En secuencia, esas mismas cinco páginas habrían sido 5 vueltas del bucle.
   palabras y no las comparten.
 - **No juzga la calidad de una fuente.** No sabe si un dominio es un medio serio o un blog.
   Da el dominio y la fecha para que el modelo —y el usuario— lo valoren.
-- **No lee PDFs ni páginas que exigen sesión.** Para un PDF abierto en el navegador está
-  `browser_text` (REQ-038).
+- **No lee páginas que exigen sesión** ni las que piden captcha.
 - **No guarda el informe solo.** Si Johan quiere el resultado en un archivo, se escribe con
   `file_write`, que es 🟡 y confinado a las carpetas de trabajo.
+
+## Los PDF de la web, que sí se cerraron
+
+Media fuente autorizada vive en PDF —informes de un ministerio, papers, circulares— y se
+descartaban por no ser HTML: el agente veía el enlace en los resultados y no podía abrirlo.
+
+Ahora se leen (`_extraer_pdf`, con PyPDF2, que ya estaba en `requirements.txt`), con tres
+cosas que salieron de probarlo contra informes reales:
+
+- **Tope propio de descarga, 8 MB.** El general de `http_seguro` son 2 MB, pensado para
+  páginas web, y con un PDF quedarse a medias no sirve de nada: el índice que dice dónde
+  empieza cada página va **al final** del archivo, así que un PDF cortado no es un PDF
+  incompleto, es un PDF ilegible. Con 2 MB fallaban los informes de Fedepalma y de la
+  Universidad Nacional. Sigue siendo un tope: la guarda existe para que una respuesta de
+  gigabytes no se coma la memoria, no para que sean exactamente dos megas.
+- **Si aun así se corta, se dice.** "Pesa más de 8 MB y solo pude descargar el principio,
+  haría falta otra fuente" — con eso el modelo busca otra, en vez de insistir contra un
+  error opaco.
+- **Un PDF escaneado se declara como tal.** Son imágenes: no hay texto que extraer, y
+  devolver vacío se leería como "no dice nada".
+
+Se leen las primeras 15 páginas: un informe oficial puede tener doscientas, y el resumen
+ejecutivo está al principio.
 
 ## Pendiente
 - Prueba manual de Johan.
