@@ -457,3 +457,162 @@ def test_el_pdf_entra_por_la_extension_aunque_el_servidor_mienta(monkeypatch):
     web_search.extraer_pagina("https://ejemplo.com/informe.PDF")
 
     assert llamado.get("si") is True
+
+
+# ------------------------------------------------------------- páginas que piden sesión
+#
+# Por HTTP el agente entra sin credenciales. Pero el navegador del usuario YA tiene la
+# sesión iniciada, y `browser_text` lee lo que se ve en él: la respuesta correcta a un muro
+# de acceso no es "no pude", es "abrila en tu navegador y la leo".
+
+class _RespuestaWeb:
+    def __init__(self, status=200, texto="", url_final="https://sitio.com/x",
+                 content_type="text/html"):
+        self.status, self.texto, self.url_final = status, texto, url_final
+        self.content_type, self.crudo, self.truncada, self.headers = content_type, b"", False, {}
+
+
+def test_un_401_dice_que_pide_sesion_y_como_leerla(monkeypatch):
+    from os_integration import web_search
+
+    monkeypatch.setattr("core.http_seguro.pedir", lambda url, **kw: _RespuestaWeb(status=401))
+
+    pagina = web_search.extraer_pagina("https://intranet.empresa.com/informe")
+
+    assert pagina["ok"] is False
+    assert pagina.get("sesion") is True
+    assert "browser_text" in pagina["error"]
+
+
+def test_un_formulario_de_acceso_con_poco_texto_es_un_muro(monkeypatch):
+    from os_integration import web_search
+
+    html = ("<html><head><title>Acceder</title></head><body><form>"
+            "<input type='text' name='usuario'><input type='password' name='clave'>"
+            "<button>Entrar</button></form></body></html>")
+    monkeypatch.setattr("core.http_seguro.pedir", lambda url, **kw: _RespuestaWeb(texto=html))
+
+    pagina = web_search.extraer_pagina("https://portal.com/documento")
+
+    assert pagina["ok"] is False
+    assert pagina.get("sesion") is True
+
+
+def test_una_pagina_normal_con_un_cuadro_de_login_en_la_esquina_se_lee(monkeypatch):
+    """Media internet tiene un campo de contraseña en la esquina: eso no es un muro."""
+    from os_integration import web_search
+
+    articulo = "<p>" + ("El precio del café subió por la sequía en el eje cafetero. " * 30) + "</p>"
+    html = ("<html><head><title>Noticia</title></head><body>"
+            "<form><input type='password'></form>" + articulo + "</body></html>")
+    monkeypatch.setattr("core.http_seguro.pedir", lambda url, **kw: _RespuestaWeb(texto=html))
+
+    pagina = web_search.extraer_pagina("https://diario.com/nota")
+
+    assert pagina["ok"] is True
+    assert "sequía" in pagina["texto"]
+
+
+def test_una_redireccion_a_login_es_un_muro(monkeypatch):
+    from os_integration import web_search
+
+    html = "<html><body><p>Bienvenido. Ingrese sus datos.</p></body></html>"
+    monkeypatch.setattr("core.http_seguro.pedir",
+                        lambda url, **kw: _RespuestaWeb(texto=html,
+                                                        url_final="https://sitio.com/login?next=/doc"))
+
+    pagina = web_search.extraer_pagina("https://sitio.com/doc")
+
+    assert pagina["ok"] is False
+    assert pagina.get("sesion") is True
+
+
+def test_en_el_dosier_una_fuente_con_sesion_explica_el_camino(monkeypatch):
+    """El modelo tiene que ver, en la propia fuente, cómo sí podría leerla."""
+    _montar(monkeypatch, [_resultado("Informe", "https://intranet.com/x", "extracto")],
+            {"https://intranet.com/x": {"ok": False, "url": "", "titulo": "", "fecha": "",
+                                         "texto": "", "sesion": True,
+                                         "error": ("Esa página pide iniciar sesión (respondió "
+                                                   "401) ... la leo con 'browser_text'")}})
+
+    texto = investigacion.formatear(investigacion.investigar("algo"))
+
+    assert "browser_text" in texto
+
+
+# --------------------------------------------------- la misma fuente en dos idiomas
+
+def test_el_dominio_base_junta_los_subdominios():
+    assert investigacion._dominio_base("https://es.wikipedia.org/wiki/X") == "wikipedia.org"
+    assert investigacion._dominio_base("https://en.wikipedia.org/wiki/X") == "wikipedia.org"
+    assert investigacion._dominio_base("https://noticias.eltiempo.com.co/a") == "eltiempo.com.co"
+    assert investigacion._dominio_base("https://www.dian.gov.co/x") == "dian.gov.co"
+
+
+def test_dos_wikipedias_cuentan_como_un_sitio_para_el_tope():
+    """`es.` y `en.wikipedia.org` son el mismo sitio, no dos."""
+    resultados = [_resultado("es", "https://es.wikipedia.org/wiki/A"),
+                  _resultado("en", "https://en.wikipedia.org/wiki/A"),
+                  _resultado("de", "https://de.wikipedia.org/wiki/A"),
+                  _resultado("otro", "https://otro.com/x")]
+
+    elegidas = investigacion._elegir_fuentes(resultados, 5)
+
+    wikis = [f for f in elegidas if "wikipedia" in f.url]
+    assert len(wikis) == investigacion.MAX_POR_DOMINIO
+    assert any("otro.com" in f.url for f in elegidas)
+
+
+_EN = ("Python was created by Guido van Rossum and first released in 1991. Version 2.0 came "
+       "out in 2000 and version 3.0 in 2008. As of 2024 it has about 8.2 million users, "
+       "with adoption growing 22 percent per year across 195 countries.")
+_ES = ("Python fue creado por Guido van Rossum y lanzado por primera vez en 1991. La versión "
+       "2.0 salió en 2000 y la 3.0 en 2008. En 2024 tiene cerca de 8.2 millones de usuarios, "
+       "con una adopción que crece un 22 por ciento al año en 195 países.")
+
+
+def test_el_mismo_articulo_en_ingles_y_espanol_es_una_sola_fuente():
+    """Las palabras no se parecen en nada; los años, los montos y los porcentajes sí."""
+    fuentes = [investigacion.Fuente(titulo="EN", url="https://en.wikipedia.org/wiki/Python",
+                                    texto=_EN),
+               investigacion.Fuente(titulo="ES", url="https://es.wikipedia.org/wiki/Python",
+                                    texto=_ES)]
+    investigacion._marcar_copias(fuentes)
+
+    assert fuentes[0].copia_de is None
+    assert fuentes[1].copia_de == 1
+
+
+def test_las_mismas_cifras_en_dos_sitios_distintos_si_son_dos_fuentes():
+    """Dos periódicos que publican las mismas cifras son dos medios que decidieron hacerlo."""
+    fuentes = [investigacion.Fuente(titulo="A", url="https://diario-a.com/python", texto=_EN),
+               investigacion.Fuente(titulo="B", url="https://diario-b.com/python", texto=_ES)]
+    investigacion._marcar_copias(fuentes)
+
+    assert all(f.copia_de is None for f in fuentes)
+
+
+def test_dos_articulos_del_mismo_sitio_con_cifras_distintas_no_son_copias():
+    otro = ("Java was released in 1995 by Sun Microsystems. Version 8 arrived in 2014 and "
+            "version 17 in 2021, reaching 9.6 million developers across 110 countries.")
+    fuentes = [investigacion.Fuente(titulo="P", url="https://en.wikipedia.org/wiki/Python",
+                                    texto=_EN),
+               investigacion.Fuente(titulo="J", url="https://en.wikipedia.org/wiki/Java",
+                                    texto=otro)]
+    investigacion._marcar_copias(fuentes)
+
+    assert all(f.copia_de is None for f in fuentes)
+
+
+def test_los_sitios_distintos_se_cuentan_por_dominio_base(monkeypatch):
+    resultados = [_resultado("es", "https://es.wikipedia.org/wiki/Cafe"),
+                  _resultado("en", "https://en.wikipedia.org/wiki/Coffee")]
+    paginas = {"https://es.wikipedia.org/wiki/Cafe": _pagina(_PROSA),
+               "https://en.wikipedia.org/wiki/Coffee": _pagina(
+                   "Coffee exports from the region grew steadily thanks to new trade deals "
+                   "signed with several partners during the last decade of expansion.")}
+    _montar(monkeypatch, resultados, paginas)
+
+    texto = investigacion.formatear(investigacion.investigar("cafe"))
+
+    assert "en 1 sitio(s) distintos" in texto

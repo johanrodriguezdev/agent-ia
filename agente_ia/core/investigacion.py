@@ -109,6 +109,42 @@ def _dominio(url: str) -> str:
     return red[4:] if red.startswith("www.") else red
 
 
+#: Sufijos de dos niveles bajo los que el dominio "de verdad" es el tercer nivel:
+#: `eltiempo.com.co` es un sitio, no un subdominio de `com.co`. Los de Colombia y los
+#: vecinos van primero porque son los que este agente se va a encontrar.
+_SUFIJOS_DOBLES = frozenset({
+    "com.co", "gov.co", "edu.co", "org.co", "net.co", "mil.co", "nom.co",
+    "com.mx", "gob.mx", "edu.mx", "org.mx", "com.ar", "gob.ar", "edu.ar", "org.ar",
+    "com.pe", "gob.pe", "edu.pe", "com.ec", "gob.ec", "edu.ec", "com.ve", "gob.ve",
+    "com.cl", "gob.cl", "com.br", "gov.br", "edu.br", "org.br", "com.uy", "gub.uy",
+    "co.uk", "org.uk", "ac.uk", "gov.uk", "com.es", "org.es", "com.au", "gov.au",
+})
+
+
+def _dominio_base(url: str) -> str:
+    """Return el dominio registrable: `es.wikipedia.org` y `en.wikipedia.org` → `wikipedia.org`.
+
+    Para el tope por sitio y para contar sitios distintos. Con el dominio completo, las
+    Wikipedias en dos idiomas contaban como dos sitios, y un medio con `noticias.` y
+    `www.` delante también.
+    """
+    dominio = _dominio(url)
+    if not dominio:
+        return ""
+    partes = dominio.split(".")
+    if len(partes) >= 3 and ".".join(partes[-2:]) in _SUFIJOS_DOBLES:
+        return ".".join(partes[-3:])
+    return ".".join(partes[-2:]) if len(partes) >= 2 else dominio
+
+
+_NUMERO_RE = re.compile(r"\d[\d.,]{1,}")
+
+
+def _cifras(texto: str) -> set:
+    """Return las cifras del texto —años, montos, porcentajes— tal como aparecen."""
+    return {n.strip(".,") for n in _NUMERO_RE.findall(texto or "") if len(n.strip(".,")) >= 2}
+
+
 def _clave_de_url(url: str) -> str:
     """Return la dirección sin lo que no cambia la página: esquema, `www`, barra final.
 
@@ -203,7 +239,8 @@ def _elegir_fuentes(resultados: List[Dict[str, str]], maximo: int) -> List[Fuent
         clave = _clave_de_url(url)
         if clave in vistas:
             continue
-        dominio = _dominio(url)
+        # Por dominio BASE: `es.` y `en.wikipedia.org` son el mismo sitio.
+        dominio = _dominio_base(url)
         if por_dominio.get(dominio, 0) >= MAX_POR_DOMINIO:
             continue
         vistas.add(clave)
@@ -278,6 +315,41 @@ def _marcar_copias(fuentes: List[Fuente]) -> None:
                 break
         else:
             huellas.append((indice, actual))
+
+    _marcar_traducciones(fuentes)
+
+
+#: Cuántas cifras tienen que tener en común dos páginas del MISMO sitio para tratarlas como
+#: la misma en dos idiomas. Las palabras no sirven —no las comparten—, pero los años, los
+#: montos y los porcentajes son los mismos en cualquier idioma.
+MINIMO_CIFRAS_COMUNES = 5
+PARECIDO_DE_CIFRAS = 0.5
+
+
+def _marcar_traducciones(fuentes: List[Fuente]) -> None:
+    """Marca como copia la misma página en otro idioma: mismo sitio y las mismas cifras.
+
+    Solo dentro del mismo sitio, a propósito. Dos periódicos distintos que citan las mismas
+    cifras son dos medios que decidieron publicarlas, y eso sí cuenta como dos fuentes;
+    la Wikipedia en inglés y en español del mismo artículo, no.
+    """
+    vistas: List[Tuple[int, str, set]] = []
+    for indice, fuente in enumerate(fuentes):
+        if not fuente.texto or fuente.copia_de is not None:
+            continue
+        sitio = _dominio_base(fuente.url)
+        cifras = _cifras(fuente.texto)
+        if not sitio or len(cifras) < MINIMO_CIFRAS_COMUNES:
+            continue
+        for anterior, otro_sitio, otras in vistas:
+            if otro_sitio != sitio:
+                continue
+            comunes = len(cifras & otras)
+            if comunes >= MINIMO_CIFRAS_COMUNES and                     comunes / min(len(cifras), len(otras)) >= PARECIDO_DE_CIFRAS:
+                fuente.copia_de = anterior + 1
+                break
+        else:
+            vistas.append((indice, sitio, cifras))
 
 
 #: Mínimos para que una línea cuente como prosa y no como un elemento de menú. Salieron de
@@ -439,7 +511,7 @@ def formatear(informe: Informe, caracteres_por_fuente: int = CARACTERES_POR_FUEN
                 lineas.append(f"    Extracto del buscador: {fuente.extracto}")
         lineas.append("")
 
-    dominios = {f.dominio for f in informe.utiles if f.dominio}
+    dominios = {_dominio_base(f.url) for f in informe.utiles if f.dominio}
     if informe.utiles:
         lineas.append(f"Fuentes independientes: {len(informe.utiles)} "
                       f"en {len(dominios)} sitio(s) distintos.")

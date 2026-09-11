@@ -51,6 +51,11 @@ class Captura:
     ancho: int
     alto: int
     tomada_en: float
+    #: Dónde cae el píxel (0, 0) de la imagen dentro del escritorio. Con un solo monitor es
+    #: (0, 0); con dos, el segundo puede empezar en x=2880, y un clic calculado sobre su
+    #: captura sin este desplazamiento aterriza en el monitor equivocado.
+    origen_x: int = 0
+    origen_y: int = 0
 
     def esta_fresca(self, ahora: Optional[float] = None) -> bool:
         t = ahora if ahora is not None else time.monotonic()
@@ -66,6 +71,45 @@ def ultima_captura() -> Optional[Captura]:
         return _ultima
 
 
+def _capturar_monitor_activo():
+    """Return `(imagen, (x, y))` del monitor donde está la ventana activa, o `(None, (0, 0))`.
+
+    `pyautogui.screenshot()` fotografía solo el monitor principal. Con dos monitores, todo
+    lo que el usuario tenga en el segundo es invisible para el agente: `pc_look` lo
+    describía como si no existiera, y se descubrió porque el OCR de una ventana en x=2880
+    devolvía cero caracteres de una captura en negro.
+
+    Se captura el monitor de la ventana activa, no el escritorio entero: dos pantallas
+    pegadas son una imagen enorme que el modelo con visión reduce, y con eso pierde la
+    precisión para localizar un botón. Y se devuelve el origen, porque las coordenadas de
+    la imagen solo valen para hacer clic si se les suma dónde empieza ese monitor.
+    """
+    if os.name != "nt":
+        return None, (0, 0)
+    try:
+        import ctypes
+        import ctypes.wintypes as wt
+
+        from PIL import ImageGrab
+
+        class _INFO(ctypes.Structure):
+            _fields_ = [("cbSize", wt.DWORD), ("rcMonitor", wt.RECT),
+                        ("rcWork", wt.RECT), ("dwFlags", wt.DWORD)]
+
+        u32 = ctypes.windll.user32
+        hwnd = u32.GetForegroundWindow()
+        monitor = u32.MonitorFromWindow(hwnd, 2)          # MONITOR_DEFAULTTONEAREST
+        info = _INFO(cbSize=ctypes.sizeof(_INFO))
+        if not monitor or not u32.GetMonitorInfoW(monitor, ctypes.byref(info)):
+            return None, (0, 0)
+        r = info.rcMonitor
+        imagen = ImageGrab.grab(bbox=(r.left, r.top, r.right, r.bottom), all_screens=True)
+        return imagen, (r.left, r.top)
+    except Exception as e:
+        logger.debug(f"no se pudo capturar el monitor activo, se usa el principal: {e}")
+        return None, (0, 0)
+
+
 def capturar() -> Optional[Captura]:
     """Toma una captura y la registra como la vigente. Return `None` si no se pudo."""
     global _ultima
@@ -76,9 +120,13 @@ def capturar() -> Optional[Captura]:
         logger.error("pyautogui no está instalado: no se puede capturar la pantalla")
         return None
 
+    origen = (0, 0)
     try:
         os.makedirs(_DIR_CAPTURAS, exist_ok=True)
-        imagen = pyautogui.screenshot()
+        imagen, origen = _capturar_monitor_activo()
+        if imagen is None:
+            imagen = pyautogui.screenshot()
+            origen = (0, 0)
         frame_id = f"f{int(time.time() * 1000) % 1_000_000:06d}"
         ruta = os.path.join(_DIR_CAPTURAS, f"{frame_id}.png")
         imagen.save(ruta)
@@ -89,6 +137,7 @@ def capturar() -> Optional[Captura]:
     captura = Captura(
         frame_id=frame_id, ruta=ruta,
         ancho=imagen.width, alto=imagen.height, tomada_en=time.monotonic(),
+        origen_x=origen[0], origen_y=origen[1],
     )
     with _lock:
         _ultima = captura
@@ -213,4 +262,6 @@ def localizar(captura: Captura, objetivo: str) -> Tuple[Optional[Tuple[int, int]
             f"pantalla de {captura.ancho}x{captura.alto}. No hago clic a ciegas."
         )
 
-    return (x, y), ""
+    # Se devuelven en coordenadas del escritorio, no de la imagen: si la captura es del
+    # segundo monitor, el clic tiene que sumarle dónde empieza ese monitor.
+    return (x + captura.origen_x, y + captura.origen_y), ""

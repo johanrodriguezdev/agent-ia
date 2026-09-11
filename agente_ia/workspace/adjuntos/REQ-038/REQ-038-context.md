@@ -118,12 +118,31 @@ lo que se podía *pulsar*: «Historia de Python» está en la página y el agent
 lo encontré" porque no había entrado en la muestra de 200. Ahora, si el nombre no está en la
 lista, se le pregunta a Windows por ese nombre concreto antes de rendirse.
 
+## Tercera entrega (2026-09-11) — leer lo que está dibujado
+
+Un mapa, un lienzo, un vídeo con subtítulos, una imagen con texto: no publican árbol, pero
+son píxeles con letras. `os_integration/ocr.py` usa el motor de reconocimiento de texto que
+trae Windows (`Windows.Media.Ocr`, español instalado): local, sin modelo y sin red.
+
+- `browser_text` cae al OCR de la ventana cuando la página no publica texto.
+- `pc_read` 🟢 lee lo dibujado en cualquier ventana: un juego, un escritorio remoto, un PDF
+  abierto en un visor que no publique texto.
+- Las cifras se corrigen donde el OCR se confunde: `$1.250.OOO` → `$1.250.000`, solo dentro
+  de palabras que ya son casi un número.
+
+Y de paso, dos cosas que estaban mal y salieron al medir:
+
+- **La captura de pantalla solo veía el monitor principal.** Johan tiene dos; una ventana
+  en x=2880 daba una captura en negro. `pc_look` la describía como si no existiera. Ahora se
+  captura el monitor donde está la ventana activa y se guarda su origen, porque un clic
+  calculado sobre esa captura tiene que sumarle dónde empieza ese monitor.
+- **La comprobación de lo escrito leía antes de que la aplicación terminara de teclear** y
+  avisaba en falso. Ahora espera a que el contenido deje de cambiar.
+
 ## Lo que sigue sin hacer
-- **Firefox no está medido.** Se reconoce para poder abrirlo; que publique la página no se
-  pudo comprobar porque no está instalado acá.
-- **Contenido dentro de un `<canvas>`** (un mapa, un editor de dibujo): ahí no hay árbol que
-  leer y no lo habrá. El camino es `pc_screenshot`, y el código lo dice cuando pasa.
-- **No inicia sesión solo** en sitios con captcha o doble factor.
+- **Firefox no está medido.** No está instalado, y medirlo es instalarlo y abrirle ventanas
+  en el equipo de Johan mientras lo usa. Se hace cuando él no esté delante.
+- **No resuelve captchas ni el doble factor.** Están para impedir exactamente esto.
 
 ## Pendiente
 - Prueba manual de Johan.

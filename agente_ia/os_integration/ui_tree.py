@@ -436,6 +436,32 @@ def describir_ventana_activa(maximo: int = 25) -> str:
     return "\n".join(lineas)
 
 
+def _contenido_de(control, largo_esperado: int) -> Optional[str]:
+    """Return lo que el control dice que contiene, o None si no lo publica."""
+    valor = patron(control, "ValuePattern")
+    if valor is not None:
+        try:
+            contenido = getattr(valor, "Value", None)
+            if contenido is not None:
+                return contenido
+        except Exception as e:
+            logger.debug(f"el campo no devolvió su contenido: {e}")
+    texto_patron = patron(control, "TextPattern")
+    if texto_patron is not None:
+        try:
+            return texto_patron.DocumentRange.GetText(largo_esperado + 200)
+        except Exception as e:
+            logger.debug(f"el campo no devolvió su texto: {e}")
+    return None
+
+
+#: Cuánto se espera a que la aplicación termine de procesar lo tecleado antes de comprobar.
+#: Las teclas van a la cola del sistema y la aplicación las consume a su ritmo: leer el campo
+#: justo después de mandarlas daba «Cotización No. 8841 / V» —a medio escribir— y un aviso
+#: falso de que no había quedado bien.
+_SEGUNDOS_PARA_ASENTARSE = 2.5
+
+
 def comprobar_escrito(control, texto: str) -> Optional[str]:
     """Return un aviso si el campo NO quedó con lo que se quiso escribir, o None.
 
@@ -449,24 +475,28 @@ def comprobar_escrito(control, texto: str) -> Optional[str]:
     if control is None or not texto:
         return None
 
-    contenido = None
-    valor = patron(control, "ValuePattern")
-    if valor is not None:
-        try:
-            contenido = getattr(valor, "Value", None)
-        except Exception as e:
-            logger.debug(f"el campo no devolvió su contenido: {e}")
-    if contenido is None:
-        texto_patron = patron(control, "TextPattern")
-        if texto_patron is not None:
-            try:
-                contenido = texto_patron.DocumentRange.GetText(len(texto) + 200)
-            except Exception as e:
-                logger.debug(f"el campo no devolvió su texto: {e}")
+    esperado = " ".join(texto.split())
+    limite = time.monotonic() + _SEGUNDOS_PARA_ASENTARSE
+    contenido = _contenido_de(control, len(texto))
     if contenido is None:
         return None
 
-    if texto.strip() in contenido:
+    # Se espera a que deje de cambiar, o a que ya esté lo que se quiso: lo primero que
+    # ocurra. Un campo que sigue creciendo es una aplicación que sigue tecleando.
+    anterior = None
+    while time.monotonic() < limite:
+        if esperado in " ".join(contenido.split()):
+            return None
+        if contenido == anterior:
+            break
+        anterior = contenido
+        time.sleep(0.25)
+        contenido = _contenido_de(control, len(texto)) or contenido
+
+    # Se comparan con los blancos aplanados: el Bloc de notas guarda los saltos como CR,
+    # otras aplicaciones como CR+LF, y lo que se tecleó llevaba LF. Comparando crudo, un
+    # texto de tres líneas escrito perfectamente daba "no quedó como querías".
+    if esperado in " ".join(contenido.split()):
         return None
     logger.warning(f"lo escrito no coincide: se quiso «{texto[:40]}» y quedó "
                    f"«{contenido[:40]}»")

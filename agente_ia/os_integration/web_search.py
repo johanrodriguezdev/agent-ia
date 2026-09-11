@@ -128,6 +128,59 @@ MAX_PAGINAS_PDF = 15
 MAX_BYTES_PDF = 8 * 1024 * 1024
 
 
+#: Páginas de un PDF escaneado que se reconocen. Cada una es dibujarla y pasarla por el
+#: OCR —alrededor de un segundo—, y en un escaneo el resumen también está al principio.
+MAX_PAGINAS_OCR = 5
+
+
+def _ocr_pdf(crudo: bytes, max_paginas: int = MAX_PAGINAS_OCR) -> str:
+    """Return el texto reconocido en las primeras páginas de un PDF sin texto, o vacío.
+
+    Hace falta dibujar cada página como imagen (PyMuPDF) y reconocerla (el OCR de
+    Windows). Si falta cualquiera de las dos cosas se devuelve vacío y el llamador lo
+    cuenta como escaneo ilegible, que es la verdad en ese equipo.
+    """
+    try:
+        import pymupdf
+    except ImportError:
+        logger.info("PyMuPDF no está instalado: un PDF escaneado no se puede reconocer")
+        return ""
+    from os_integration.ocr import disponible, leer_imagen
+
+    if not disponible():
+        return ""
+
+    import os
+    import tempfile
+
+    trozos = []
+    try:
+        documento = pymupdf.open(stream=crudo, filetype="pdf")
+    except Exception as e:
+        logger.debug(f"PyMuPDF no pudo abrir el PDF para reconocerlo: {e}")
+        return ""
+    try:
+        for numero, pagina in enumerate(documento):
+            if numero >= max_paginas:
+                break
+            ruta = os.path.join(tempfile.gettempdir(), f"orion_ocr_pdf_{numero}.png")
+            try:
+                pagina.get_pixmap(dpi=150).save(ruta)
+                leido = leer_imagen(ruta)
+            finally:
+                try:
+                    os.remove(ruta)
+                except OSError:
+                    pass
+            if leido:
+                trozos.append(leido)
+    except Exception as e:
+        logger.warning(f"el reconocimiento del PDF se cortó: {e}")
+    finally:
+        documento.close()
+    return "\n\n".join(trozos)
+
+
 def _extraer_pdf(respuesta, url: str, max_chars: int) -> Dict[str, str]:
     """Return el texto de un PDF descargado. Mismo formato que el resto de páginas.
 
@@ -168,10 +221,18 @@ def _extraer_pdf(respuesta, url: str, max_chars: int) -> Dict[str, str]:
     texto = "\n".join(linea.strip() for linea in texto.splitlines() if linea.strip())
     texto = _SALTOS_RE.sub("\n\n", texto).strip()
 
+    escaneado = False
     if not texto:
-        vacio["error"] = ("Ese PDF no trae texto: es un escaneo o son imágenes. Habría que "
-                          "leerlo a ojo, no se puede extraer.")
-        return vacio
+        # Un escaneo son imágenes: no hay texto que extraer, pero sí que RECONOCER. Se
+        # dibujan las primeras páginas y se pasan por el OCR de Windows. Sale marcado como
+        # leído por OCR porque puede traer errores; es incomparablemente mejor que "no se
+        # puede", que era lo que había.
+        texto = _ocr_pdf(respuesta.crudo)
+        escaneado = bool(texto)
+        if not texto:
+            vacio["error"] = ("Ese PDF no trae texto: es un escaneo o son imágenes, y el "
+                              "reconocimiento de texto tampoco sacó nada legible.")
+            return vacio
 
     titulo, fecha = "", ""
     try:
@@ -181,6 +242,9 @@ def _extraer_pdf(respuesta, url: str, max_chars: int) -> Dict[str, str]:
     except Exception as e:
         logger.debug(f"el PDF no declara título ni fecha: {e}")
 
+    if escaneado:
+        texto = ("[Texto reconocido por OCR de un PDF escaneado: puede tener errores de "
+                 "lectura]\n" + texto)
     if respuesta.truncada:
         texto += "\n\n[...el PDF era grande y se descargó solo el principio...]"
     if len(texto) > max_chars:
@@ -188,6 +252,41 @@ def _extraer_pdf(respuesta, url: str, max_chars: int) -> Dict[str, str]:
 
     return {"ok": True, "url": url, "titulo": titulo, "fecha": fecha,
             "texto": texto, "error": ""}
+
+
+#: Lo que se le dice al modelo cuando una página no se puede leer sin sesión. Importa que
+#: nombre el camino: el navegador del usuario YA tiene la sesión iniciada, y `browser_text`
+#: lee lo que se ve en él. Sin esto, "no pude leerla" se quedaba en un callejón.
+_AVISO_DE_SESION = (
+    "Esa página pide iniciar sesión ({motivo}) y por acá entro sin credenciales. Si la "
+    "abrís en tu navegador —donde ya tenés la sesión— la leo con 'browser_text', o "
+    "decime que la abra yo con 'browser_open'."
+)
+
+#: Con menos texto que esto, un formulario de acceso ES la página. Con más, es una página
+#: normal que además tiene un cuadro de "iniciar sesión" en la esquina, como casi todas.
+_POCO_TEXTO_PARA_SER_MURO = 700
+
+#: Trozos de dirección que delatan una pantalla de acceso, cuando la página redirige a una.
+_RUTAS_DE_ACCESO = ("login", "signin", "sign-in", "iniciar-sesion", "acceder", "/auth",
+                    "account/login", "sesion")
+
+
+def _pide_sesion(sopa, url_final: str) -> bool:
+    """Return True si lo descargado parece un muro de acceso y no el contenido.
+
+    Dos señales, y hace falta cualquiera: un campo de contraseña en la página, o que la
+    dirección FINAL —tras las redirecciones— sea la de una pantalla de acceso. El llamador
+    exige además que haya poco texto, porque un campo de contraseña en una esquina lo tiene
+    media internet.
+    """
+    try:
+        if sopa.find("input", attrs={"type": "password"}) is not None:
+            return True
+    except Exception:
+        pass
+    camino = (url_final or "").lower()
+    return any(marca in camino for marca in _RUTAS_DE_ACCESO)
 
 
 def extraer_pagina(url: str, max_chars: int = MAX_CHARS_PAGINA) -> Dict[str, str]:
@@ -240,6 +339,13 @@ def extraer_pagina(url: str, max_chars: int = MAX_CHARS_PAGINA) -> Dict[str, str
         vacio["error"] = f"No pude abrir esa página: {type(e).__name__}."
         return vacio
 
+    if respuesta.status in (401, 403):
+        # No es un error de la página: es que no deja entrar sin credenciales, o bloquea
+        # lecturas automáticas. En el navegador del usuario la sesión ya está iniciada, y
+        # `browser_text` lee lo que se ve: ese es el camino, y hay que decirlo.
+        vacio["error"] = _AVISO_DE_SESION.format(motivo=f"respondió {respuesta.status}")
+        vacio["sesion"] = True
+        return vacio
     if respuesta.status >= 400:
         vacio["error"] = f"Esa página respondió con un error {respuesta.status}."
         return vacio
@@ -257,6 +363,8 @@ def extraer_pagina(url: str, max_chars: int = MAX_CHARS_PAGINA) -> Dict[str, str
         sopa = BeautifulSoup(respuesta.texto, "html.parser")
         titulo = (sopa.title.get_text().strip() if sopa.title else "")
         fecha = _fecha_publicada(sopa)
+        # Se mira ANTES de quitar los formularios: el campo de contraseña vive en uno.
+        muro = _pide_sesion(sopa, getattr(respuesta, "url_final", "") or url)
         for etiqueta in sopa(["script", "style", "nav", "footer", "header", "aside", "form"]):
             etiqueta.decompose()
         texto = sopa.get_text("\n")
@@ -268,6 +376,11 @@ def extraer_pagina(url: str, max_chars: int = MAX_CHARS_PAGINA) -> Dict[str, str
     texto = _ESPACIOS_RE.sub(" ", texto)
     texto = "\n".join(linea.strip() for linea in texto.splitlines() if linea.strip())
     texto = _SALTOS_RE.sub("\n\n", texto).strip()
+
+    if muro and len(texto) < _POCO_TEXTO_PARA_SER_MURO:
+        vacio["error"] = _AVISO_DE_SESION.format(motivo="muestra un formulario de acceso")
+        vacio["sesion"] = True
+        return vacio
 
     if not texto:
         vacio["error"] = "Esa página no tiene texto legible."
