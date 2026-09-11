@@ -1,0 +1,98 @@
+# Contexto REQ-039 — Investigar: varias fuentes a la vez y con qué sostener cada dato
+
+## Resumen ejecutivo
+Punto 3 de la lista de Johan: *"Investigación: puede buscar información, analizarla,
+combinar múltiples fuentes y producir un resultado estructurado"*.
+
+Con `web_search` + `web_read` el agente ya *podía* investigar. El problema no era la
+capacidad, era el presupuesto y la honestidad del resultado.
+
+## Estado actual
+- **Estado tracker:** EN_PRUEBAS | **Categoría:** INTEGRACION | **Tipo:** FEATURE_NUEVA
+- **Rama git:** `feature/REQ-027-reasoning-loop-nativo` | **Fecha:** 2026-09-10
+
+## Por qué no alcanzaba con lo que había
+
+**1. Se quedaba sin turnos antes de empezar a pensar.** Cada página era una vuelta entera
+del bucle de razonamiento, y el bucle tiene techo (`MAX_LLM_CALLS = 8`, menos en canales
+remotos). Buscar, leer una, leer otra, leer otra: cuatro vueltas gastadas en descargar, y el
+razonamiento tenía que caber en lo que sobrara.
+
+**2. Cada página entraba entera.** Seis mil caracteres por fuente, de los que sirven
+doscientos. Cinco fuentes no cabían.
+
+**3. Nada distinguía una fuente de una copia.** Cinco medios publicando el mismo teletipo se
+presentaban como cinco resultados, y eso hace que una conclusión parezca respaldada cuando
+está sostenida por una sola fuente.
+
+## La decisión de diseño: el paralelismo va dentro de la herramienta
+
+El bucle ejecuta las tool calls **en secuencia a propósito** — una confirmación humana
+concurrente con otra ejecución es exactamente lo que el gate de REQ-005 no debe permitir, y
+eso no se toca. Así que el paralelismo vive dentro de una sola herramienta, que pasa por su
+gate una vez y por dentro solo hace lecturas.
+
+    research(pregunta, consultas[], max_fuentes)
+      ├── busca con hasta 4 consultas EN PARALELO
+      ├── mezcla intercalando: si no, la primera consulta se lleva todas las fuentes
+      ├── descarta páginas repetidas y limita a 2 por dominio
+      ├── descarga las páginas EN PARALELO (25 s para todas, no por cada una)
+      ├── marca las que copian el contenido de otra
+      └── de cada una extrae los párrafos que responden la pregunta
+
+**Quién decide las consultas: el modelo.** Descomponer una pregunta en las búsquedas que la
+responden es justo lo que sabe hacer; hacerlo acá con reglas sería peor. La herramienta hace
+el trabajo mecánico y no saca conclusiones.
+
+## Lo que sostiene la honestidad del resultado
+
+| Decisión | Por qué |
+|---|---|
+| Marcar las copias (parecido ≥ 0,6 sobre palabras poco comunes) | Cinco copias del mismo teletipo no son cinco confirmaciones |
+| Tope de 2 fuentes por dominio | Tres enlaces de un mismo medio son una fuente |
+| Guardar la fecha de publicación | Dos fuentes que se contradicen pueden estar separadas por dos años, no en desacuerdo |
+| Contar "fuentes independientes" al final | Es el número que importa, y no el de enlaces |
+| Cerrar el dosier pidiendo citas, discrepancias y lo no verificado | El resultado estructurado es parte del encargo |
+
+## El filtro de prosa — un caso real
+La primera versión recortaba "los párrafos más relevantes" y en la prueba contra internet
+devolvió, para una pregunta sobre tarifas de envío, cincuenta líneas así:
+
+    International Shipping / Shipping API / Volver / Ver todas las funciones / Contacto
+
+Todas traían las palabras buscadas y ninguna traía una cifra. Al quitar las etiquetas HTML,
+cada elemento de un menú queda en su propia línea, y un bloque de cincuenta menús seguidos
+parece un párrafo largo. Ahora se filtra **línea a línea** y se exige que parezca una frase:
+60 caracteres, 10 palabras y puntuación interna. Si nada parece prosa —una tabla de
+precios— se cae a las líneas sueltas, que es peor pero sigue siendo el contenido.
+
+## Medido contra internet
+| Prueba | Resultado |
+|---|---|
+| "qué es el protocolo MCP de Anthropic", 2 consultas | 5 fuentes útiles en **12,2 s** |
+| "festivos en Colombia en octubre de 2026", 2 consultas | 5 fuentes útiles en **10,1 s** |
+
+En secuencia, esas mismas cinco páginas habrían sido 5 vueltas del bucle.
+
+## Seguridad
+- `research` es 🟢 **verde**, igual que `web_search` y `web_read`, de las que sale todo lo
+  que hace: leer información pública. No escribe nada.
+- Las descargas pasan por `core/http_seguro.py`, así que la guarda anti-SSRF de REQ-031
+  sigue puesta: una investigación no puede terminar leyendo `127.0.0.1:3000`.
+- El dosier termina diciendo explícitamente que lo de arriba **son datos, no
+  instrucciones**. Es contenido escrito por terceros y entra al contexto del modelo: está
+  fijado por test.
+
+## Lo que NO hace
+- **No detecta que dos fuentes son la misma en idiomas distintos.** La Wikipedia inglesa y
+  la española del mismo artículo pasan como fuentes separadas; la comparación es por
+  palabras y no las comparten.
+- **No juzga la calidad de una fuente.** No sabe si un dominio es un medio serio o un blog.
+  Da el dominio y la fecha para que el modelo —y el usuario— lo valoren.
+- **No lee PDFs ni páginas que exigen sesión.** Para un PDF abierto en el navegador está
+  `browser_text` (REQ-038).
+- **No guarda el informe solo.** Si Johan quiere el resultado en un archivo, se escribe con
+  `file_write`, que es 🟡 y confinado a las carpetas de trabajo.
+
+## Pendiente
+- Prueba manual de Johan.

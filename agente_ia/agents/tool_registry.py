@@ -2325,3 +2325,74 @@ register_tool(ToolSpec(
     risk_level=RiskLevel.YELLOW,
     invoke=_browser_tab_close_invoke,
 ))
+
+
+# ---------------------------------------------------------------------------
+# REQ-039 — investigar: varias fuentes a la vez, y con qué sostener cada dato.
+# ---------------------------------------------------------------------------
+
+def _research_invoke(params: dict) -> str:
+    from core.investigacion import MAX_FUENTES, formatear, investigar
+
+    pregunta = str(params.get("pregunta") or params.get("query") or "").strip()
+    if not pregunta:
+        return f"Necesito saber qué querés que investigue{vocative()}."
+
+    crudas = params.get("consultas") or []
+    if isinstance(crudas, str):
+        crudas = [crudas]
+    consultas = [str(c).strip() for c in crudas if str(c).strip()]
+
+    try:
+        cuantas = int(params.get("max_fuentes") or MAX_FUENTES)
+    except (TypeError, ValueError):
+        cuantas = MAX_FUENTES
+
+    return _con_manejo(
+        "research",
+        lambda: formatear(investigar(pregunta, consultas, cuantas)),
+    )
+
+
+register_tool(ToolSpec(
+    name="research",
+    description=(
+        "Investiga una pregunta: busca con varias consultas a la vez, lee las páginas en "
+        "paralelo y devuelve un dosier con las fuentes numeradas, su dominio y su fecha. "
+        "Marca cuáles repiten el contenido de otra —cinco medios copiando el mismo "
+        "teletipo no son cinco confirmaciones— para que no cuentes como respaldo lo que es "
+        "una sola fuente.\n"
+        "Úsala en vez de encadenar 'web_search' + varios 'web_read' siempre que la "
+        "pregunta necesite contrastar: en una llamada hace lo que en esas te cuesta cinco, "
+        "y te quedan vueltas para pensar.\n"
+        "Pasá en 'consultas' las búsquedas concretas que responden la pregunta —"
+        "descomponerla es tuyo, no de la herramienta—. Con la respuesta, cita cada dato "
+        "con el número de su fuente y decí en qué no coinciden."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "pregunta": {
+                "type": "string",
+                "description": "Qué hay que averiguar, tal como lo entendiste.",
+            },
+            "consultas": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Búsquedas concretas (hasta 4). Si no las pasás, se busca la pregunta "
+                    "tal cual, que casi siempre da peores resultados."
+                ),
+            },
+            "max_fuentes": {
+                "type": "integer",
+                "description": "Cuántas fuentes leer (por defecto 5, máximo 10).",
+            },
+        },
+        "required": ["pregunta"],
+    },
+    # GREEN: leer información pública, igual que `web_search` y `web_read`, de las que sale
+    # todo lo que hace. No escribe nada y las descargas pasan por la misma guarda anti-SSRF.
+    risk_level=RiskLevel.GREEN,
+    invoke=_research_invoke,
+))

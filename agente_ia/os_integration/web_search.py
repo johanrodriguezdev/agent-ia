@@ -113,23 +113,29 @@ def formatear_resultados(resultados: List[Dict[str, str]], consulta: str) -> str
     return "\n".join(lineas).strip()
 
 
-def leer_pagina(url: str, max_chars: int = MAX_CHARS_PAGINA) -> str:
-    """Return el texto legible de una página, o un mensaje de error.
+def extraer_pagina(url: str, max_chars: int = MAX_CHARS_PAGINA) -> Dict[str, str]:
+    """Return `{ok, url, titulo, fecha, texto, error}` de una página.
 
-    Se descartan `script`, `style`, navegación y pies: lo que interesa es la prosa. Sin una
-    librería de extracción dedicada esto no es perfecto, pero es suficiente para que el
-    modelo lea un artículo y responda con él.
+    Es el trabajo real de `leer_pagina`, separado para que una investigación pueda leer
+    varias páginas a la vez y quedarse además con el título y la fecha — que a la hora de
+    contrastar fuentes importan tanto como el texto. `leer_pagina` no cambió: sigue
+    devolviendo el mismo texto, y los mismos mensajes cuando algo falla.
     """
+    vacio = {"ok": False, "url": url, "titulo": "", "fecha": "", "texto": "", "error": ""}
+
     url = (url or "").strip()
+    vacio["url"] = url
     if not url.startswith(("http://", "https://")):
-        return "Solo puedo leer direcciones que empiecen por http:// o https://."
+        vacio["error"] = "Solo puedo leer direcciones que empiecen por http:// o https://."
+        return vacio
 
     try:
         import requests  # noqa: F401 — lo usa `core.http_seguro`; se chequea acá para el aviso claro
         from bs4 import BeautifulSoup
     except ImportError as e:
         logger.error(f"Falta una dependencia para leer páginas: {e}")
-        return "No tengo instalado lo necesario para leer páginas web."
+        vacio["error"] = "No tengo instalado lo necesario para leer páginas web."
+        return vacio
 
     # REQ-031 — el destino se valida antes de conectarse, y en cada redirección. Antes acá
     # había un `requests.get()` pelado: alcanzaba con pedir `http://127.0.0.1:3000` o
@@ -141,35 +147,87 @@ def leer_pagina(url: str, max_chars: int = MAX_CHARS_PAGINA) -> str:
         respuesta = pedir(url, timeout=TIMEOUT)
     except DestinoBloqueado as e:
         logger.info(f"lectura de página rechazada por destino no permitido: {e}")
-        return str(e)
+        vacio["error"] = str(e)
+        return vacio
     except Exception as e:
         logger.warning(f"No se pudo descargar '{url[:80]}': {e}")
-        return f"No pude abrir esa página: {type(e).__name__}."
+        vacio["error"] = f"No pude abrir esa página: {type(e).__name__}."
+        return vacio
 
     if respuesta.status >= 400:
-        return f"Esa página respondió con un error {respuesta.status}."
+        vacio["error"] = f"Esa página respondió con un error {respuesta.status}."
+        return vacio
 
     tipo = respuesta.content_type
     if "html" not in tipo and "text" not in tipo:
-        return f"Esa dirección no es una página de texto (es {tipo or 'de tipo desconocido'})."
+        vacio["error"] = (f"Esa dirección no es una página de texto "
+                          f"(es {tipo or 'de tipo desconocido'}).")
+        return vacio
 
     try:
         sopa = BeautifulSoup(respuesta.texto, "html.parser")
+        titulo = (sopa.title.get_text().strip() if sopa.title else "")
+        fecha = _fecha_publicada(sopa)
         for etiqueta in sopa(["script", "style", "nav", "footer", "header", "aside", "form"]):
             etiqueta.decompose()
         texto = sopa.get_text("\n")
     except Exception as e:
         logger.warning(f"No se pudo extraer el texto de '{url[:80]}': {e}")
-        return "Pude descargar la página pero no entender su contenido."
+        vacio["error"] = "Pude descargar la página pero no entender su contenido."
+        return vacio
 
     texto = _ESPACIOS_RE.sub(" ", texto)
     texto = "\n".join(linea.strip() for linea in texto.splitlines() if linea.strip())
     texto = _SALTOS_RE.sub("\n\n", texto).strip()
 
     if not texto:
-        return "Esa página no tiene texto legible."
+        vacio["error"] = "Esa página no tiene texto legible."
+        return vacio
 
     if len(texto) > max_chars:
         texto = texto[:max_chars].rsplit(" ", 1)[0] + "\n\n[...contenido truncado...]"
 
-    return f"Contenido de {url}:\n\n{texto}"
+    return {"ok": True, "url": url, "titulo": titulo, "fecha": fecha,
+            "texto": texto, "error": ""}
+
+
+#: De dónde se saca la fecha de publicación, en orden de fiabilidad. Ninguna es obligatoria:
+#: media web no la publica, y para contrastar fuentes es mejor "sin fecha" que una inventada.
+_METAS_DE_FECHA = (
+    ("meta", {"property": "article:published_time"}, "content"),
+    ("meta", {"name": "date"}, "content"),
+    ("meta", {"name": "pubdate"}, "content"),
+    ("meta", {"itemprop": "datePublished"}, "content"),
+    ("time", {"datetime": True}, "datetime"),
+)
+
+
+def _fecha_publicada(sopa) -> str:
+    """Return la fecha de publicación declarada por la página, o cadena vacía.
+
+    Importa para investigar: dos fuentes que dicen cosas distintas pueden no estar en
+    desacuerdo, sino separadas por dos años.
+    """
+    for etiqueta, atributos, campo in _METAS_DE_FECHA:
+        try:
+            hallado = sopa.find(etiqueta, attrs=atributos)
+        except Exception:
+            continue
+        if hallado:
+            valor = (hallado.get(campo) or "").strip()
+            if valor:
+                return valor[:10]            # basta el día: 2026-09-10
+    return ""
+
+
+def leer_pagina(url: str, max_chars: int = MAX_CHARS_PAGINA) -> str:
+    """Return el texto legible de una página, o un mensaje de error.
+
+    Se descartan `script`, `style`, navegación y pies: lo que interesa es la prosa. Sin una
+    librería de extracción dedicada esto no es perfecto, pero es suficiente para que el
+    modelo lea un artículo y responda con él.
+    """
+    pagina = extraer_pagina(url, max_chars)
+    if not pagina["ok"]:
+        return pagina["error"]
+    return f"Contenido de {pagina['url']}:\n\n{pagina['texto']}"
