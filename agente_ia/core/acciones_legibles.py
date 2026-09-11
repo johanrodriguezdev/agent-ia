@@ -51,6 +51,7 @@ _DESCRIPCIONES: Dict[str, str] = {
     # sesión del usuario, con sus cuentas abiertas. El objetivo concreto lo agrega
     # `format_details` a partir del parámetro `objetivo`.
     "browser_act": "haga clic o escriba dentro de la página abierta",
+    "browser_tab_close": "cierre una pestaña del navegador",
 
     # ── Terminal ──
     "terminal_open": "abra una terminal",

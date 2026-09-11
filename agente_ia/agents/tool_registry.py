@@ -2213,3 +2213,115 @@ register_tool(ToolSpec(
     risk_level=RiskLevel.YELLOW,
     invoke=_browser_act_invoke,
 ))
+
+
+def _browser_text_invoke(params: dict) -> str:
+    from os_integration.navegador import MAX_CARACTERES_DE_TEXTO, texto_de_pagina
+
+    try:
+        tope = int(params.get("maximo") or MAX_CARACTERES_DE_TEXTO)
+    except (TypeError, ValueError):
+        tope = MAX_CARACTERES_DE_TEXTO
+    return _con_manejo("browser_text", lambda: texto_de_pagina(tope))
+
+
+register_tool(ToolSpec(
+    name="browser_text",
+    description=(
+        "Lee el TEXTO de la página abierta, no solo lo que se puede pulsar. Úsala cuando "
+        "el usuario pregunte por el contenido: resumir un artículo, buscar un dato dentro "
+        "de la página, comparar dos cosas que dice. Sirve también para un PDF abierto en "
+        "el navegador. Si querés pulsar algo, esa es 'browser_page' + 'browser_act'."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "maximo": {
+                "type": "integer",
+                "description": "Tope de caracteres a devolver (por defecto 6000).",
+            },
+        },
+    },
+    # GREEN: es leer lo que el usuario ya tiene en pantalla. Mismo criterio que `pc_look`.
+    risk_level=RiskLevel.GREEN,
+    invoke=_browser_text_invoke,
+))
+
+
+def _browser_tabs_invoke(_params: dict) -> str:
+    from os_integration.navegador import listar_pestanas
+
+    return _con_manejo("browser_tabs", listar_pestanas)
+
+
+register_tool(ToolSpec(
+    name="browser_tabs",
+    description=(
+        "Lista las pestañas abiertas del navegador y marca cuál se está viendo. Úsala "
+        "cuando el usuario hable de algo que tiene abierto en otra pestaña, o antes de "
+        "cambiarte a una."
+    ),
+    parameters_schema={"type": "object", "properties": {}},
+    # GREEN: mira, no toca.
+    risk_level=RiskLevel.GREEN,
+    invoke=_browser_tabs_invoke,
+))
+
+
+def _browser_tab_switch_invoke(params: dict) -> str:
+    from os_integration.navegador import cambiar_de_pestana
+
+    objetivo = str(params.get("objetivo") or "").strip()
+    if not objetivo:
+        return f"Necesito el nombre de la pestaña a la que querés ir{vocative()}."
+    return _con_manejo("browser_tab_switch", lambda: cambiar_de_pestana(objetivo))
+
+
+register_tool(ToolSpec(
+    name="browser_tab_switch",
+    description=(
+        "Pone delante una pestaña por su nombre (el que devuelve 'browser_tabs'). Después "
+        "de cambiar, 'browser_page' y 'browser_text' leen esa pestaña."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "objetivo": {"type": "string", "description": "Nombre de la pestaña."},
+        },
+        "required": ["objetivo"],
+    },
+    # GREEN: cambia lo que se ve, no toca el contenido de ninguna página — y se hace por
+    # UI Automation, sin ratón y sin robarle el foco a lo que el usuario esté haciendo.
+    risk_level=RiskLevel.GREEN,
+    invoke=_browser_tab_switch_invoke,
+))
+
+
+def _browser_tab_close_invoke(params: dict) -> str:
+    from os_integration.navegador import cerrar_pestana
+
+    objetivo = str(params.get("objetivo") or "").strip()
+    if not objetivo:
+        return f"Necesito el nombre de la pestaña que querés cerrar{vocative()}."
+    return _con_manejo("browser_tab_close", lambda: cerrar_pestana(objetivo))
+
+
+register_tool(ToolSpec(
+    name="browser_tab_close",
+    description=(
+        "Cierra una pestaña por su nombre. Cerrá solo lo que el usuario te pida cerrar: "
+        "una pestaña puede tener un formulario a medio llenar."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "objetivo": {"type": "string", "description": "Nombre de la pestaña a cerrar."},
+        },
+        "required": ["objetivo"],
+    },
+    # YELLOW: lo que se pierde al cerrar no vuelve — un formulario a medio llenar, un
+    # borrador. Es el mismo criterio que "cerrar aplicaciones" en las reglas del proyecto, y
+    # la confirmación dice qué pestaña es.
+    risk_level=RiskLevel.YELLOW,
+    invoke=_browser_tab_close_invoke,
+))

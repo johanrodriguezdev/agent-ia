@@ -99,6 +99,24 @@ def _al_futuro(parsed: datetime.datetime) -> datetime.datetime:
 _HORA_POR_DEFECTO = 9
 
 
+def _hoy_sin_hora(now: datetime.datetime) -> datetime.datetime:
+    """Return cuándo cae un "hoy" al que no le dieron hora. Siempre HOY.
+
+    A las 9, que es la misma hora por defecto que usa "mañana". Si ya pasaron, dentro de una
+    hora — pero **sin salirse del día**: la versión anterior devolvía `ahora + 1 hora` a
+    secas, así que un "recordame llamar al banco hoy" dicho a las once de la noche quedaba
+    para mañana a las doce y pico. Es el error que decía arreglar.
+
+    En el último minuto del día no queda "hoy" al que mandarlo, y entonces cae ya mismo: un
+    recordatorio que suena enseguida es más fiel a lo que se pidió que uno que suena mañana.
+    """
+    target = now.replace(hour=_HORA_POR_DEFECTO, minute=0, second=0, microsecond=0)
+    if target > now:
+        return target
+    fin_del_dia = now.replace(hour=23, minute=59, second=0, microsecond=0)
+    return min(now + datetime.timedelta(hours=1), fin_del_dia)
+
+
 def _fallback_date_parse(text: str) -> Optional[datetime.datetime]:
     """Parseo básico con regex para cuando dateparser no está disponible."""
     now = datetime.datetime.now()
@@ -148,10 +166,7 @@ def _fallback_date_parse(text: str) -> Optional[datetime.datetime]:
         # creaba y el agente seguia preguntando "para cuando" por una fecha que el usuario
         # ya habia dado.
         #
-        # A las 9, que es la misma hora por defecto que usa "manana". Si ya pasaron, dentro
-        # de una hora: un recordatorio para hoy tiene que caer hoy, no manana.
-        target = now.replace(hour=_HORA_POR_DEFECTO, minute=0, second=0, microsecond=0)
-        return target if target > now else now + datetime.timedelta(hours=1)
+        return _hoy_sin_hora(now)
 
     # Días de la semana
     dias = {

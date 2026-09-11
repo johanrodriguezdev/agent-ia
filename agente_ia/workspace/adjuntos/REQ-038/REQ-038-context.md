@@ -85,15 +85,45 @@ equivocado dentro de la sesión del usuario no es un detalle de precisión. `_el
 ahora de lo estricto a lo flexible —exacto, empieza por, **palabra entera**, aparece
 dentro— y entre varios candidatos gana el nombre más corto.
 
-## Lo que NO hace todavía
-- **No desplaza la página.** Solo actúa sobre lo que está renderizado; un elemento que
-  requiere hacer scroll no aparece en la lista.
-- **No maneja pestañas** (cambiar, cerrar, abrir en segundo plano).
-- **No lee PDFs abiertos en el navegador** ni contenido dentro de un `<canvas>`: ahí no hay
-  árbol de accesibilidad que leer.
-- **No espera a que la página termine de cambiar** después de un clic: si un formulario
-  carga la pantalla siguiente, hay que volver a pedir `browser_page`.
-- Firefox no está en la lista de navegadores reconocidos (Chrome y Edge sí).
+## Segunda entrega — los cinco huecos que quedaban
+
+Johan pidió cerrarlos todos. Se cerraron cuatro y el quinto queda reconocido pero sin medir.
+
+| Hueco | Qué se hizo |
+|---|---|
+| No desplazaba la página | `ScrollItemPattern.ScrollIntoView()` antes de pulsar. Medido: un enlace a y=5352 baja a y=556 |
+| No manejaba pestañas | `browser_tabs`, `browser_tab_switch` 🟢, `browser_tab_close` 🟡 |
+| No leía PDFs ni texto | `browser_text` con `TextPattern`. **El PDF se lee**: probado con uno abierto en Chrome |
+| No esperaba tras un clic | `_esperar_a_que_cambie`: espera a que cambie *y se quede quieta*, y dice en qué página quedaste |
+| Firefox | Reconocido, **sin probar**: no está instalado en esta máquina |
+
+### El cambio de fondo: patrones en vez de ratón
+Cerrando estos huecos apareció algo más importante. Hacer todo con coordenadas se rompe por
+todos lados, y se rompió de verdad en las pruebas:
+
+1. Windows se negó a poner la ventana al frente — el clic se rechazó (bien) pero el paso no
+   se hizo. Se arregló enganchándose al hilo de entrada (`AttachThreadInput`) y reintentando.
+2. Al traer un enlace de Wikipedia a la vista, `ScrollIntoView` lo dejó **debajo de la
+   cabecera fija** de la página: el punto exacto estaba tapado.
+
+UI Automation permite *operar* los controles, no solo leerlos, y eso no tiene ninguno de
+esos problemas. Ahora se pulsa con `InvokePattern`, se escribe con `SetFocus()` + teclado,
+se cambia de pestaña con `SelectionItemPattern` y se cierra con el `InvokePattern` de su
+botón. El clic por coordenadas sigue de respaldo, con todas las comprobaciones
+(`_preparar_clic_fisico`), pero ya no es el camino normal.
+
+### Y un tercer hueco que no estaba en la lista
+El tope de elementos acotaba lo que se le *muestra* al modelo, pero también estaba acotando
+lo que se podía *pulsar*: «Historia de Python» está en la página y el agente respondía "no
+lo encontré" porque no había entrado en la muestra de 200. Ahora, si el nombre no está en la
+lista, se le pregunta a Windows por ese nombre concreto antes de rendirse.
+
+## Lo que sigue sin hacer
+- **Firefox no está medido.** Se reconoce para poder abrirlo; que publique la página no se
+  pudo comprobar porque no está instalado acá.
+- **Contenido dentro de un `<canvas>`** (un mapa, un editor de dibujo): ahí no hay árbol que
+  leer y no lo habrá. El camino es `pc_screenshot`, y el código lo dice cuando pasa.
+- **No inicia sesión solo** en sitios con captcha o doble factor.
 
 ## Pendiente
 - Prueba manual de Johan.
