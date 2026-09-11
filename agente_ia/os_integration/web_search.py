@@ -113,6 +113,83 @@ def formatear_resultados(resultados: List[Dict[str, str]], consulta: str) -> str
     return "\n".join(lineas).strip()
 
 
+#: Páginas de un PDF que se leen. Un informe oficial puede tener doscientas y no caben; las
+#: primeras traen el resumen ejecutivo, que es donde está la respuesta casi siempre.
+MAX_PAGINAS_PDF = 15
+
+#: Cuánto se deja descargar de un PDF. El tope general de `http_seguro` son 2 MB, pensado
+#: para páginas web, y con un PDF no sirve de nada quedarse a medias: el índice que dice
+#: dónde empieza cada página va **al final** del archivo, así que un PDF cortado no es un
+#: PDF incompleto, es un PDF ilegible. Probado contra informes reales de Fedepalma y de la
+#: Universidad Nacional: los dos fallaban con 2 MB.
+#:
+#: Sigue siendo un tope, que es lo que importa: la guarda existe para que una respuesta de
+#: gigabytes no se coma la memoria, no para que sean exactamente dos megas.
+MAX_BYTES_PDF = 8 * 1024 * 1024
+
+
+def _extraer_pdf(respuesta, url: str, max_chars: int) -> Dict[str, str]:
+    """Return el texto de un PDF descargado. Mismo formato que el resto de páginas.
+
+    Media fuente autorizada vive en PDF —informes de un ministerio, papers, circulares— y
+    hasta acá se descartaban por no ser HTML: el agente veía el enlace en los resultados y
+    no podía abrirlo.
+
+    Un PDF escaneado no tiene texto, solo imágenes, y eso no se puede arreglar leyendo: se
+    dice, en vez de devolver una página en blanco como si no hubiera nada que contar.
+    """
+    vacio = {"ok": False, "url": url, "titulo": "", "fecha": "", "texto": "", "error": ""}
+    try:
+        from PyPDF2 import PdfReader
+    except ImportError as e:
+        logger.warning(f"no hay con qué leer PDFs: {e}")
+        vacio["error"] = "No tengo instalado lo necesario para leer archivos PDF."
+        return vacio
+
+    import io as _io
+
+    try:
+        lector = PdfReader(_io.BytesIO(respuesta.crudo))
+        paginas = [(p.extract_text() or "") for p in lector.pages[:MAX_PAGINAS_PDF]]
+    except Exception as e:
+        logger.warning(f"no se pudo leer el PDF '{url[:70]}': {e}")
+        if getattr(respuesta, "truncada", False):
+            # El indice de un PDF va al final: cortado por tamano no es incompleto, es
+            # ilegible. Decirlo asi permite al modelo buscar otra fuente en vez de insistir.
+            vacio["error"] = (f"Ese PDF pesa mas de {MAX_BYTES_PDF // (1024 * 1024)} MB y "
+                              f"solo pude descargar el principio, con lo que no se puede "
+                              f"abrir. Haria falta otra fuente.")
+        else:
+            vacio["error"] = "Pude descargar el PDF pero no entender su contenido."
+        return vacio
+
+    texto = "\n".join(p.strip() for p in paginas if p.strip())
+    texto = _ESPACIOS_RE.sub(" ", texto)
+    texto = "\n".join(linea.strip() for linea in texto.splitlines() if linea.strip())
+    texto = _SALTOS_RE.sub("\n\n", texto).strip()
+
+    if not texto:
+        vacio["error"] = ("Ese PDF no trae texto: es un escaneo o son imágenes. Habría que "
+                          "leerlo a ojo, no se puede extraer.")
+        return vacio
+
+    titulo, fecha = "", ""
+    try:
+        datos = lector.metadata or {}
+        titulo = (datos.get("/Title") or "").strip()
+        fecha = (datos.get("/CreationDate") or "")[2:10]   # D:20260910... -> 20260910
+    except Exception as e:
+        logger.debug(f"el PDF no declara título ni fecha: {e}")
+
+    if respuesta.truncada:
+        texto += "\n\n[...el PDF era grande y se descargó solo el principio...]"
+    if len(texto) > max_chars:
+        texto = texto[:max_chars].rsplit(" ", 1)[0] + "\n\n[...contenido truncado...]"
+
+    return {"ok": True, "url": url, "titulo": titulo, "fecha": fecha,
+            "texto": texto, "error": ""}
+
+
 def extraer_pagina(url: str, max_chars: int = MAX_CHARS_PAGINA) -> Dict[str, str]:
     """Return `{ok, url, titulo, fecha, texto, error}` de una página.
 
@@ -143,8 +220,17 @@ def extraer_pagina(url: str, max_chars: int = MAX_CHARS_PAGINA) -> Dict[str, str
     # contenido al chat. Y como `web_read` es verde, eso era alcanzable desde Telegram.
     from core.http_seguro import DestinoBloqueado, pedir
 
+    # El tope se decide ANTES de pedir, y lo unico que se sabe antes es la direccion.
+    # Un PDF servido sin ".pdf" en la URL se descarga con el tope normal y, si se corta,
+    # se vuelve a pedir con el grande: una peticion de mas solo en ese caso.
+    tope = MAX_BYTES_PDF if url.lower().endswith(".pdf") else None
+
     try:
-        respuesta = pedir(url, timeout=TIMEOUT)
+        respuesta = pedir(url, timeout=TIMEOUT, **({"max_bytes": tope} if tope else {}))
+        if (respuesta.truncada and tope is None
+                and "pdf" in (respuesta.content_type or "").lower()):
+            logger.info(f"'{url[:60]}' era un PDF cortado: se vuelve a pedir entero")
+            respuesta = pedir(url, timeout=TIMEOUT, max_bytes=MAX_BYTES_PDF)
     except DestinoBloqueado as e:
         logger.info(f"lectura de página rechazada por destino no permitido: {e}")
         vacio["error"] = str(e)
@@ -159,6 +245,9 @@ def extraer_pagina(url: str, max_chars: int = MAX_CHARS_PAGINA) -> Dict[str, str
         return vacio
 
     tipo = respuesta.content_type
+    if "pdf" in tipo.lower() or url.lower().endswith(".pdf"):
+        return _extraer_pdf(respuesta, url, max_chars)
+
     if "html" not in tipo and "text" not in tipo:
         vacio["error"] = (f"Esa dirección no es una página de texto "
                           f"(es {tipo or 'de tipo desconocido'}).")
