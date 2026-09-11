@@ -2417,3 +2417,47 @@ register_tool(ToolSpec(
     risk_level=RiskLevel.GREEN,
     invoke=_research_invoke,
 ))
+
+
+def _pc_act_invoke(params: dict) -> str:
+    """Pulsa o escribe en un control de la ventana activa por su NOMBRE."""
+    from os_integration.ui_tree import operar
+
+    objetivo = str(params.get("objetivo") or "").strip()
+    if not objetivo:
+        return f"Necesito el nombre de lo que querés que pulse{vocative()}."
+    texto = params.get("texto")
+    texto = str(texto) if texto not in (None, "") else None
+    return _con_manejo("pc_act", lambda: operar(objetivo, texto))
+
+
+register_tool(ToolSpec(
+    name="pc_act",
+    description=(
+        "Pulsa un botón, una pestaña o un elemento de la ventana que el usuario tiene "
+        "delante POR SU NOMBRE —el que devuelve 'pc_look'—, y si le pasás 'texto', lo "
+        "escribe ahí. Preferila a 'pc_find' + 'pc_click': el nombre se resuelve contra la "
+        "pantalla viva en el momento de pulsar, así que no hay hueco entre mirar y actuar, "
+        "y no depende de acertarle a unas coordenadas. Para una página web en el "
+        "navegador, usá 'browser_act'."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "objetivo": {
+                "type": "string",
+                "description": "Nombre del botón, campo o elemento, tal como se ve.",
+            },
+            "texto": {
+                "type": "string",
+                "description": "Qué escribir ahí. Vacío para solo pulsar.",
+            },
+        },
+        "required": ["objetivo"],
+    },
+    # YELLOW: actúa sobre la ventana del usuario, y quien da la orden puede no estar
+    # delante. Mismo nivel que `pc_click` y `pc_type`, y la confirmación muestra el
+    # objetivo y el texto (`_DETAILS_ALLOWED_KEYS`).
+    risk_level=RiskLevel.YELLOW,
+    invoke=_pc_act_invoke,
+))

@@ -545,18 +545,12 @@ _ultima_ventana: Optional[int] = None
 def _patron(control, nombre: str):
     """Return un patrón de UI Automation del control, o None si no lo tiene.
 
-    Los patrones son lo que permite *operar* un control sin el ratón: seleccionar una
-    pestaña, pulsar un botón, desplazar hasta un elemento. Cuando existe, siempre es mejor
-    que un clic por coordenadas — no depende de qué ventana esté delante ni de que el
-    usuario no mueva nada mientras tanto.
+    Vive en `ui_tree` porque operar un control es lo mismo dentro de una página que dentro
+    de cualquier otra ventana.
     """
-    try:
-        import uiautomation as auto
+    from os_integration.ui_tree import patron
 
-        return control.GetPattern(getattr(auto.PatternId, nombre))
-    except Exception as e:
-        logger.debug(f"el control no expone {nombre}: {e}")
-        return None
+    return patron(control, nombre)
 
 
 def _pestanas_de(hwnd: int) -> List:
@@ -1011,49 +1005,18 @@ def _asegurar_visible(hwnd: int, elemento):
 def _control_por_nombre(hwnd: int, nombre: str):
     """Return el control ACCIONABLE de la página que se llama así, o None.
 
-    Es el único sitio que decide "cuál de todos es". Importa que sea uno solo: mientras
-    pulsar y desplazar buscaban cada uno por su cuenta, en Wikipedia se quedaban con nodos
-    distintos que se llaman igual —el título de una sección y el enlace hacia ella—, así
-    que se desplazaba hasta uno y se intentaba pulsar el otro.
+    Lo resuelve `ui_tree`, acotado al documento y a los tipos que tienen sentido en una
+    página. Importa que sea un solo sitio: mientras pulsar y desplazar buscaban cada uno por
+    su cuenta, en Wikipedia se quedaban con nodos distintos que se llaman igual —el título
+    de una sección y el enlace hacia ella—, así que se desplazaba hasta uno y se intentaba
+    pulsar el otro.
     """
-    if not disponible():
-        return None
-    import uiautomation as auto
+    from os_integration.ui_tree import control_por_nombre
 
     documento, _tamano = documento_de(hwnd)
-    cliente = _cliente_uia()
-    if documento is None or cliente is None:
+    if documento is None:
         return None
-
-    tipos = {getattr(auto.ControlType, t) for t in TIPOS_ACCIONABLES
-             if hasattr(auto.ControlType, t)}
-    try:
-        # `IgnoreCase` evita fallar por una mayúscula; si esta versión de la API no lo
-        # admite, se busca exacto, que sigue sirviendo para los nombres que el modelo leyó.
-        try:
-            condicion = cliente.CreatePropertyConditionEx(
-                auto.PropertyId.NameProperty, nombre, 1,
-            )
-        except Exception:
-            condicion = cliente.CreatePropertyCondition(auto.PropertyId.NameProperty, nombre)
-        hallados = documento.Element.FindAll(TREE_DESCENDANTS, condicion)
-    except Exception as e:
-        logger.debug(f"no se pudo buscar «{nombre}» en la página: {e}")
-        return None
-
-    for i in range(hallados.Length):
-        try:
-            control = auto.Control.CreateControlFromElement(hallados.GetElement(i))
-            if control.Element.CurrentControlType not in tipos:
-                continue
-            rect = control.BoundingRectangle
-            if not rect or rect.width() <= 0 or rect.height() <= 0:
-                continue
-            return control
-        except Exception as e:
-            logger.debug(f"un candidato de «{nombre}» no se pudo leer: {e}")
-            continue
-    return None
+    return control_por_nombre(documento, nombre, frozenset(TIPOS_ACCIONABLES))
 
 
 def _elemento_por_nombre(hwnd: int, nombre: str):
@@ -1270,7 +1233,11 @@ def accionar(objetivo: str, texto: Optional[str] = None) -> str:
             time.sleep(0.3)
         type_text(texto)
         logger.info(f"[Navegador] escribí en «{elemento.nombre}» de '{titulo[:40]}'")
-        return f"Escribí «{texto}» en «{elemento.nombre}»."
+
+        from os_integration.ui_tree import comprobar_escrito
+
+        aviso = comprobar_escrito(control, texto) or ""
+        return f"Escribí «{texto}» en «{elemento.nombre}».{aviso}"
 
     # Pulsar por el patrón del propio elemento cuando se puede: no depende de qué ventana
     # esté delante, no hay coordenadas que puedan caer en otro sitio, y no falla porque una
