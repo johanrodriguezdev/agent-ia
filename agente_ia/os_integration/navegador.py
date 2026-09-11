@@ -213,17 +213,14 @@ def _cliente_uia():
     segundo cliente COM en el mismo proceso funciona, pero duplica el coste de cada
     consulta sin ganar nada.
 
-    Es API privada de la librería (`_AutomationClient`). Si una versión futura la mueve,
-    esto devuelve None y el módulo sigue funcionando por el camino lento — más despacio y
-    con menos alcance, pero sin romperse.
+    Vive en `ui_tree` porque ese es el módulo del árbol de accesibilidad, y porque lo usan
+    los dos: leer una página y leer cualquier otra ventana son el mismo problema. Si una
+    versión futura de la librería mueve esa API privada, devuelve None y todo sigue
+    funcionando por el camino lento — más despacio y con menos alcance, pero sin romperse.
     """
-    try:
-        from uiautomation.uiautomation import _AutomationClient
+    from os_integration.ui_tree import cliente_uia
 
-        return _AutomationClient.instance().IUIAutomation
-    except Exception as e:
-        logger.warning(f"UI Automation no expone el cliente nativo, se usa el camino lento: {e}")
-        return None
+    return cliente_uia()
 
 
 def _documentos_de(control) -> List:
