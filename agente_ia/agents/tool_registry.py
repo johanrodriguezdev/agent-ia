@@ -235,7 +235,28 @@ def execute_tool(name: str, params: dict, channel, user_id: str = "default") -> 
     # instrumentarlo aquí evita repartir avisos por cada `invoke`.
     _report_tool_progress(spec.name, params)
 
-    return spec.invoke(params)
+    # Quién ejecuta y por dónde lo pone el gate, no el llamador de turno. Son los mismos
+    # valores que ya usó `require_confirmation()` arriba, así que una herramienta no puede
+    # actuar como un usuario distinto del que acaba de autorizarla.
+    #
+    # Cierra un agujero real: cinco herramientas (`task_create`, `task_list`,
+    # `task_complete`, `task_complete_all`, `intent_list`) leen `params["user_id"]` con
+    # corchetes y reventaban con KeyError si el llamador se olvidaba de ponerlo. Hoy lo
+    # pone el bucle de razonamiento en cada llamada, pero era una convención sostenida en
+    # un solo sitio: cualquier camino nuevo hacia `execute_tool()` heredaba el traceback.
+    #
+    # **Solo a los tools locales.** Los de origen remoto reciben sus parámetros TAL CUAL:
+    # ahí `params` no es un diccionario interno, es la carga que sale por la red hacia un
+    # servidor de terceros. Meterle quién es el usuario —que puede ser su correo o su id de
+    # Telegram— sería mandar a un tercero un dato que nunca pidió y que su esquema no
+    # declara. Lo detectó `test_tool_origen_remoto_mismo_contrato` al cambiar esto.
+    parametros = params
+    if spec.origin == "local":
+        parametros = dict(params)
+        parametros["user_id"] = user_id
+        parametros["channel"] = getattr(channel, "value", channel)
+
+    return spec.invoke(parametros)
 
 
 #: De qué parámetro sacar el detalle que acompaña al aviso, por herramienta. Solo se leen
