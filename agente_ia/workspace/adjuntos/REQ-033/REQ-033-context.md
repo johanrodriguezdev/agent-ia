@@ -75,5 +75,33 @@ nadie confirme. Eso es inherente a lo que se pidió. Lo que lo acota: solo el es
 esas tres acciones, solo esas carpetas, todo en `audit.db`, y en el nivel total todo en una
 rama de git que se puede revisar y descartar entera.
 
+## Segunda entrega (2026-09-10) — la promesa del historial, cumplida
+
+El documento decía: *"el trabajo va a una rama propia, **cada cosa queda en el historial**, y
+a la mañana se ve el diff completo y se vuelve atrás con un comando"*.
+
+La rama se creaba. **Nadie confirmaba nada.** A la mañana, el trabajo de ocho horas era un
+único bulto sin commitear: se podía tirar entero, pero no revisar paso a paso ni quedarse con
+la mitad buena. La promesa estaba escrita y no implementada — que es peor que no haberla
+hecho, porque se decide encender el modo confiando en ella.
+
+`autonomy.registrar_cambio(accion, ruta)` deja ahora un commit por cada cambio, y está
+enganchado en `core/workspace_files.py`, que es el único sitio donde una escritura ocurre de
+verdad: así ninguna vía nueva de escritura puede olvidarse de dejar rastro.
+
+Tres límites, y los tres importan:
+
+- **Se confirma solo el archivo tocado** (`git commit -- <ruta>`), nunca `git add -A`. Si
+  Johan se fue a dormir con trabajo suyo a medias, barrérselo dentro de un commit del agente
+  sería mezclarle sus cambios con los de la noche.
+- **Solo su propio código.** El repositorio del usuario es suyo: el agente no le escribe el
+  historial aunque esté trabajando ahí.
+- **Solo en la rama de autonomía.** Si al volver la rama activa es otra, no se escribe nada
+  y queda en el log: confirmar sobre una rama que no es la del trabajo es justo lo que este
+  modo existe para evitar.
+
+Que git falle no deshace una escritura que ya se hizo bien: se avisa en el log y se sigue.
+
 ## Log de transiciones
 2026-09-09 | — → EN_PRUEBAS | conversación principal | Núcleo, gate, confinamiento, interruptor, indicador y 56 tests
+2026-09-10 | EN_PRUEBAS | conversación principal | Segunda entrega: cada cambio queda en el historial, 9 tests más

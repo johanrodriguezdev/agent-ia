@@ -261,3 +261,60 @@ def preparar_rama() -> "tuple[str, str]":
         f"Todo lo que el agente toque de su propio código queda ahí."
     )
     return nueva, anterior
+
+
+def registrar_cambio(accion: str, ruta: str) -> bool:
+    """Deja en el historial el cambio que el agente acaba de hacer en su propio código.
+
+    Return True si quedó un commit.
+
+    **Por qué existe.** El modo total promete que todo es reversible: "el trabajo va a una
+    rama propia, cada cosa queda en el historial, y a la mañana se ve el diff completo".
+    La rama se creaba, pero nadie confirmaba nada, así que a la mañana el trabajo de ocho
+    horas era un único bulto sin commitear: se podía tirar entero, pero no revisar paso a
+    paso ni quedarse con la mitad buena. La promesa estaba escrita y no implementada.
+
+    **Se confirma SOLO el archivo tocado** (`git commit -- <ruta>`), nunca `git add -A`.
+    Si el usuario dejó trabajo suyo sin confirmar antes de irse a dormir, barrerlo dentro
+    de un commit del agente sería mezclarle sus cambios con los de la noche.
+
+    **Y solo en la rama de autonomía.** Si al volver cambió de rama, esto no escribe nada:
+    confirmar sobre una rama que no es la del trabajo es justo lo que el modo existe para
+    evitar.
+    """
+    datos = estado()
+    rama = (datos.get("rama") or "").strip()
+    if datos.get("nivel") != NIVEL_TOTAL or not rama:
+        return False
+
+    from core.workspace_files import es_codigo_de_orion
+
+    if not es_codigo_de_orion(ruta):
+        return False                       # el repo del usuario es suyo: no se toca su historial
+
+    codigo, actual = _git("rev-parse", "--abbrev-ref", "HEAD")
+    if codigo != 0 or actual.strip() != rama:
+        logger.warning(
+            f"No registro «{accion}» en el historial: la rama activa es '{actual.strip()}' "
+            f"y el trabajo de autonomía va en '{rama}'."
+        )
+        return False
+
+    relativa = os.path.relpath(os.path.abspath(ruta), _CARPETA_ORION)
+    codigo, salida = _git("add", "-A", "--", relativa)
+    if codigo != 0:
+        logger.error(f"no se pudo preparar «{relativa}» para el historial: {salida}")
+        return False
+
+    codigo, pendiente = _git("status", "--porcelain", "--", relativa)
+    if codigo != 0 or not pendiente.strip():
+        return False                       # el archivo quedó igual: no hay nada que contar
+
+    mensaje = f"autonomia({accion}): {relativa}"
+    codigo, salida = _git("commit", "-m", mensaje, "--", relativa)
+    if codigo != 0:
+        logger.error(f"no se pudo registrar «{relativa}» en el historial: {salida}")
+        return False
+
+    logger.info(f"[Autonomía] registrado en '{rama}': {mensaje}")
+    return True
