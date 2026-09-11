@@ -349,3 +349,17 @@ def test_manana_a_las_9_es_manana_y_no_hoy():
 
     assert fecha.date() == datetime.date.today() + datetime.timedelta(days=1)
     assert fecha.hour == 9
+
+
+def test_hoy_no_se_sale_de_hoy_ni_a_las_once_de_la_noche():
+    """A las 23:04, "hoy" devolvía mañana a las 00:04: `ahora + 1 hora` cruzaba medianoche."""
+    from tasks.task_manager import _hoy_sin_hora
+
+    noche = datetime.datetime(2026, 9, 10, 23, 4, 39)
+    assert _hoy_sin_hora(noche).date() == noche.date()
+
+    manana_temprano = datetime.datetime(2026, 9, 10, 7, 0)
+    assert _hoy_sin_hora(manana_temprano).hour == 9        # la hora por defecto
+
+    media_tarde = datetime.datetime(2026, 9, 10, 15, 0)
+    assert _hoy_sin_hora(media_tarde) == datetime.datetime(2026, 9, 10, 16, 0)

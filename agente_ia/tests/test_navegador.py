@@ -203,6 +203,15 @@ def _preparar_accion(monkeypatch, elementos):
                         lambda: (7, "Wikipedia", "Google Chrome"))
     monkeypatch.setattr(navegador, "_al_frente", lambda hwnd: True)
     monkeypatch.setattr(navegador, "_sigue_ahi", lambda e: True)
+    monkeypatch.setattr(navegador, "_asegurar_visible", lambda hwnd, e: e)
+    monkeypatch.setattr(navegador, "_dentro_de_la_ventana", lambda hwnd, e: True)
+    monkeypatch.setattr(navegador, "_firma_de_pagina", lambda hwnd: ("Antes", 100))
+    monkeypatch.setattr(navegador, "_esperar_a_que_cambie",
+                        lambda hwnd, antes, **kw: ("Antes", 100))
+    monkeypatch.setattr(navegador, "_elemento_por_nombre", lambda hwnd, n: None)
+    # Por defecto se prueba el camino FISICO: sin control, no hay patrón que invocar.
+    monkeypatch.setattr(navegador, "_control_por_nombre", lambda hwnd, n: None)
+    monkeypatch.setattr(navegador, "_enfocar", lambda c: False)
     monkeypatch.setattr(navegador, "elementos_de_pagina", lambda hwnd, **kw: elementos)
     monkeypatch.setattr(navegador.time, "sleep", lambda _s: None)
 
@@ -222,6 +231,7 @@ def test_accionar_pulsa_en_la_posicion_del_elemento(monkeypatch):
     assert clics == [(880, 120)]
     assert escrito == []
     assert "Iniciar sesión" in respuesta
+    assert "quedó igual" in respuesta      # la firma no cambio en este montaje
 
 
 def test_accionar_escribe_cuando_le_pasan_texto(monkeypatch):
@@ -269,6 +279,67 @@ def test_accionar_no_pulsa_si_el_elemento_se_movio(monkeypatch):
 
 
 # ------------------------------------------------------------------------- el resumen
+
+def test_se_pulsa_por_el_patron_y_no_por_coordenadas_cuando_se_puede(monkeypatch):
+    """Invocar el elemento no depende de qué ventana esté delante ni de que nada lo tape.
+
+    Es lo que arregla el caso de Wikipedia: al traer el enlace a la vista quedaba debajo de
+    la cabecera pegada de arriba, y el clic por coordenadas habría pulsado la cabecera.
+    """
+    clics, _ = _preparar_accion(monkeypatch, [_elemento("Historia de Python")])
+    invocado = _Patron()
+    monkeypatch.setattr(navegador, "_control_por_nombre", lambda hwnd, n: object())
+    monkeypatch.setattr(navegador, "_patron",
+                        lambda c, n: invocado if n == "InvokePattern" else None)
+
+    navegador.accionar("Historia de Python")
+
+    assert invocado.llamadas == ["Invoke"]
+    assert clics == []                       # no se tocó el ratón
+
+
+def test_si_el_patron_falla_se_pulsa_a_mano(monkeypatch):
+    class _Roto:
+        def Invoke(self):
+            raise RuntimeError("el elemento no acepta Invoke")
+
+    clics, _ = _preparar_accion(monkeypatch, [_elemento("Aceptar", x=50, y=60)])
+    monkeypatch.setattr(navegador, "_control_por_nombre", lambda hwnd, n: object())
+    monkeypatch.setattr(navegador, "_patron",
+                        lambda c, n: _Roto() if n == "InvokePattern" else None)
+
+    navegador.accionar("Aceptar")
+
+    assert clics == [(50, 60)]
+
+
+def test_escribir_enfoca_el_campo_sin_hacer_clic(monkeypatch):
+    clics, escrito = _preparar_accion(monkeypatch, [_elemento("Usuario", tipo="EditControl")])
+    monkeypatch.setattr(navegador, "_control_por_nombre", lambda hwnd, n: object())
+    monkeypatch.setattr(navegador, "_enfocar", lambda c: True)
+
+    navegador.accionar("Usuario", "johan")
+
+    assert escrito == ["johan"]
+    assert clics == []
+
+
+def test_lo_que_el_tope_recorta_igual_se_puede_pulsar(monkeypatch):
+    """Wikipedia tiene 507 enlaces: la lista va acotada, pero pulsar no puede estarlo.
+
+    Paso de verdad — «Historia de Python» estaba en la pagina y el agente respondia "no lo
+    encontre" porque no habia entrado en la muestra.
+    """
+    escondido = _elemento("Historia de Python", x=300, y=500)
+    clics, _ = _preparar_accion(monkeypatch, [_elemento("Portada")])
+    monkeypatch.setattr(navegador, "_elemento_por_nombre",
+                        lambda hwnd, n: escondido if n == "Historia de Python" else None)
+
+    respuesta = navegador.accionar("Historia de Python")
+
+    assert clics == [(300, 500)]
+    assert "Historia de Python" in respuesta
+
 
 def test_resumen_sin_navegador_abierto(monkeypatch):
     monkeypatch.setattr(navegador, "ventanas_de_navegador", lambda: [])
@@ -353,7 +424,8 @@ def test_abrir_recuerda_la_ventana_para_los_pasos_siguientes(monkeypatch):
 def test_las_tres_herramientas_estan_registradas():
     from agents.tool_registry import get_tool
 
-    for nombre in ("browser_open", "browser_page", "browser_act"):
+    for nombre in ("browser_open", "browser_page", "browser_act", "browser_text",
+                   "browser_tabs", "browser_tab_switch", "browser_tab_close"):
         assert get_tool(nombre) is not None, nombre
 
 
@@ -370,8 +442,23 @@ def test_actuar_en_una_pagina_es_amarillo_y_solo_de_escritorio():
 def test_mirar_la_pagina_es_verde():
     from core.security_manager import RiskLevel, security_manager
 
-    assert security_manager.classify_action("browser_open") == RiskLevel.GREEN
-    assert security_manager.classify_action("browser_page") == RiskLevel.GREEN
+    for verde in ("browser_open", "browser_page", "browser_text", "browser_tabs",
+                  "browser_tab_switch"):
+        assert security_manager.classify_action(verde) == RiskLevel.GREEN, verde
+
+
+def test_cerrar_una_pestana_pide_permiso_y_no_llega_de_lejos():
+    """Lo que se pierde al cerrar no vuelve: un formulario a medio llenar, un borrador."""
+    from core.security_manager import ChannelType, RiskLevel, security_manager
+
+    assert security_manager.classify_action("browser_tab_close") == RiskLevel.YELLOW
+    assert not security_manager.is_action_allowed("browser_tab_close", ChannelType.TELEGRAM)
+
+
+def test_cerrar_una_pestana_se_lee_en_voz_alta():
+    from core.acciones_legibles import _DESCRIPCIONES
+
+    assert "pestaña" in _DESCRIPCIONES["browser_tab_close"]
 
 
 def test_la_confirmacion_muestra_sobre_que_se_va_a_pulsar_y_que_se_escribe():
@@ -382,3 +469,262 @@ def test_la_confirmacion_muestra_sobre_que_se_va_a_pulsar_y_que_se_escribe():
                                              "texto": "confirmar"})
     assert "Eliminar cuenta" in detalle
     assert "confirmar" in detalle
+
+
+# =========================================================================== pestañas
+#
+# Las pestañas se operan con patrones de UI Automation, no con el ratón: seleccionar una
+# pestaña con `SelectionItemPattern` no roba el foco ni exige acertarle a un objetivo de
+# veinte píxeles de alto. Estas pruebas fijan eso.
+
+class _Patron:
+    """Un patrón de UI Automation simulado: registra si lo llamaron."""
+
+    def __init__(self, seleccionada=False):
+        self.CurrentIsSelected = seleccionada
+        self.llamadas = []
+
+    def Select(self):
+        self.llamadas.append("Select")
+
+    def Invoke(self):
+        self.llamadas.append("Invoke")
+
+    def ScrollIntoView(self):
+        self.llamadas.append("ScrollIntoView")
+
+
+class _Pestana:
+    def __init__(self, nombre, seleccionada=False, con_boton=True):
+        self.Name = nombre
+        self.ControlTypeName = "TabItemControl"
+        self.seleccion = _Patron(seleccionada)
+        self.cerrar = _Patron()
+        self._con_boton = con_boton
+
+    def GetChildren(self):
+        if not self._con_boton:
+            return []
+        boton = _Pestana("Cerrar")
+        boton.ControlTypeName = "ButtonControl"
+        boton.invocar = self.cerrar
+        return [boton]
+
+
+def _montar_pestanas(monkeypatch, pestanas):
+    monkeypatch.setattr(navegador, "ventanas_de_navegador",
+                        lambda: [(7, "Ventana", "Google Chrome")])
+    monkeypatch.setattr(navegador, "_pestanas_de", lambda hwnd: pestanas)
+
+    def _patron(control, nombre):
+        if nombre == "SelectionItemPattern":
+            return getattr(control, "seleccion", None)
+        if nombre == "InvokePattern":
+            return getattr(control, "invocar", None)
+        return None
+
+    monkeypatch.setattr(navegador, "_patron", _patron)
+    monkeypatch.setattr(navegador, "esperar_pagina", lambda hwnd, **kw: True)
+
+
+def test_listar_pestanas_marca_la_que_se_esta_viendo(monkeypatch):
+    _montar_pestanas(monkeypatch, [_Pestana("Correo"), _Pestana("Factura", seleccionada=True)])
+    salida = navegador.listar_pestanas()
+
+    assert "«Correo»" in salida
+    assert "«Factura»" in salida
+    assert salida.splitlines()[2].endswith("la que estás viendo")
+
+
+def test_cambiar_de_pestana_no_usa_el_raton(monkeypatch):
+    factura = _Pestana("Factura")
+    _montar_pestanas(monkeypatch, [_Pestana("Correo"), factura])
+
+    respuesta = navegador.cambiar_de_pestana("Factura")
+
+    assert factura.seleccion.llamadas == ["Select"]
+    assert "Factura" in respuesta
+
+
+def test_cambiar_de_pestana_no_parte_palabras(monkeypatch):
+    """Mismo criterio que los enlaces: «Factura» no puede llevar a «Facturación anual»."""
+    exacta = _Pestana("Factura")
+    _montar_pestanas(monkeypatch, [_Pestana("Facturación anual"), exacta])
+
+    navegador.cambiar_de_pestana("Factura")
+
+    assert exacta.seleccion.llamadas == ["Select"]
+
+
+def test_cambiar_a_una_pestana_que_no_existe_ofrece_las_que_hay(monkeypatch):
+    _montar_pestanas(monkeypatch, [_Pestana("Correo"), _Pestana("Factura")])
+    respuesta = navegador.cambiar_de_pestana("Banco")
+
+    assert "no encontré" in respuesta.lower()
+    assert "«Correo»" in respuesta and "«Factura»" in respuesta
+
+
+def test_cerrar_pestana_invoca_su_boton_cerrar(monkeypatch):
+    factura = _Pestana("Factura")
+    _montar_pestanas(monkeypatch, [_Pestana("Correo"), factura])
+
+    respuesta = navegador.cerrar_pestana("Factura")
+
+    assert factura.cerrar.llamadas == ["Invoke"]
+    assert "Cerré" in respuesta
+
+
+def test_cerrar_pestana_sin_boton_no_pulsa_a_ciegas(monkeypatch):
+    """Ctrl+W cerraría la pestaña ACTIVA, que puede no ser la que se pidió."""
+    sin_boton = _Pestana("Factura", con_boton=False)
+    _montar_pestanas(monkeypatch, [sin_boton])
+
+    respuesta = navegador.cerrar_pestana("Factura")
+
+    assert "no la cierro" in respuesta.lower()
+
+
+def test_cerrar_pestana_sin_nombre_no_cierra_nada():
+    assert "necesito" in navegador.cerrar_pestana("").lower()
+
+
+# ==================================================== desplazar hasta lo que se va a pulsar
+
+def test_un_elemento_fuera_de_la_ventana_no_se_pulsa(monkeypatch):
+    """Medido en Wikipedia: 474 de 507 enlaces están fuera de la vista, uno a y=31449."""
+    lejano = _elemento("Referencias", y=31449)
+    clics, _ = _preparar_accion(monkeypatch, [lejano])
+    monkeypatch.setattr(navegador, "_asegurar_visible", lambda hwnd, e: e)
+    monkeypatch.setattr(navegador, "_dentro_de_la_ventana", lambda hwnd, e: False)
+
+    respuesta = navegador.accionar("Referencias")
+
+    assert clics == []
+    assert "no consigo traerlo a la vista" in respuesta
+
+
+def test_se_pulsa_en_la_posicion_NUEVA_despues_de_desplazar(monkeypatch):
+    lejano = _elemento("Referencias", y=31449)
+    cerca = _elemento("Referencias", y=603)
+    clics, _ = _preparar_accion(monkeypatch, [lejano])
+    monkeypatch.setattr(navegador, "_asegurar_visible", lambda hwnd, e: cerca)
+
+    navegador.accionar("Referencias")
+
+    assert clics == [(cerca.x, 603)]
+
+
+def test_asegurar_visible_no_desplaza_lo_que_ya_se_ve(monkeypatch):
+    monkeypatch.setattr(navegador, "_dentro_de_la_ventana", lambda hwnd, e: True)
+    visible = _elemento("Aceptar", y=300)
+
+    assert navegador._asegurar_visible(7, visible) is visible
+
+
+# ============================================== esperar a que la página termine de cambiar
+
+def test_esperar_a_que_cambie_devuelve_la_pagina_nueva(monkeypatch):
+    """Sin esto el agente lee la página VIEJA y decide el paso siguiente sobre ella."""
+    firmas = [("Antes", 100), ("Después", 50), ("Después", 900), ("Después", 900)]
+    monkeypatch.setattr(navegador, "_firma_de_pagina", lambda hwnd: firmas.pop(0))
+    monkeypatch.setattr(navegador.time, "sleep", lambda _s: None)
+
+    assert navegador._esperar_a_que_cambie(7, ("Antes", 100), segundos=30) == ("Después", 900)
+
+
+def test_esperar_a_que_cambie_se_rinde_si_nada_cambia(monkeypatch):
+    monkeypatch.setattr(navegador, "_firma_de_pagina", lambda hwnd: ("Antes", 100))
+    monkeypatch.setattr(navegador.time, "sleep", lambda _s: None)
+
+    assert navegador._esperar_a_que_cambie(7, ("Antes", 100), segundos=0) == ("Antes", 100)
+
+
+def test_el_clic_cuenta_en_que_pagina_quedaste(monkeypatch):
+    clics, _ = _preparar_accion(monkeypatch, [_elemento("Siguiente")])
+    monkeypatch.setattr(navegador, "_esperar_a_que_cambie",
+                        lambda hwnd, antes, **kw: ("Paso 2 de 3", 800))
+
+    respuesta = navegador.accionar("Siguiente")
+
+    assert clics
+    assert "Paso 2 de 3" in respuesta
+
+
+def test_escribir_no_espera_un_cambio_de_pagina(monkeypatch):
+    """Escribir en un campo no cambia de pantalla: esperar sería regalar doce segundos."""
+    clics, escrito = _preparar_accion(monkeypatch, [_elemento("Usuario", tipo="EditControl")])
+    llamadas = []
+
+    def _no_deberia(hwnd, antes, **kw):
+        llamadas.append(1)
+        return ("x", 1)
+
+    monkeypatch.setattr(navegador, "_esperar_a_que_cambie", _no_deberia)
+
+    navegador.accionar("Usuario", "johan")
+
+    assert escrito == ["johan"]
+    assert llamadas == []
+
+
+# ========================================================== el texto de la página (y el PDF)
+
+class _Rango:
+    def __init__(self, texto):
+        self._texto = texto
+
+    def GetText(self, tope):
+        return self._texto[:tope]
+
+
+class _PatronTexto:
+    def __init__(self, texto):
+        self.DocumentRange = _Rango(texto)
+
+
+def _montar_texto(monkeypatch, texto, patron=True):
+    monkeypatch.setattr(navegador, "ventana_con_pagina",
+                        lambda: (7, "Informe anual", "Google Chrome"))
+    monkeypatch.setattr(navegador, "documento_de", lambda hwnd: (object(), 500))
+    monkeypatch.setattr(navegador, "_patron",
+                        lambda c, n: _PatronTexto(texto) if patron else None)
+
+
+def test_texto_de_pagina_devuelve_el_contenido(monkeypatch):
+    _montar_texto(monkeypatch, "Primera línea\n\n  \nSegunda línea")
+    salida = navegador.texto_de_pagina()
+
+    assert "Informe anual" in salida
+    assert "Primera línea" in salida and "Segunda línea" in salida
+
+
+def test_texto_de_pagina_corta_lo_muy_largo(monkeypatch):
+    _montar_texto(monkeypatch, "x" * 9000)
+    salida = navegador.texto_de_pagina(maximo_caracteres=500)
+
+    assert "cortado" in salida
+    assert len(salida) < 1200
+
+
+def test_sin_texto_se_ofrece_la_captura(monkeypatch):
+    """Un lienzo o un vídeo no tienen texto que leer: ahí sí hace falta mirar."""
+    _montar_texto(monkeypatch, "")
+    monkeypatch.setattr(navegador, "elementos_de_pagina", lambda hwnd, **kw: [])
+    salida = navegador.texto_de_pagina()
+
+    assert "captura" in salida
+
+
+def test_texto_sin_pagina_legible_lo_dice(monkeypatch):
+    monkeypatch.setattr(navegador, "ventana_con_pagina", lambda: None)
+    assert "no puedo leer" in navegador.texto_de_pagina().lower()
+
+
+# ================================================================== Firefox, sin medir
+
+def test_firefox_esta_reconocido_pero_no_probado():
+    """Se deja abrirlo; que publique la página no se pudo medir (no está instalado acá)."""
+    nombres = [n for n, _rutas in navegador.NAVEGADORES]
+    assert "Mozilla Firefox" in nombres
+    # Último de la lista: se prefieren los navegadores contra los que sí se midió.
+    assert nombres.index("Mozilla Firefox") == len(nombres) - 1
