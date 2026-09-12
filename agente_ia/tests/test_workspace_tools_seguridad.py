@@ -76,10 +76,16 @@ NIVELES_REQ036 = {
     "project_stop": RiskLevel.GREEN,
 }
 
-#: Las 10 juntas. Las pruebas de canal recorren todas; las que fijan el alcance de REQ-029
+#: REQ-040 — mirar cómo está hecha una plantilla es leer un archivo del usuario: verde, y
+#: por lo mismo que `file_read`, solo delante del computador.
+NIVELES_REQ040 = {
+    "document_inspect": RiskLevel.GREEN,
+}
+
+#: Todas juntas. Las pruebas de canal recorren todas; las que fijan el alcance de REQ-029
 #: (el modo "codigo") siguen usando solo las 8 de v1.
 TODAS = {**NIVELES_ESPERADOS, **NIVELES_REQ030, **NIVELES_REQ032, **NIVELES_REQ034,
-         **NIVELES_REQ035, **NIVELES_REQ036}
+         **NIVELES_REQ035, **NIVELES_REQ036, **NIVELES_REQ040}
 
 TODOS_LOS_CANALES = [
     ChannelType.DESKTOP, ChannelType.TELEGRAM, ChannelType.DISCORD, ChannelType.VOICE,

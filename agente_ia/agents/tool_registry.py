@@ -2516,3 +2516,262 @@ register_tool(ToolSpec(
     risk_level=RiskLevel.GREEN,
     invoke=_pc_read_invoke,
 ))
+
+
+# ---------------------------------------------------------------------------
+# REQ-040 — producir documentos de verdad: Word, Excel, PowerPoint, PDF y más.
+# ---------------------------------------------------------------------------
+
+def _con_documento(nombre_accion: str, operacion) -> str:
+    """Corre una operación de documentos devolviendo SIEMPRE texto que el modelo entienda."""
+    from core.documentos import DocumentoRechazado
+
+    try:
+        return operacion().describir()
+    except DocumentoRechazado as e:
+        return str(e)
+    except Exception as e:
+        logger.error(f"'{nombre_accion}' falló inesperadamente: {type(e).__name__}: {e}")
+        return (f"No pude generar el archivo: {type(e).__name__}. Revisá que el contenido "
+                f"tenga la forma esperada.")
+
+
+_INSTRUCCION_CONTENIDO = (
+    "El contenido lo escribís VOS, completo: todas las secciones con su texto real, todas "
+    "las filas, todas las diapositivas. Nada de «[insertar aquí]», «lorem ipsum» ni "
+    "«por definir» — se rechaza. Si te falta información, preguntá antes o investigá; no "
+    "dejes huecos."
+)
+
+
+def _document_create_invoke(params: dict) -> str:
+    from core.documentos import crear_documento
+
+    nombre = str(params.get("nombre") or "").strip()
+    if not nombre:
+        return f"Necesito el nombre del archivo, con su extensión{vocative()}."
+    return _con_documento("document_create", lambda: crear_documento(
+        nombre, params.get("contenido"), plantilla=params.get("plantilla"),
+        reemplazos=params.get("reemplazos") or {}, carpeta=params.get("carpeta"),
+    ))
+
+
+register_tool(ToolSpec(
+    name="document_create",
+    description=(
+        "Crea un documento de texto real: .docx (Word), .pdf, .md, .html o .txt, con "
+        "título, encabezados, párrafos, listas, tablas, imágenes y citas. Con 'plantilla' "
+        "(un .docx del usuario) escribe DENTRO de ella: conserva membrete, pies, márgenes y "
+        "estilos; y con 'reemplazos' rellena sus marcadores ({{cliente}}, [FECHA]) "
+        "conservando el formato. Antes de usar una plantilla, mirala con 'document_inspect'. "
+        "Un .pdf se hace en Word y se convierte, así que se ve igual que el Word. "
+        + _INSTRUCCION_CONTENIDO
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "nombre": {"type": "string",
+                       "description": "Nombre del archivo con extensión: 'informe.docx', 'acta.pdf'."},
+            "contenido": {
+                "description": (
+                    "Objeto con 'titulo', 'subtitulo', 'autor', 'fecha' y 'bloques': lista de "
+                    "{tipo: titulo|parrafo|lista|tabla|imagen|cita|salto, ...}. Un 'titulo' "
+                    "lleva 'texto' y 'nivel' (1-3); 'parrafo' y 'cita' llevan 'texto'; 'lista' "
+                    "lleva 'items' (una lista dentro es un subnivel) y 'numerada'; 'tabla' lleva "
+                    "'encabezados', 'filas' y 'titulo'; 'imagen' lleva 'ruta', 'ancho_cm' y "
+                    "'pie'. También se acepta un texto en Markdown."
+                ),
+            },
+            "plantilla": {"type": "string",
+                          "description": "Ruta a un .docx cuyo formato hay que seguir (opcional)."},
+            "reemplazos": {"type": "object",
+                           "description": "Marcadores de la plantilla y su valor: {'{{cliente}}': 'Agro SAS'}."},
+            "carpeta": {"type": "string",
+                        "description": "Dónde guardarlo. Vacío = el Escritorio."},
+        },
+        "required": ["nombre", "contenido"],
+    },
+    # YELLOW: crea un archivo en el equipo del usuario. Mismo nivel que `write_file_direct`
+    # y `file_write`; la confirmación muestra el nombre (`nombre` en `_DETAILS_ALLOWED_KEYS`).
+    risk_level=RiskLevel.YELLOW,
+    invoke=_document_create_invoke,
+))
+
+
+def _spreadsheet_create_invoke(params: dict) -> str:
+    from core.documentos import crear_hoja
+
+    nombre = str(params.get("nombre") or "").strip()
+    if not nombre:
+        return f"Necesito el nombre del archivo, con su extensión{vocative()}."
+    return _con_documento("spreadsheet_create", lambda: crear_hoja(
+        nombre, params.get("contenido"), plantilla=params.get("plantilla"),
+        carpeta=params.get("carpeta"),
+    ))
+
+
+register_tool(ToolSpec(
+    name="spreadsheet_create",
+    description=(
+        "Crea una hoja de cálculo real: .xlsx (Excel) o .csv. Varias hojas, encabezados con "
+        "formato, filas, fórmulas (las celdas que empiezan por '='), fila de totales, "
+        "formatos de número por columna y un gráfico de barras, líneas o torta. Los números "
+        "escritos a la colombiana ('1.250.000', '12,5') se guardan como números. Con "
+        "'plantilla' (un .xlsx del usuario) escribe en sus hojas conservando su formato. "
+        + _INSTRUCCION_CONTENIDO
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "nombre": {"type": "string", "description": "'ventas.xlsx' o 'clientes.csv'."},
+            "contenido": {
+                "description": (
+                    "Objeto con 'hojas': lista de {nombre, encabezados, filas, totales (bool), "
+                    "formatos ({'B': '#,##0', 'D': '0.0%'}), grafico ({tipo: barras|lineas|torta, "
+                    "titulo, columnas, categorias}), desde ('A5', para una plantilla)}. "
+                    "También se acepta una lista de filas o una lista de registros."
+                ),
+            },
+            "plantilla": {"type": "string", "description": "Ruta a un .xlsx a seguir (opcional)."},
+            "carpeta": {"type": "string", "description": "Dónde guardarlo. Vacío = el Escritorio."},
+        },
+        "required": ["nombre", "contenido"],
+    },
+    risk_level=RiskLevel.YELLOW,
+    invoke=_spreadsheet_create_invoke,
+))
+
+
+def _presentation_create_invoke(params: dict) -> str:
+    from core.documentos import crear_presentacion
+
+    nombre = str(params.get("nombre") or "").strip()
+    if not nombre:
+        return f"Necesito el nombre del archivo, con su extensión{vocative()}."
+    return _con_documento("presentation_create", lambda: crear_presentacion(
+        nombre, params.get("contenido"), plantilla=params.get("plantilla"),
+        reemplazos=params.get("reemplazos") or {}, carpeta=params.get("carpeta"),
+        tema=params.get("tema"),
+    ))
+
+
+register_tool(ToolSpec(
+    name="presentation_create",
+    description=(
+        "Crea una presentación real: .pptx (PowerPoint) o su .pdf. Portada, diapositivas con "
+        "viñetas (y subniveles), tablas, imágenes y notas del orador. Sin plantilla aplica un "
+        "tema de diseño de Office ('tema': Retrospect, Facet, Ion, Integral, Wisp...). Con "
+        "'plantilla' (un .pptx del usuario) usa su tema y sus diseños, y con 'reemplazos' "
+        "rellena sus marcadores. " + _INSTRUCCION_CONTENIDO
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "nombre": {"type": "string", "description": "'resultados.pptx' o 'propuesta.pdf'."},
+            "contenido": {
+                "description": (
+                    "Objeto con 'titulo', 'subtitulo' y 'diapositivas': lista de {titulo, "
+                    "puntos (lista; una lista dentro es un subnivel), texto, tabla "
+                    "({encabezados, filas}), imagen (ruta), notas}."
+                ),
+            },
+            "plantilla": {"type": "string", "description": "Ruta a un .pptx a seguir (opcional)."},
+            "reemplazos": {"type": "object", "description": "Marcadores de la plantilla y su valor."},
+            "tema": {"type": "string", "description": "Tema de diseño de Office (sin plantilla)."},
+            "carpeta": {"type": "string", "description": "Dónde guardarla. Vacío = el Escritorio."},
+        },
+        "required": ["nombre", "contenido"],
+    },
+    risk_level=RiskLevel.YELLOW,
+    invoke=_presentation_create_invoke,
+))
+
+
+def _file_create_invoke(params: dict) -> str:
+    from core.documentos import crear_archivo
+
+    nombre = str(params.get("nombre") or "").strip()
+    if not nombre:
+        return f"Necesito el nombre del archivo, con su extensión{vocative()}."
+    return _con_documento("file_create", lambda: crear_archivo(
+        nombre, params.get("contenido"), carpeta=params.get("carpeta"),
+    ))
+
+
+register_tool(ToolSpec(
+    name="file_create",
+    description=(
+        "Crea un archivo de cualquier otra extensión con el contenido que le pases: .json "
+        "(con sangría), .sql, .py, .yaml, .xml, .ini, .bat, lo que sea. Para Word, Excel, "
+        "PowerPoint y PDF usá las herramientas específicas. Se guarda en el Escritorio o en "
+        "la carpeta que indiques; nunca pisa un archivo existente. " + _INSTRUCCION_CONTENIDO
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "nombre": {"type": "string", "description": "Nombre con extensión."},
+            "contenido": {"description": "Texto del archivo, o un objeto si es .json."},
+            "carpeta": {"type": "string", "description": "Dónde guardarlo. Vacío = el Escritorio."},
+        },
+        "required": ["nombre", "contenido"],
+    },
+    risk_level=RiskLevel.YELLOW,
+    invoke=_file_create_invoke,
+))
+
+
+def _document_inspect_invoke(params: dict) -> str:
+    from core.documentos import inspeccionar
+
+    ruta = str(params.get("ruta") or params.get("path") or "").strip()
+    if not ruta:
+        return f"Necesito la ruta del documento que querés que mire{vocative()}."
+    return _con_manejo("document_inspect", lambda: inspeccionar(ruta))
+
+
+register_tool(ToolSpec(
+    name="document_inspect",
+    description=(
+        "Mira cómo está hecha una plantilla o un documento de Office (.docx, .xlsx, .pptx): "
+        "qué estilos usa, qué encabezados y pies tiene, qué hojas o diseños, y qué "
+        "marcadores trae para rellenar ({{cliente}}, [FECHA]). Usala ANTES de generar algo "
+        "sobre una plantilla, para seguirla bien en vez de adivinar."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {"ruta": {"type": "string", "description": "Ruta al archivo."}},
+        "required": ["ruta"],
+    },
+    # GREEN: lee la estructura de un archivo del usuario. Mismo criterio que `file_read`.
+    risk_level=RiskLevel.GREEN,
+    invoke=_document_inspect_invoke,
+))
+
+
+def _document_to_pdf_invoke(params: dict) -> str:
+    from core.documentos import convertir_a_pdf
+
+    ruta = str(params.get("ruta") or params.get("path") or "").strip()
+    if not ruta:
+        return f"Necesito la ruta del documento que querés convertir{vocative()}."
+    return _con_documento("document_to_pdf", lambda: convertir_a_pdf(ruta, params.get("carpeta")))
+
+
+register_tool(ToolSpec(
+    name="document_to_pdf",
+    description=(
+        "Convierte a PDF un archivo existente de Word, Excel o PowerPoint usando el propio "
+        "Office, así que el PDF se ve exactamente igual. El PDF queda junto al original (o "
+        "en 'carpeta') y no pisa nada."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "ruta": {"type": "string", "description": "Ruta al .docx, .xlsx o .pptx."},
+            "carpeta": {"type": "string", "description": "Dónde dejar el PDF (opcional)."},
+        },
+        "required": ["ruta"],
+    },
+    risk_level=RiskLevel.YELLOW,
+    invoke=_document_to_pdf_invoke,
+))
