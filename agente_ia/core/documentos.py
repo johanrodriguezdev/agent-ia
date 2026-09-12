@@ -355,6 +355,8 @@ def _validar_documento(cabecera: Dict[str, Any], bloques: List[Dict[str, Any]],
             prosa += sum(len(str(i)) for i in b.get("items") or [])
         elif tipo == "tabla":
             filas += len(b.get("filas") or [])
+        elif tipo == "grafico":
+            filas += len(_series_de(b)[0])
     if not bloques or (prosa < _MINIMO_CARACTERES_DOCUMENTO and filas < 2):
         raise DocumentoRechazado(
             "El documento no tiene contenido suficiente: hacen falta las secciones con su "
@@ -427,31 +429,151 @@ def _estilo(doc, *candidatos: str):
     return None
 
 
-def _docx(cabecera: Dict[str, Any], bloques: List[Dict[str, Any]], ruta: Path,
-          plantilla: Optional[Path], reemplazos: Dict[str, str]) -> Resultado:
-    from docx import Document
+# ================================================================================ gráficos
+
+#: Paleta sobria para los gráficos que se dibujan como imagen (Word, PDF sin Office).
+_COLORES_GRAFICO = ("#305496", "#C55A11", "#548235", "#7030A0", "#BF9000", "#2E75B6")
+
+
+def _series_de(grafico: Dict[str, Any]) -> Tuple[List[str], List[Tuple[str, List[float]]]]:
+    """Return `(categorías, [(nombre de serie, valores)])` de un bloque de gráfico.
+
+    Se aceptan dos formas: `series` con `nombre` y `valores`, o un par `etiquetas`/`valores`
+    para un gráfico de una sola serie. Los valores se leen como números a la colombiana.
+    """
+    categorias = [str(c) for c in (grafico.get("categorias") or grafico.get("etiquetas") or [])]
+    series: List[Tuple[str, List[float]]] = []
+    crudas = grafico.get("series")
+    if isinstance(crudas, list) and crudas:
+        for s in crudas:
+            if isinstance(s, dict):
+                valores = [_valor_de_celda(v) for v in (s.get("valores") or [])]
+                series.append((str(s.get("nombre") or ""), [v if isinstance(v, (int, float)) else 0
+                                                             for v in valores]))
+    elif grafico.get("valores"):
+        valores = [_valor_de_celda(v) for v in grafico["valores"]]
+        series.append((str(grafico.get("titulo") or ""), [v if isinstance(v, (int, float)) else 0
+                                                          for v in valores]))
+    if not categorias and series:
+        categorias = [str(i + 1) for i in range(len(series[0][1]))]
+    return categorias, series
+
+
+def _grafico_como_imagen(grafico: Dict[str, Any], destino: str) -> bool:
+    """Dibuja el gráfico en un PNG con matplotlib. Return si se pudo.
+
+    Para Word y para el PDF sin Office: python-docx no sabe crear gráficos nativos, así que
+    un gráfico en Word es una imagen. Se dibuja limpio —sin marco arriba ni a la derecha,
+    cuadrícula suave, etiquetas de valor— para que no parezca sacado de una consola.
+    """
+    categorias, series = _series_de(grafico)
+    if not series:
+        return False
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        logger.info("matplotlib no está instalado: no se puede dibujar el gráfico")
+        return False
+
+    tipo = str(grafico.get("tipo_grafico") or grafico.get("tipo") or "barras").lower()
+    conv = convencion()
+    fig, ax = plt.subplots(figsize=(7.5, 4.2), dpi=150)
+    try:
+        if tipo in ("torta", "pastel", "pie"):
+            nombre, valores = series[0]
+            ax.pie(valores, labels=categorias, colors=_COLORES_GRAFICO[:len(valores)],
+                   autopct=lambda p: f"{p:.0f} %" if p >= 4 else "", startangle=90,
+                   wedgeprops={"linewidth": 1, "edgecolor": "white"})
+            ax.axis("equal")
+        elif tipo in ("lineas", "línea", "linea", "line"):
+            for i, (nombre, valores) in enumerate(series):
+                ax.plot(categorias[:len(valores)], valores, marker="o", linewidth=2,
+                        color=_COLORES_GRAFICO[i % len(_COLORES_GRAFICO)], label=nombre or None)
+        else:
+            ancho = 0.8 / max(1, len(series))
+            for i, (nombre, valores) in enumerate(series):
+                posiciones = [x + i * ancho for x in range(len(valores))]
+                barras = ax.bar(posiciones, valores, width=ancho,
+                                color=_COLORES_GRAFICO[i % len(_COLORES_GRAFICO)], label=nombre or None)
+                if len(valores) <= 12:
+                    ax.bar_label(barras, fmt=lambda v: conv.formatear(v), fontsize=8, padding=2)
+            ax.set_xticks([x + ancho * (len(series) - 1) / 2 for x in range(len(categorias))])
+            ax.set_xticklabels(categorias)
+        if tipo not in ("torta", "pastel", "pie"):
+            from matplotlib.ticker import FuncFormatter
+
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+            ax.grid(axis="y", color="#DDDDDD", linewidth=0.8)
+            ax.set_axisbelow(True)
+            ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _p: conv.formatear(v)))
+            if grafico.get("eje_y"):
+                ax.set_ylabel(str(grafico["eje_y"]))
+            if len(series) > 1 or any(n for n, _ in series):
+                ax.legend(frameon=False)
+        if grafico.get("titulo"):
+            ax.set_title(str(grafico["titulo"]), fontsize=12, loc="left", pad=12)
+        fig.tight_layout()
+        fig.savefig(destino, dpi=150)
+        return True
+    except Exception as e:
+        logger.warning(f"no se pudo dibujar el gráfico: {e}")
+        return False
+    finally:
+        plt.close(fig)
+
+
+def _grafico_nativo_pptx(slide, grafico: Dict[str, Any], x, y, ancho, alto) -> bool:
+    """Pone un gráfico NATIVO de PowerPoint —editable por el usuario— en la diapositiva."""
+    from pptx.chart.data import CategoryChartData
+    from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION
+
+    categorias, series = _series_de(grafico)
+    if not series:
+        return False
+    tipo = str(grafico.get("tipo_grafico") or grafico.get("tipo") or "barras").lower()
+    clase = {"lineas": XL_CHART_TYPE.LINE_MARKERS, "linea": XL_CHART_TYPE.LINE_MARKERS,
+             "línea": XL_CHART_TYPE.LINE_MARKERS, "line": XL_CHART_TYPE.LINE_MARKERS,
+             "torta": XL_CHART_TYPE.PIE, "pastel": XL_CHART_TYPE.PIE, "pie": XL_CHART_TYPE.PIE,
+             }.get(tipo, XL_CHART_TYPE.COLUMN_CLUSTERED)
+    datos = CategoryChartData()
+    datos.categories = categorias
+    for nombre, valores in series:
+        datos.add_series(nombre or "Serie", valores)
+    try:
+        forma = slide.shapes.add_chart(clase, x, y, ancho, alto, datos)
+        chart = forma.chart
+        if grafico.get("titulo"):
+            chart.has_title = True
+            chart.chart_title.text_frame.text = str(grafico["titulo"])
+        chart.has_legend = len(series) > 1 or clase == XL_CHART_TYPE.PIE
+        if chart.has_legend:
+            chart.legend.position = XL_LEGEND_POSITION.BOTTOM
+            chart.legend.include_in_layout = False
+        if clase == XL_CHART_TYPE.PIE:
+            plot = chart.plots[0]
+            plot.has_data_labels = True
+            plot.data_labels.show_percentage = True
+            plot.data_labels.show_value = False
+            plot.data_labels.number_format = "0%"
+            plot.data_labels.number_format_is_linked = False
+        else:
+            # Separador de miles en el eje: PowerPoint lo formatea según la región del
+            # equipo que abra el archivo, así que "#,##0" sale 1.250.000 en Colombia.
+            chart.value_axis.tick_labels.number_format = "#,##0"
+            chart.value_axis.tick_labels.number_format_is_linked = False
+        return True
+    except Exception as e:
+        logger.warning(f"no se pudo crear el gráfico en la diapositiva: {e}")
+        return False
+
+
+def _escribir_bloques(doc, bloques: List[Dict[str, Any]], avisos: List[str]) -> None:
+    """Escribe los bloques al final del documento con sus estilos. Lo usan crear y editar."""
     from docx.shared import Cm, Pt
-
-    doc = Document(str(plantilla)) if plantilla else Document()
-    avisos: List[str] = []
-
-    sustituidos = _reemplazar_en_docx(doc, reemplazos) if reemplazos else 0
-    if reemplazos and not sustituidos:
-        avisos.append("Ojo: ninguno de los marcadores que me diste aparece en la plantilla; "
-                      "revisá cómo están escritos en ella con document_inspect.")
-    if plantilla and bloques:
-        _vaciar_cuerpo(doc)
-
-    if cabecera.get("titulo"):
-        p = doc.add_paragraph(str(cabecera["titulo"]), style=_estilo(doc, "Title", "Título"))
-        if p.style is None or p.style.name not in ("Title", "Título"):
-            p.runs[0].bold = True
-            p.runs[0].font.size = Pt(24)
-    if cabecera.get("subtitulo"):
-        doc.add_paragraph(str(cabecera["subtitulo"]), style=_estilo(doc, "Subtitle", "Subtítulo"))
-    pie_portada = " · ".join(str(cabecera[k]) for k in ("autor", "fecha") if cabecera.get(k))
-    if pie_portada:
-        doc.add_paragraph(pie_portada)
 
     for bloque in bloques:
         tipo = str(bloque.get("tipo") or "parrafo").lower()
@@ -518,6 +640,18 @@ def _docx(cabecera: Dict[str, Any], bloques: List[Dict[str, Any]], ruta: Path,
                 avisos.append(f"No pude insertar la imagen «{os.path.basename(ruta_imagen)}»: {e}.")
         elif tipo == "salto":
             doc.add_page_break()
+        elif tipo == "grafico":
+            # python-docx no crea gráficos nativos: en Word, un gráfico es una imagen. Se
+            # dibuja con matplotlib y se inserta con su pie.
+            with tempfile.TemporaryDirectory() as temporal:
+                png = os.path.join(temporal, "grafico.png")
+                if _grafico_como_imagen(bloque, png):
+                    doc.add_picture(png, width=Cm(float(bloque.get("ancho_cm") or 15)))
+                    if bloque.get("pie"):
+                        doc.add_paragraph(str(bloque["pie"]), style=_estilo(doc, "Caption", "Descripción"))
+                else:
+                    avisos.append("Un gráfico no traía datos (hacen falta 'categorias' y 'series') "
+                                  "y se omitió.")
         elif tipo == "cita":
             doc.add_paragraph(str(bloque.get("texto") or ""),
                               style=_estilo(doc, "Intense Quote", "Quote", "Cita destacada", "Cita"))
@@ -526,6 +660,36 @@ def _docx(cabecera: Dict[str, Any], bloques: List[Dict[str, Any]], ruta: Path,
             if bloque.get("negrita"):
                 for r in p.runs:
                     r.bold = True
+
+
+
+def _docx(cabecera: Dict[str, Any], bloques: List[Dict[str, Any]], ruta: Path,
+          plantilla: Optional[Path], reemplazos: Dict[str, str]) -> Resultado:
+    from docx import Document
+    from docx.shared import Cm, Pt
+
+    doc = Document(str(plantilla)) if plantilla else Document()
+    avisos: List[str] = []
+
+    sustituidos = _reemplazar_en_docx(doc, reemplazos) if reemplazos else 0
+    if reemplazos and not sustituidos:
+        avisos.append("Ojo: ninguno de los marcadores que me diste aparece en la plantilla; "
+                      "revisá cómo están escritos en ella con document_inspect.")
+    if plantilla and bloques:
+        _vaciar_cuerpo(doc)
+
+    if cabecera.get("titulo"):
+        p = doc.add_paragraph(str(cabecera["titulo"]), style=_estilo(doc, "Title", "Título"))
+        if p.style is None or p.style.name not in ("Title", "Título"):
+            p.runs[0].bold = True
+            p.runs[0].font.size = Pt(24)
+    if cabecera.get("subtitulo"):
+        doc.add_paragraph(str(cabecera["subtitulo"]), style=_estilo(doc, "Subtitle", "Subtítulo"))
+    pie_portada = " · ".join(str(cabecera[k]) for k in ("autor", "fecha") if cabecera.get(k))
+    if pie_portada:
+        doc.add_paragraph(pie_portada)
+
+    _escribir_bloques(doc, bloques, avisos)
 
     doc.save(str(ruta))
     detalle = f"{len(bloques)} bloques"
@@ -575,6 +739,16 @@ def _html_de(cabecera: Dict[str, Any], bloques: List[Dict[str, Any]]) -> str:
             partes.append(f"<blockquote>{e(str(b.get('texto') or ''))}</blockquote>")
         elif tipo == "salto":
             partes.append("<div style='page-break-after:always'></div>")
+        elif tipo == "grafico":
+            import base64
+
+            with tempfile.TemporaryDirectory() as temporal:
+                png = os.path.join(temporal, "grafico.png")
+                if _grafico_como_imagen(b, png):
+                    datos = base64.b64encode(Path(png).read_bytes()).decode("ascii")
+                    partes.append(f"<img src='data:image/png;base64,{datos}' style='max-width:100%'>")
+                    if b.get("pie"):
+                        partes.append(f"<p><i>{e(str(b['pie']))}</i></p>")
         elif tipo == "imagen":
             if os.path.isfile(str(b.get("ruta") or "")):
                 partes.append(f"<img src='file:///{e(str(b['ruta']))}' style='max-width:100%'>")
@@ -617,6 +791,17 @@ def _markdown_de(cabecera: Dict[str, Any], bloques: List[Dict[str, Any]]) -> str
             lineas += ["> " + str(b.get("texto") or ""), ""]
         elif tipo == "salto":
             lineas += ["---", ""]
+        elif tipo == "grafico":
+            categorias, series = _series_de(b)
+            if series:
+                if b.get("titulo"):
+                    lineas += [f"*{b['titulo']}*", ""]
+                lineas.append("| " + " | ".join([""] + [n or "Serie" for n, _ in series]) + " |")
+                lineas.append("|" + "---|" * (len(series) + 1))
+                for i, c in enumerate(categorias):
+                    lineas.append("| " + " | ".join([c] + [str(v[i]) if i < len(v) else ""
+                                                         for _, v in series]) + " |")
+                lineas.append("")
         elif tipo == "imagen":
             lineas += [f"![{b.get('pie') or ''}]({b.get('ruta') or ''})", ""]
         else:
@@ -736,6 +921,59 @@ def _hojas_de(spec: Any) -> List[Dict[str, Any]]:
     return salida
 
 
+@dataclass(frozen=True)
+class Convencion:
+    """Cómo se escriben los números en una región: qué separa los miles y qué los decimales."""
+
+    miles: str
+    decimal: str
+    separador_csv: str
+
+    def formatear(self, valor: float, decimales: int = 0) -> str:
+        """Return el número escrito como se escribe en la región: 1.250.000,50 o 1,250,000.50."""
+        texto = f"{valor:,.{decimales}f}"                 # a la inglesa, y luego se traduce
+        return texto.replace(",", "\x00").replace(".", self.decimal).replace("\x00", self.miles)
+
+
+#: Convenciones conocidas. Las de habla hispana usan punto de miles y coma decimal, salvo
+#: México y Centroamérica, que escriben como en Estados Unidos. Una región que no esté acá
+#: cae en la del idioma: `es-*` a la española, todo lo demás a la inglesa.
+_CONVENCIONES = {
+    "es": Convencion(miles=".", decimal=",", separador_csv=";"),
+    "es-MX": Convencion(miles=",", decimal=".", separador_csv=","),
+    "es-GT": Convencion(miles=",", decimal=".", separador_csv=","),
+    "es-SV": Convencion(miles=",", decimal=".", separador_csv=","),
+    "es-HN": Convencion(miles=",", decimal=".", separador_csv=","),
+    "es-NI": Convencion(miles=",", decimal=".", separador_csv=","),
+    "es-PA": Convencion(miles=",", decimal=".", separador_csv=","),
+    "es-DO": Convencion(miles=",", decimal=".", separador_csv=","),
+    "es-PR": Convencion(miles=",", decimal=".", separador_csv=","),
+    "en": Convencion(miles=",", decimal=".", separador_csv=","),
+    "pt": Convencion(miles=".", decimal=",", separador_csv=";"),
+    "fr": Convencion(miles=" ", decimal=",", separador_csv=";"),
+    "de": Convencion(miles=".", decimal=",", separador_csv=";"),
+    "it": Convencion(miles=".", decimal=",", separador_csv=";"),
+}
+
+
+def convencion() -> Convencion:
+    """Return la convención numérica de la región configurada.
+
+    Se consulta cada vez y no se cachea: cambiar la región en la configuración tiene que
+    valer para el siguiente documento, no para el siguiente arranque.
+    """
+    region = ""
+    try:
+        from config_manager import get_region
+
+        region = get_region()
+    except Exception as e:
+        logger.debug(f"no se pudo leer la región, se usa la del proyecto: {e}")
+    region = (region or "es-CO").replace("_", "-")
+    idioma = region.split("-")[0].lower()
+    return _CONVENCIONES.get(region) or _CONVENCIONES.get(idioma) or _CONVENCIONES["en"]
+
+
 def _valor_de_celda(valor: Any) -> Any:
     """Return el valor listo para Excel: números como números, fórmulas como fórmulas."""
     if valor is None or isinstance(valor, (int, float, bool)):
@@ -743,23 +981,28 @@ def _valor_de_celda(valor: Any) -> Any:
     texto = str(valor).strip()
     if texto.startswith("="):
         return texto                            # fórmula, la calcula Excel
-    # "1.250.000" y "12,5" son números escritos a la colombiana: se guardan como número para
-    # que las fórmulas y los formatos funcionen, no como texto que parece número.
+    # "1.250.000" y "12,5" son números escritos a mano: se guardan como número para que
+    # las fórmulas y los formatos funcionen, no como texto que parece número.
     #
-    # La convención es la del español, y se decide a propósito: el punto seguido de
-    # exactamente tres dígitos es separador de miles, la coma es el decimal. La primera
-    # versión leía "870.000" como 870 con decimales —a la inglesa— y una hoja de costos
-    # quedó con ochocientos setenta pesos donde iban ochocientos setenta mil. Un "12.5" a
-    # la inglesa (uno o dos decimales tras el punto) se sigue leyendo como 12,5.
-    numero = re.fullmatch(r"-?\d{1,3}(\.\d{3})+(,\d+)?|-?\d+(,\d+)?|-?\d+(\.\d+)?", texto)
-    if numero:
-        limpio = texto
-        if "," in texto:
-            limpio = texto.replace(".", "").replace(",", ".")
-        elif re.fullmatch(r"-?\d{1,3}(\.\d{3})+", texto):
-            limpio = texto.replace(".", "")
+    # Qué es de miles y qué es decimal lo decide la región configurada, no el código. La
+    # primera versión tenía fija la convención inglesa y una hoja de costos quedó con
+    # ochocientos setenta pesos donde iban ochocientos setenta mil ("870.000"); fijar la
+    # española habría hecho lo mismo, al revés, con un usuario en México o Estados Unidos.
+    conv = convencion()
+    miles, decimal = re.escape(conv.miles), re.escape(conv.decimal)
+    patron = rf"-?\d{{1,3}}({miles}\d{{3}})+({decimal}\d+)?|-?\d+({decimal}\d+)?"
+    if re.fullmatch(patron, texto):
+        limpio = texto.replace(conv.miles, "").replace(conv.decimal, ".")
         try:
-            return float(limpio) if ("." in limpio) else int(limpio)
+            return float(limpio) if "." in limpio else int(limpio)
+        except ValueError:
+            return texto
+    # Un número escrito con la convención contraria y sin ambigüedad —"12.5" donde el punto
+    # es de miles no puede ser de miles porque no le siguen tres dígitos— se acepta igual.
+    otro = "." if conv.decimal == "," else ","
+    if re.fullmatch(rf"-?\d+{re.escape(otro)}\d{{1,2}}", texto):
+        try:
+            return float(texto.replace(otro, "."))
         except ValueError:
             return texto
     return texto
@@ -888,6 +1131,220 @@ def _agregar_grafico(ws, grafico: Dict[str, Any], encabezados: List[str],
     ws.add_chart(chart, f"A{fila_ancla}")
 
 
+_REF_RE = re.compile(r"\$?([A-Z]{1,3})\$?(\d{1,7})")
+_RANGO_RE = re.compile(r"\$?[A-Z]{1,3}\$?\d{1,7}:\$?[A-Z]{1,3}\$?\d{1,7}")
+_TOKEN_RE = re.compile(
+    r"\s*(?:(?P<num>\d+(?:\.\d+)?)|(?P<fn>SUM|SUMA|AVERAGE|PROMEDIO|MIN|MAX)\(|"
+    r"(?P<rango>\$?[A-Z]{1,3}\$?\d+:\$?[A-Z]{1,3}\$?\d+)|(?P<ref>\$?[A-Z]{1,3}\$?\d+)|"
+    r"(?P<op>[-+*/()]))"
+)
+
+
+def _calcular_formula(formula: str, celdas: Dict[str, Any], profundidad: int = 0) -> Optional[float]:
+    """Return el valor de una fórmula SENCILLA, o None si no se puede calcular.
+
+    Sin Excel nadie calcula, y un PDF con `=SUM(B2:B4)` escrito en la fila de totales no es
+    un informe: es una hoja a medio hacer. Esto evalúa lo que este módulo produce y lo que
+    una hoja corriente trae —sumas, restas, productos, divisiones, paréntesis, SUMA,
+    PROMEDIO, MÍN y MÁX sobre rangos— con un evaluador propio: nunca `eval()`, y cualquier
+    cosa fuera de esa gramática devuelve None, que se muestra como la fórmula escrita.
+    """
+    if profundidad > 20:
+        return None
+    texto = formula.lstrip("=").strip().upper()
+    pos = 0
+    salida: List[Any] = []                              # notación polaca inversa
+    operadores: List[str] = []
+    precedencia = {"+": 1, "-": 1, "*": 2, "/": 2}
+
+    def _valor_de(ref: str) -> Optional[float]:
+        v = celdas.get(ref.replace("$", ""))
+        if isinstance(v, bool):
+            return None
+        if isinstance(v, (int, float)):
+            return float(v)
+        if isinstance(v, str) and v.startswith("="):
+            return _calcular_formula(v, celdas, profundidad + 1)
+        return 0.0 if v in (None, "") else None
+
+    def _rango(texto_rango: str) -> Optional[List[float]]:
+        a, b = texto_rango.replace("$", "").split(":")
+        ca, fa = _REF_RE.match(a).groups()
+        cb, fb = _REF_RE.match(b).groups()
+        from openpyxl.utils import column_index_from_string, get_column_letter
+
+        valores = []
+        for c in range(column_index_from_string(ca), column_index_from_string(cb) + 1):
+            for f in range(int(fa), int(fb) + 1):
+                v = _valor_de(f"{get_column_letter(c)}{f}")
+                if v is None:
+                    return None
+                valores.append(v)
+        return valores
+
+    esperando_operando = True
+    while pos < len(texto):
+        m = _TOKEN_RE.match(texto, pos)
+        if not m:
+            return None
+        pos = m.end()
+        if m.group("num"):
+            salida.append(float(m.group("num")))
+            esperando_operando = False
+        elif m.group("fn"):
+            cierre = texto.find(")", pos)
+            if cierre < 0:
+                return None
+            interior = texto[pos:cierre]
+            pos = cierre + 1
+            valores = _rango(interior) if _RANGO_RE.fullmatch(interior) else None
+            if valores is None:
+                return None
+            fn = m.group("fn")
+            if fn in ("SUM", "SUMA"):
+                salida.append(float(sum(valores)))
+            elif fn in ("AVERAGE", "PROMEDIO"):
+                salida.append(sum(valores) / len(valores) if valores else 0.0)
+            elif fn == "MIN":
+                salida.append(float(min(valores)) if valores else 0.0)
+            else:
+                salida.append(float(max(valores)) if valores else 0.0)
+            esperando_operando = False
+        elif m.group("rango"):
+            return None                                 # un rango suelto no es un valor
+        elif m.group("ref"):
+            v = _valor_de(m.group("ref"))
+            if v is None:
+                return None
+            salida.append(v)
+            esperando_operando = False
+        else:
+            op = m.group("op")
+            if op == "(":
+                operadores.append(op)
+            elif op == ")":
+                while operadores and operadores[-1] != "(":
+                    salida.append(operadores.pop())
+                if not operadores:
+                    return None
+                operadores.pop()
+            else:
+                if op == "-" and esperando_operando:
+                    salida.append(0.0)                  # menos unario: 0 - x
+                while operadores and operadores[-1] != "(" and \
+                        precedencia.get(operadores[-1], 0) >= precedencia[op]:
+                    salida.append(operadores.pop())
+                operadores.append(op)
+                esperando_operando = True
+    while operadores:
+        if operadores[-1] == "(":
+            return None
+        salida.append(operadores.pop())
+
+    pila: List[float] = []
+    for token in salida:
+        if isinstance(token, float):
+            pila.append(token)
+            continue
+        if len(pila) < 2:
+            return None
+        b, a = pila.pop(), pila.pop()
+        if token == "+":
+            pila.append(a + b)
+        elif token == "-":
+            pila.append(a - b)
+        elif token == "*":
+            pila.append(a * b)
+        elif token == "/":
+            if b == 0:
+                return None
+            pila.append(a / b)
+    return pila[0] if len(pila) == 1 else None
+
+
+def _html_de_hoja(ruta_xlsx: Path) -> Tuple[str, List[str]]:
+    """Return `(html, avisos)` con cada hoja del libro como una tabla. Para el PDF sin Excel."""
+    import html as _html
+
+    from openpyxl import load_workbook
+
+    e = _html.escape
+    # En modo de solo lectura, porque es el único en que `close()` suelta el archivo de
+    # verdad. En modo normal openpyxl deja el archivo abierto hasta que el objeto se
+    # recolecta, y en Windows eso bloquea el borrado de la carpeta temporal: pasó.
+    wb = load_workbook(str(ruta_xlsx), read_only=True)
+    try:
+        return _html_de_libro(wb, e)
+    finally:
+        wb.close()
+
+
+def _html_de_libro(wb, e) -> Tuple[str, List[str]]:
+    avisos: List[str] = []
+    partes = ["<!doctype html><html><head><meta charset='utf-8'><style>"
+              "body{font-family:Calibri,Arial,sans-serif;font-size:9pt;margin:1.2cm}"
+              "h2{font-size:13pt;margin:0 0 6pt 0}table{border-collapse:collapse;margin-bottom:14pt}"
+              "td,th{border:1px solid #999;padding:3pt 5pt;text-align:left;white-space:nowrap}"
+              "th{background:#305496;color:#fff}td.n{text-align:right}</style></head><body>"]
+    sin_calcular = False
+    from openpyxl.utils import get_column_letter
+
+    for ws in wb.worksheets:
+        filas_leidas = [f for f in ws.iter_rows(values_only=True)
+                        if any(c is not None for c in f)]
+        if not filas_leidas:
+            continue
+        # Un mapa celda -> valor para calcular las fórmulas sencillas sin Excel.
+        celdas_por_ref: Dict[str, Any] = {}
+        for numero_fila, fila in enumerate(ws.iter_rows(values_only=True), 1):
+            for numero_col, valor in enumerate(fila, 1):
+                if valor is not None:
+                    celdas_por_ref[f"{get_column_letter(numero_col)}{numero_fila}"] = valor
+        partes.append(f"<h2>{e(ws.title)}</h2><table>")
+        conv = convencion()
+        for i, fila in enumerate(filas_leidas, 1):
+            etiqueta = "th" if i == 1 else "td"
+            celdas = []
+            for valor in fila:
+                if isinstance(valor, str) and valor.startswith("="):
+                    calculado = _calcular_formula(valor, celdas_por_ref)
+                    if calculado is None:
+                        sin_calcular = True
+                        celdas.append(f"<{etiqueta} class='n'><i>{e(valor)}</i></{etiqueta}>")
+                    else:
+                        decimales = 0 if float(calculado).is_integer() else 2
+                        celdas.append(f"<{etiqueta} class='n'>{e(conv.formatear(calculado, decimales))}</{etiqueta}>")
+                elif isinstance(valor, (int, float)) and not isinstance(valor, bool):
+                    decimales = 0 if float(valor).is_integer() else 2
+                    celdas.append(f"<{etiqueta} class='n'>{e(conv.formatear(valor, decimales))}</{etiqueta}>")
+                else:
+                    celdas.append(f"<{etiqueta}>{e('' if valor is None else str(valor))}</{etiqueta}>")
+            partes.append(f"<tr>{''.join(celdas)}</tr>")
+        partes.append("</table>")
+    partes.append("</body></html>")
+    if sin_calcular:
+        avisos.append("Sin Excel, alguna fórmula quedó escrita y no calculada en el PDF; "
+                      "el .xlsx sí las calcula al abrirlo.")
+    return "".join(partes), avisos
+
+
+def _pdf_apaisado_sin_office(html: str, ruta: Path) -> None:
+    """Maqueta HTML en un PDF apaisado (A4 horizontal): para hojas y diapositivas."""
+    import pymupdf
+
+    historia = pymupdf.Story(html=html)
+    escritor = pymupdf.DocumentWriter(str(ruta))
+    rect_pagina = pymupdf.paper_rect("a4-l")
+    area = rect_pagina + (36, 36, -36, -36)
+    hay_mas = True
+    while hay_mas:
+        dispositivo = escritor.begin_page(rect_pagina)
+        hay_mas, _ = historia.place(area)
+        historia.draw(dispositivo)
+        escritor.end_page()
+    escritor.close()
+
+
 def crear_hoja(nombre: str, contenido: Any, plantilla: Optional[str] = None,
                carpeta: Optional[str] = None) -> Resultado:
     """Produce una hoja de cálculo: .xlsx o .csv. Levanta `DocumentoRechazado`.
@@ -898,18 +1355,40 @@ def crear_hoja(nombre: str, contenido: Any, plantilla: Optional[str] = None,
     Las celdas que empiezan por `=` son fórmulas y las calcula Excel.
     """
     extension = _extension(nombre)
-    if extension not in EXTENSIONES_HOJA:
-        raise DocumentoRechazado(f"«{nombre}» no es una hoja de cálculo: hace falta .xlsx o .csv.")
+    if extension not in EXTENSIONES_HOJA + ("pdf",):
+        raise DocumentoRechazado(f"«{nombre}» no es una hoja de cálculo: hace falta .xlsx, .csv o .pdf.")
     spec = _como_estructura(contenido)
     rechazar_relleno(spec)
     hojas = _hojas_de(spec)
     destino = carpeta_de_salida(carpeta)
     ruta = ruta_libre(destino, nombre)
 
+    if extension == "pdf":
+        # Primero el Excel de verdad, y de ahí el PDF con Excel. Sin Excel, cada hoja se
+        # maqueta como tabla apaisada: sin gráficos y con las fórmulas escritas, y se dice.
+        with tempfile.TemporaryDirectory() as temporal:
+            intermedio = Path(temporal) / (ruta.stem + ".xlsx")
+            resultado = _xlsx(hojas, intermedio,
+                              _plantilla_valida(plantilla, ("xlsx",)) if plantilla else None)
+            pdf_temporal = Path(temporal) / (ruta.stem + ".pdf")
+            if _con_office("Excel", resultado.ruta, str(pdf_temporal)):
+                os.replace(str(pdf_temporal), str(ruta))
+                return Resultado(ruta=str(ruta), formato="pdf",
+                                 detalle=resultado.detalle + "; convertido con Excel",
+                                 avisos=resultado.avisos)
+            html, avisos = _html_de_hoja(Path(resultado.ruta))
+            _pdf_apaisado_sin_office(html, ruta)
+            if any(h.get("grafico") for h in hojas):
+                avisos.append("Sin Excel, el gráfico no entra en el PDF.")
+            return Resultado(ruta=str(ruta), formato="pdf",
+                             detalle=resultado.detalle + "; maquetado sin Office",
+                             avisos=resultado.avisos + avisos)
+
     if extension == "csv":
         hoja = hojas[0]
         with open(ruta, "w", encoding="utf-8-sig", newline="") as f:
-            escritor = csv.writer(f, delimiter=";")     # el separador que abre Excel en español
+            # El separador que Excel abre bien en la región: ";" en español, "," en inglés.
+            escritor = csv.writer(f, delimiter=convencion().separador_csv)
             if hoja["encabezados"]:
                 escritor.writerow(hoja["encabezados"])
             escritor.writerows(hoja["filas"])
@@ -917,9 +1396,13 @@ def crear_hoja(nombre: str, contenido: Any, plantilla: Optional[str] = None,
                          detalle=f"{len(hoja['filas'])} filas" +
                                  (", solo la primera hoja" if len(hojas) > 1 else ""))
 
+    return _xlsx(hojas, ruta, _plantilla_valida(plantilla, ("xlsx",)) if plantilla else None)
+
+
+def _xlsx(hojas: List[Dict[str, Any]], ruta: Path, ruta_plantilla: Optional[Path]) -> Resultado:
+    """Escribe el libro en `ruta`, que ya viene decidida. Es lo que comparten .xlsx y .pdf."""
     from openpyxl import Workbook, load_workbook
 
-    ruta_plantilla = _plantilla_valida(plantilla, ("xlsx",)) if plantilla else None
     if ruta_plantilla:
         wb = load_workbook(str(ruta_plantilla))
     else:
@@ -968,7 +1451,8 @@ def _validar_presentacion(cabecera: Dict[str, Any], diapositivas: List[Dict[str,
     if con_reemplazos and not diapositivas:
         return
     con_contenido = [d for d in diapositivas
-                     if d.get("puntos") or d.get("texto") or d.get("tabla") or d.get("imagen")]
+                     if d.get("puntos") or d.get("texto") or d.get("tabla") or d.get("imagen")
+                     or d.get("grafico")]
     if len(con_contenido) < 2:
         raise DocumentoRechazado(
             "La presentación no tiene contenido suficiente: hacen falta al menos dos "
@@ -1033,31 +1517,9 @@ def _quitar_diapositivas(prs) -> None:
         lista.remove(sld_id)
 
 
-def _pptx(cabecera: Dict[str, Any], diapositivas: List[Dict[str, Any]], ruta: Path,
-          plantilla: Optional[Path], reemplazos: Dict[str, str]) -> Resultado:
-    from pptx import Presentation
+def _agregar_diapositivas(prs, diapositivas: List[Dict[str, Any]], avisos: List[str]) -> None:
+    """Añade las diapositivas al final de la presentación. Lo usan crear y editar."""
     from pptx.util import Cm, Pt
-
-    from pptx.util import Inches
-
-    prs = Presentation(str(plantilla)) if plantilla else Presentation()
-    if not plantilla:
-        prs.slide_width, prs.slide_height = Inches(13.333), Inches(7.5)   # panorámica 16:9
-    avisos: List[str] = []
-    sustituidos = _reemplazar_en_pptx(prs, reemplazos) if reemplazos else 0
-    if reemplazos and not sustituidos:
-        avisos.append("Ojo: ninguno de los marcadores que me diste aparece en la plantilla.")
-    if plantilla and diapositivas:
-        _quitar_diapositivas(prs)
-
-    if cabecera.get("titulo"):
-        slide = prs.slides.add_slide(_layout(prs, "Title Slide", "Diapositiva de título",
-                                             con_cuerpo=False))
-        if slide.shapes.title is not None:
-            slide.shapes.title.text = str(cabecera["titulo"])
-        for ph in slide.placeholders:
-            if ph.placeholder_format.idx == 1 and cabecera.get("subtitulo"):
-                ph.text = str(cabecera["subtitulo"])
 
     for d in diapositivas:
         tiene_cuerpo = bool(d.get("puntos") or d.get("texto"))
@@ -1116,6 +1578,12 @@ def _pptx(cabecera: Dict[str, Any], diapositivas: List[Dict[str, Any]], ruta: Pa
                     forma.table.cell(r, c).text = texto
                 r += 1
 
+        grafico = d.get("grafico")
+        if isinstance(grafico, dict):
+            if not _grafico_nativo_pptx(slide, grafico, Cm(1.5), arriba,
+                                        prs.slide_width - Cm(3), alto_libre):
+                avisos.append(f"El gráfico de «{d.get('titulo') or ''}» no traía datos y se omitió.")
+
         imagen = d.get("imagen")
         if imagen:
             if os.path.isfile(str(imagen)):
@@ -1130,6 +1598,36 @@ def _pptx(cabecera: Dict[str, Any], diapositivas: List[Dict[str, Any]], ruta: Pa
 
         if d.get("notas"):
             slide.notes_slide.notes_text_frame.text = str(d["notas"])
+
+
+
+def _pptx(cabecera: Dict[str, Any], diapositivas: List[Dict[str, Any]], ruta: Path,
+          plantilla: Optional[Path], reemplazos: Dict[str, str]) -> Resultado:
+    from pptx import Presentation
+    from pptx.util import Cm, Pt
+
+    from pptx.util import Inches
+
+    prs = Presentation(str(plantilla)) if plantilla else Presentation()
+    if not plantilla:
+        prs.slide_width, prs.slide_height = Inches(13.333), Inches(7.5)   # panorámica 16:9
+    avisos: List[str] = []
+    sustituidos = _reemplazar_en_pptx(prs, reemplazos) if reemplazos else 0
+    if reemplazos and not sustituidos:
+        avisos.append("Ojo: ninguno de los marcadores que me diste aparece en la plantilla.")
+    if plantilla and diapositivas:
+        _quitar_diapositivas(prs)
+
+    if cabecera.get("titulo"):
+        slide = prs.slides.add_slide(_layout(prs, "Title Slide", "Diapositiva de título",
+                                             con_cuerpo=False))
+        if slide.shapes.title is not None:
+            slide.shapes.title.text = str(cabecera["titulo"])
+        for ph in slide.placeholders:
+            if ph.placeholder_format.idx == 1 and cabecera.get("subtitulo"):
+                ph.text = str(cabecera["subtitulo"])
+
+    _agregar_diapositivas(prs, diapositivas, avisos)
 
     prs.save(str(ruta))
     detalle = f"{len(prs.slides)} diapositivas"
@@ -1209,6 +1707,55 @@ def _aplicar_tema(ruta_pptx: str, tema: str) -> bool:
         pythoncom.CoUninitialize()
 
 
+def _html_de_diapositivas(cabecera: Dict[str, Any], diapositivas: List[Dict[str, Any]]) -> str:
+    """Return las diapositivas como páginas HTML apaisadas. Para el PDF sin PowerPoint."""
+    import base64
+    import html as _html
+
+    e = _html.escape
+    partes = ["<!doctype html><html><head><meta charset='utf-8'><style>"
+              "body{font-family:Calibri,Arial,sans-serif;color:#222;margin:0}"
+              ".d{page-break-after:always;padding:0.4cm 0.8cm}h1{font-size:26pt;margin:0 0 10pt 0;"
+              "border-bottom:2px solid #305496;padding-bottom:6pt}h2{font-size:34pt;margin-top:3cm;"
+              "text-align:center}p.sub{text-align:center;color:#555;font-size:16pt}"
+              "li{font-size:15pt;margin:4pt 0}ul ul li{font-size:13pt}p{font-size:15pt}"
+              "table{border-collapse:collapse;font-size:12pt;margin-top:8pt}"
+              "td,th{border:1px solid #999;padding:4pt 8pt}th{background:#305496;color:#fff}"
+              "</style></head><body>"]
+    if cabecera.get("titulo"):
+        partes.append(f"<div class='d'><h2>{e(str(cabecera['titulo']))}</h2>")
+        if cabecera.get("subtitulo"):
+            partes.append(f"<p class='sub'>{e(str(cabecera['subtitulo']))}</p>")
+        partes.append("</div>")
+    for d in diapositivas:
+        partes.append(f"<div class='d'><h1>{e(str(d.get('titulo') or ''))}</h1>")
+        puntos = d.get("puntos") or ([d["texto"]] if d.get("texto") else [])
+        if puntos:
+            partes.append("<ul>")
+            for punto in puntos:
+                if isinstance(punto, (list, tuple)):
+                    partes.append("<ul>" + "".join(f"<li>{e(str(s))}</li>" for s in punto) + "</ul>")
+                else:
+                    partes.append(f"<li>{e(str(punto))}</li>")
+            partes.append("</ul>")
+        tabla = d.get("tabla")
+        if isinstance(tabla, dict) and (tabla.get("filas") or tabla.get("encabezados")):
+            enc = "".join(f"<th>{e(str(c))}</th>" for c in (tabla.get("encabezados") or []))
+            filas = "".join("<tr>" + "".join(f"<td>{e('' if c is None else str(c))}</td>" for c in f)
+                            + "</tr>" for f in (tabla.get("filas") or []))
+            partes.append(f"<table>{'<tr>' + enc + '</tr>' if enc else ''}{filas}</table>")
+        grafico = d.get("grafico")
+        if isinstance(grafico, dict):
+            with tempfile.TemporaryDirectory() as temporal:
+                png = os.path.join(temporal, "g.png")
+                if _grafico_como_imagen(grafico, png):
+                    datos = base64.b64encode(Path(png).read_bytes()).decode("ascii")
+                    partes.append(f"<img src='data:image/png;base64,{datos}' style='max-height:11cm'>")
+        partes.append("</div>")
+    partes.append("</body></html>")
+    return "".join(partes)
+
+
 def crear_presentacion(nombre: str, contenido: Any, plantilla: Optional[str] = None,
                        reemplazos: Optional[Dict[str, str]] = None,
                        carpeta: Optional[str] = None, tema: Optional[str] = None) -> Resultado:
@@ -1258,10 +1805,16 @@ def crear_presentacion(nombre: str, contenido: Any, plantilla: Optional[str] = N
             return Resultado(ruta=str(ruta), formato="pdf",
                              detalle=resultado.detalle + ", convertido con PowerPoint",
                              avisos=resultado.avisos)
-    raise DocumentoRechazado(
-        "Para pasar una presentación a PDF hace falta PowerPoint y no pude usarlo. Te la "
-        "puedo hacer en .pptx."
-    )
+
+    # Sin PowerPoint: cada diapositiva es una página apaisada con su título, sus puntos, su
+    # tabla y su gráfico dibujado. No lleva el tema, y se dice.
+    _pdf_apaisado_sin_office(_html_de_diapositivas(cabecera, diapositivas), ruta)
+    avisos = [a for a in resultado.avisos if "tema" not in a.lower()]
+    avisos.append("Sin PowerPoint el PDF no lleva el tema de diseño: cada diapositiva va "
+                  "maquetada en limpio.")
+    cuantas = len(diapositivas) + (1 if cabecera.get("titulo") else 0)
+    return Resultado(ruta=str(ruta), formato="pdf",
+                     detalle=f"{cuantas} diapositivas, maquetado sin Office", avisos=avisos)
 
 
 # ============================================================================ otros
@@ -1351,10 +1904,15 @@ def convertir_a_pdf(ruta: str, carpeta: Optional[str] = None) -> Resultado:
         raise DocumentoRechazado(f"No sé convertir «{origen.name}» a PDF: solo Word, Excel y PowerPoint.")
     destino = carpeta_de_salida(carpeta) if carpeta else origen.parent
     salida = ruta_libre(destino, origen.stem + ".pdf")
-    if not _con_office(aplicacion, str(origen), str(salida)):
-        raise DocumentoRechazado(f"No pude convertir «{origen.name}» con {aplicacion}. "
-                                 f"¿Está instalado y sin diálogos abiertos?")
-    return Resultado(ruta=str(salida), formato="pdf", detalle=f"convertido con {aplicacion}")
+    if _con_office(aplicacion, str(origen), str(salida)):
+        return Resultado(ruta=str(salida), formato="pdf", detalle=f"convertido con {aplicacion}")
+    if aplicacion == "Excel":
+        html, avisos = _html_de_hoja(origen)
+        _pdf_apaisado_sin_office(html, salida)
+        return Resultado(ruta=str(salida), formato="pdf", detalle="maquetado sin Office",
+                         avisos=avisos + ["Sin Excel, los gráficos no entran en el PDF."])
+    raise DocumentoRechazado(f"No pude convertir «{origen.name}» con {aplicacion}. "
+                             f"¿Está instalado y sin diálogos abiertos?")
 
 
 # ======================================================================== inspeccionar
@@ -1436,6 +1994,13 @@ def _inspeccionar_xlsx(archivo: Path) -> str:
     from openpyxl import load_workbook
 
     wb = load_workbook(str(archivo), read_only=True)
+    try:
+        return _inspeccionar_libro(wb, archivo)
+    finally:
+        wb.close()
+
+
+def _inspeccionar_libro(wb, archivo: Path) -> str:
     lineas = [f"Plantilla Excel «{archivo.name}»: {len(wb.sheetnames)} hoja(s)."]
     textos = []
     for ws in wb.worksheets:
@@ -1472,3 +2037,270 @@ def _inspeccionar_pptx(archivo: Path) -> str:
     if marcadores:
         lineas.append("Marcadores para rellenar (pasalos en 'reemplazos'): " + ", ".join(marcadores))
     return "\n".join(lineas)
+
+
+# ======================================================================= editar existente
+
+def _destino_de_edicion(origen: Path, en_sitio: bool, carpeta: Optional[str]) -> Path:
+    """Return dónde se guarda el documento editado.
+
+    Por defecto, a un archivo nuevo al lado del original (`informe (2).docx`): editar el
+    documento de alguien y equivocarse no tiene deshacer. Si se pide `en_sitio`, se
+    sobrescribe el original — y eso es lo que muestra la confirmación.
+    """
+    if en_sitio:
+        return origen
+    if carpeta:
+        return ruta_libre(carpeta_de_salida(carpeta), origen.name)
+    return ruta_libre(origen.parent, origen.name)
+
+
+def _origen_valido(ruta: str) -> Path:
+    archivo = Path(os.path.expanduser(str(ruta or "").strip()))
+    if not archivo.is_file():
+        for base in [_escritorio(), Path.home() / "Documents", Path.home() / "OneDrive" / "Documentos",
+                     Path.home() / "Downloads"]:
+            if (base / archivo).is_file():
+                archivo = base / archivo
+                break
+    if not archivo.is_file():
+        raise DocumentoRechazado(f"No encuentro «{ruta}».")
+    real = Path(os.path.realpath(archivo))
+    for base in _bases_permitidas():
+        base_real = str(Path(os.path.realpath(base))).lower()
+        try:
+            if os.path.commonpath([str(real).lower(), base_real]) == base_real:
+                return real
+        except ValueError:
+            continue
+    raise DocumentoRechazado(
+        f"«{archivo.name}» está fuera de tu carpeta personal y de los espacios de trabajo: "
+        f"no lo edito."
+    )
+
+
+def _mover_al_final_despues_de(doc, ancla: str, habia_antes: set) -> bool:
+    """Mueve lo agregado al final del cuerpo para que quede justo después del párrafo `ancla`.
+
+    python-docx solo sabe añadir al final. Para "poné esto después de la sección 3" se
+    escribe al final y luego se recolocan esos elementos detrás del párrafo que contiene
+    el texto ancla. Return si se encontró el ancla.
+
+    Lo nuevo se reconoce por identidad y no por posición: python-docx inserta cada párrafo
+    ANTES del `sectPr` final, así que "los elementos a partir del índice N" era solo el
+    `sectPr` y el contenido nuevo se quedaba al final. Pasó en la primera prueba.
+    """
+    from os_integration.ui_tree import _normalizar
+
+    buscado = _normalizar(ancla)
+    cuerpo = doc.element.body
+    nuevos = [h for h in cuerpo if h not in habia_antes and not h.tag.endswith("}sectPr")]
+    objetivo = None
+    for parrafo in doc.paragraphs:
+        if parrafo._p in nuevos:
+            break
+        if buscado and buscado in _normalizar(parrafo.text):
+            objetivo = parrafo._p
+    if objetivo is None:
+        return False
+    for elemento in reversed(nuevos):
+        objetivo.addnext(elemento)
+    return True
+
+
+def _editar_docx(origen: Path, destino: Path, cambios: Dict[str, Any]) -> Resultado:
+    from docx import Document
+
+    doc = Document(str(origen))
+    avisos: List[str] = []
+    hechos: List[str] = []
+
+    reemplazos = {str(k): str(v) for k, v in (cambios.get("reemplazos") or {}).items()}
+    if reemplazos:
+        cuantos = _reemplazar_en_docx(doc, reemplazos)
+        hechos.append(f"{cuantos} reemplazos")
+        if not cuantos:
+            avisos.append("Ninguno de los textos a reemplazar aparece en el documento.")
+
+    quitar = [str(q) for q in (cambios.get("quitar") or []) if str(q).strip()]
+    if quitar:
+        from os_integration.ui_tree import _normalizar
+
+        borrados = 0
+        for parrafo in list(doc.paragraphs):
+            texto = _normalizar(parrafo.text)
+            if texto and any(_normalizar(q) in texto for q in quitar):
+                parrafo._p.getparent().remove(parrafo._p)
+                borrados += 1
+        hechos.append(f"{borrados} párrafos quitados")
+        if not borrados:
+            avisos.append("No encontré ningún párrafo con los textos a quitar.")
+
+    agregar = cambios.get("agregar") or []
+    _, bloques = _bloques_de(agregar if isinstance(agregar, str) else {"bloques": agregar})
+    if bloques:
+        rechazar_relleno(bloques)
+        antes = set(doc.element.body)
+        _escribir_bloques(doc, bloques, avisos)
+        despues_de = str(cambios.get("despues_de") or "").strip()
+        if despues_de and not _mover_al_final_despues_de(doc, despues_de, antes):
+            avisos.append(f"No encontré «{despues_de}» para poner el contenido después; "
+                          f"quedó al final.")
+        hechos.append(f"{len(bloques)} bloques agregados"
+                      + (f" después de «{despues_de}»" if despues_de else " al final"))
+
+    if not hechos:
+        raise DocumentoRechazado("No me diste ningún cambio: 'reemplazos', 'agregar' o 'quitar'.")
+    doc.save(str(destino))
+    return Resultado(ruta=str(destino), formato="docx", detalle=", ".join(hechos), avisos=avisos)
+
+
+def _editar_xlsx(origen: Path, destino: Path, cambios: Dict[str, Any]) -> Resultado:
+    from openpyxl import load_workbook
+
+    wb = load_workbook(str(origen))
+    avisos: List[str] = []
+    hechos: List[str] = []
+
+    celdas = cambios.get("celdas") or {}
+    if celdas:
+        escritas = 0
+        for referencia, valor in celdas.items():
+            hoja, _, celda = str(referencia).rpartition("!")
+            ws = wb[hoja] if hoja and hoja in wb.sheetnames else wb.worksheets[0]
+            if hoja and hoja not in wb.sheetnames:
+                avisos.append(f"No hay una hoja «{hoja}»; escribí en «{ws.title}».")
+            try:
+                ws[celda.upper()] = _valor_de_celda(valor)
+                escritas += 1
+            except Exception as e:
+                avisos.append(f"No pude escribir en {referencia}: {e}")
+        hechos.append(f"{escritas} celdas escritas")
+
+    agregar = cambios.get("agregar") or {}
+    if isinstance(agregar, list):
+        agregar = {wb.worksheets[0].title: agregar}
+    for nombre_hoja, filas in (agregar or {}).items():
+        ws = wb[nombre_hoja] if nombre_hoja in wb.sheetnames else wb.create_sheet(str(nombre_hoja)[:31])
+        cuantas = 0
+        for fila in filas or []:
+            valores = fila if isinstance(fila, (list, tuple)) else [fila]
+            ws.append([_valor_de_celda(v) for v in valores])
+            cuantas += 1
+        hechos.append(f"{cuantas} filas agregadas a «{ws.title}»")
+
+    reemplazos = {str(k): str(v) for k, v in (cambios.get("reemplazos") or {}).items()}
+    if reemplazos:
+        cuantos = 0
+        for ws in wb.worksheets:
+            for fila in ws.iter_rows():
+                for celda in fila:
+                    if isinstance(celda.value, str) and any(m in celda.value for m in reemplazos):
+                        nuevo = celda.value
+                        for m, v in reemplazos.items():
+                            cuantos += nuevo.count(m)
+                            nuevo = nuevo.replace(m, v)
+                        celda.value = _valor_de_celda(nuevo)
+        hechos.append(f"{cuantos} reemplazos")
+
+    if not hechos:
+        raise DocumentoRechazado("No me diste ningún cambio: 'celdas', 'agregar' o 'reemplazos'.")
+    wb.save(str(destino))
+    wb.close()
+    return Resultado(ruta=str(destino), formato="xlsx", detalle=", ".join(hechos), avisos=avisos)
+
+
+def _renumerar_diapositivas(prs) -> None:
+    """Deja las partes de las diapositivas numeradas seguidas: slide1, slide2, slide3...
+
+    python-pptx nombra una diapositiva nueva por CANTIDAD (`slide{n+1}`), no mirando qué
+    nombres ya existen. Tras borrar la 2 de tres, la siguiente que se agrega se llama
+    `slide3.xml`, que es la que ya está, y el archivo sale con dos partes del mismo nombre:
+    PowerPoint lo abre roto. Se vio en la primera prueba: «Cierre» desapareció y «Anexo»
+    salió dos veces. Con las partes renumeradas después de borrar, no hay choque.
+    """
+    from pptx.opc.packuri import PackURI
+
+    # Primero a nombres provisionales, para no chocar a mitad del cambio.
+    for i, slide in enumerate(prs.slides, 1):
+        slide.part.partname = PackURI(f"/ppt/slides/tmp{i}.xml")
+    for i, slide in enumerate(prs.slides, 1):
+        slide.part.partname = PackURI(f"/ppt/slides/slide{i}.xml")
+
+
+def _editar_pptx(origen: Path, destino: Path, cambios: Dict[str, Any]) -> Resultado:
+    from pptx import Presentation
+
+    prs = Presentation(str(origen))
+    avisos: List[str] = []
+    hechos: List[str] = []
+
+    reemplazos = {str(k): str(v) for k, v in (cambios.get("reemplazos") or {}).items()}
+    if reemplazos:
+        cuantos = _reemplazar_en_pptx(prs, reemplazos)
+        hechos.append(f"{cuantos} reemplazos")
+        if not cuantos:
+            avisos.append("Ninguno de los textos a reemplazar aparece en la presentación.")
+
+    quitar = [str(q) for q in (cambios.get("quitar") or []) if str(q).strip()]
+    if quitar:
+        from os_integration.ui_tree import _normalizar
+
+        lista = prs.slides._sldIdLst
+        borradas = 0
+        for indice in reversed(range(len(prs.slides))):
+            slide = prs.slides[indice]
+            titulo = _normalizar(slide.shapes.title.text if slide.shapes.title is not None else "")
+            numero = str(indice + 1)
+            if any(q == numero or (titulo and _normalizar(q) in titulo) for q in quitar):
+                sld_id = list(lista)[indice]
+                prs.part.drop_rel(sld_id.rId)
+                lista.remove(sld_id)
+                borradas += 1
+        hechos.append(f"{borradas} diapositivas quitadas")
+        if borradas:
+            _renumerar_diapositivas(prs)
+
+    _, diapositivas = _diapositivas_de({"diapositivas": cambios.get("agregar") or []})
+    if diapositivas:
+        rechazar_relleno(diapositivas)
+        _agregar_diapositivas(prs, diapositivas, avisos)
+        hechos.append(f"{len(diapositivas)} diapositivas agregadas al final")
+
+    if not hechos:
+        raise DocumentoRechazado("No me diste ningún cambio: 'reemplazos', 'agregar' o 'quitar'.")
+    prs.save(str(destino))
+    return Resultado(ruta=str(destino), formato="pptx", detalle=", ".join(hechos), avisos=avisos)
+
+
+def editar_documento(ruta: str, cambios: Any, en_sitio: bool = False,
+                     carpeta: Optional[str] = None) -> Resultado:
+    """Edita un .docx, .xlsx o .pptx que ya existe. Levanta `DocumentoRechazado`.
+
+    `cambios` según el tipo:
+    - Word: `reemplazos` {texto: nuevo}, `agregar` (bloques o Markdown) con `despues_de`
+      (texto del párrafo tras el que va), `quitar` [textos de párrafos].
+    - Excel: `celdas` {"Hoja!B4": valor}, `agregar` {hoja: [filas]}, `reemplazos`.
+    - PowerPoint: `reemplazos`, `agregar` [diapositivas], `quitar` [títulos o números].
+    """
+    origen = _origen_valido(ruta)
+    spec = _como_estructura(cambios)
+    if not isinstance(spec, dict):
+        raise DocumentoRechazado("Los cambios tienen que ser un objeto con 'reemplazos', "
+                                 "'agregar', 'quitar' o 'celdas'.")
+    rechazar_relleno({k: v for k, v in spec.items() if k != "quitar"})
+    destino = _destino_de_edicion(origen, bool(en_sitio), carpeta)
+    extension = _extension(origen.name)
+
+    if extension == "docx":
+        resultado = _editar_docx(origen, destino, spec)
+    elif extension == "xlsx":
+        resultado = _editar_xlsx(origen, destino, spec)
+    elif extension == "pptx":
+        resultado = _editar_pptx(origen, destino, spec)
+    else:
+        raise DocumentoRechazado(f"No sé editar «{origen.name}»: solo .docx, .xlsx y .pptx.")
+
+    if not en_sitio:
+        resultado.detalle += f"; el original {origen.name} quedó intacto"
+    return resultado

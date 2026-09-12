@@ -61,6 +61,7 @@ _DESCRIPCIONES: Dict[str, str] = {
     "presentation_create": "cree una presentación",
     "file_create": "cree un archivo",
     "document_to_pdf": "convierta un documento a PDF",
+    "document_edit": "edite un documento que ya existe",
 
     # ── Terminal ──
     "terminal_open": "abra una terminal",

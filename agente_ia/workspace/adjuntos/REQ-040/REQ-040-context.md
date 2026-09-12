@@ -85,12 +85,37 @@ existente**: `informe (2).docx`, como hacen los adjuntos de correo.
 ## Dependencias nuevas
 `python-pptx` (nuevo). `python-docx`, `openpyxl`, `pymupdf` y `pywin32` ya estaban.
 
+## Segunda entrega (2026-09-12) — lo que "no hacía", cerrado
+
+| Antes | Ahora |
+|---|---|
+| No editaba un documento existente | `document_edit` 🟡: en Word reemplaza conservando formato, agrega bloques **después del párrafo que se pida** y quita párrafos; en Excel escribe celdas (`Hoja!B4`), agrega filas y reemplaza; en PowerPoint reemplaza, quita diapositivas por título o número y agrega. Por defecto deja el original intacto (`informe (2).docx`); `en_sitio` sobrescribe |
+| No dibujaba gráficos en Word ni PowerPoint | Bloque `grafico` (barras, líneas, torta; varias series). En PowerPoint es **nativo y editable**; en Word y en el PDF sin Office, una imagen limpia con las cifras a la colombiana. La torta lleva porcentajes |
+| Sin Office, hoja y presentación no iban a PDF | Se maquetan apaisadas con PyMuPDF. Las **fórmulas sencillas se calculan** —sumas, restas, SUMA, PROMEDIO, MÍN, MÁX— con un evaluador propio (nunca `eval`), y lo que no se sabe calcular se muestra escrito y se avisa |
+
+### Región, no país fijo
+Johan lo pidió pensando en otro país mañana. `"870.000"` es ochocientos setenta mil en
+Colombia y 870 con decimales en Estados Unidos; México escribe a la inglesa. Ahora la
+convención numérica y el separador del CSV salen de `region` en la configuración
+(`es-CO` por defecto): `config_manager.get_region()`. Es el primer ajuste regional; el
+multiidioma completo —respuestas, interfaz, voz— es un análisis aparte.
+
+### Tres fallos que solo aparecieron ejecutándolo
+- **python-docx inserta antes del `sectPr` final**, así que "lo nuevo a partir del índice N"
+  era solo el `sectPr` y el contenido quedaba al final en vez de tras el ancla. Lo nuevo se
+  reconoce por identidad, no por posición.
+- **python-pptx nombra una diapositiva nueva por cantidad** (`slide{n+1}`), no mirando qué
+  nombres existen: tras borrar la 2 de tres, la nueva se llamaba `slide3.xml` y chocaba con
+  la 3. El archivo salía corrupto («Cierre» desaparecía). Se renumeran las partes al borrar.
+- **openpyxl en modo normal no suelta el archivo con `close()`**, solo al recolectar el
+  objeto; en Windows eso bloqueaba la carpeta temporal. Las lecturas van en modo solo
+  lectura, que sí lo suelta.
+
 ## Lo que NO hace
-- No edita un documento existente "en su sitio": produce uno nuevo (con plantilla o sin
-  ella). Editar párrafos concretos de un Word ya escrito es otro REQ.
-- No dibuja gráficos dentro de Word o PowerPoint (sí en Excel). Una imagen se puede
-  insertar si se le da la ruta.
-- Sin Office, una hoja o una presentación no se convierten a PDF.
+- No convierte a PDF con el tema una presentación sin PowerPoint (sale maquetada en limpio).
+- No inserta gráficos nativos en Word (son imagen; en Excel y PowerPoint sí son nativos).
+- La región se cambia en `config.json` (`"region": "en-US"`); no tiene ajuste en la pantalla
+  de configuración todavía.
 
 ## Pendiente
 - Prueba manual de Johan: *"hazme una cotización con la plantilla de Documentos"*.
