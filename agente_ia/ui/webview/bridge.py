@@ -364,7 +364,8 @@ class Bridge(QObject):
 
         from core.resolution import resolve
         run_async(resolve, self._on_resolve_done, self._on_resolve_error, text,
-                   ChannelType.DESKTOP, user_id=OWNER_USER_ID, modo=(modo or None))
+                   ChannelType.DESKTOP, user_id=OWNER_USER_ID, modo=(modo or None),
+                   historial=self._historial_de_la_conversacion())
 
     def _on_stream_chunk(self, pedazo: str) -> None:
         """Recibe un pedazo de respuesta DESDE EL HILO que habla con el modelo.
@@ -552,6 +553,28 @@ class Bridge(QObject):
         # No se pronuncia (un error no es una respuesta del agente), pero tampoco se deja
         # la conversación muerta: en manos libres la ventana se abre igual (CA-28).
         self._open_conversation_window()
+
+    def _historial_de_la_conversacion(self) -> Optional[list]:
+        """Return los turnos de la conversación abierta, para que el modelo los vea.
+
+        Antes el modelo recibía el contexto por USUARIO de `agent_context`: los últimos
+        cinco registros de cualquier conversación, con las respuestas cortadas a 200
+        caracteres. Johan le pidió "mejorá ese mensaje" y el agente no tenía el mensaje.
+        Los turnos completos de cada conversación estaban guardados desde REQ-013; solo
+        faltaba dárselos.
+        """
+        if not self._conversation_id:
+            return None
+        from ai.memory_manager import memory
+
+        try:
+            turnos = memory.get_conversation_turns(self._conversation_id, user_id=OWNER_USER_ID,
+                                                   limit=60)
+        except Exception as e:
+            logger.warning(f"no se pudo leer la conversación {self._conversation_id}: {e}")
+            return None
+        return [{"role": t.role or "user", "content": t.text or ""} for t in turnos
+                if getattr(t, "role", None) in ("user", "assistant")]
 
     def _ensure_conversation_id(self) -> str:
         from ai.memory_manager import memory

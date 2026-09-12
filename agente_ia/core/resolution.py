@@ -657,6 +657,7 @@ def _try_claude(
     text: str, channel: "ChannelType", user_id: str,
     claude_fn: Optional[Callable[[str], str]] = None,
     modo: Optional[str] = None,
+    historial: Optional[list] = None,
 ) -> ResolutionResult:
     """Último recurso — siempre responde algo, nunca retorna `None`.
 
@@ -693,10 +694,14 @@ def _try_claude(
     # caminos existentes pasa nunca un `modo` real (solo `Bridge.send_message()` lo hace),
     # así que omitir el kwarg cuando es `None` preserva la firma exacta de antes para todo
     # lo que no es la funcionalidad nueva, sin perder el hilo real de REQ-026.
+    # `historial` son los turnos de la conversación ABIERTA (escritorio). Igual que `modo`,
+    # solo se pasa si viene: los dobles de test con la firma vieja no lo esperan.
+    extra = {}
     if modo is not None:
-        result = reasoning_run(text, channel, user_id, estado=estado, modo=modo)
-    else:
-        result = reasoning_run(text, channel, user_id, estado=estado)
+        extra["modo"] = modo
+    if historial is not None:
+        extra["prior_turns"] = historial
+    result = reasoning_run(text, channel, user_id, estado=estado, **extra)
 
     if estado.get("sin_modelo"):
         local = _resolver_sin_modelo(text, channel, user_id)
@@ -844,6 +849,7 @@ def resolve(
     text: str, channel, user_id: str = "default",
     claude_fn: Optional[Callable[[str], str]] = None,
     modo: Optional[str] = None,
+    historial: Optional[list] = None,
 ) -> ResolutionResult:
     """Punto único de resolución de O.R.I.O.N. (CA-01).
 
@@ -871,7 +877,8 @@ def resolve(
         abortar_si_cancelado(f"resolve, antes de '{name}'")
         try:
             if name == "claude":
-                result = fn(text, resolved_channel, user_id, claude_fn=claude_fn, modo=modo)
+                result = fn(text, resolved_channel, user_id, claude_fn=claude_fn, modo=modo,
+                            historial=historial)
             else:
                 result = fn(text, resolved_channel, user_id)
         except ActionDenied as e:

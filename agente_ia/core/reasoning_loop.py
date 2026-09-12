@@ -58,9 +58,20 @@ MAX_LLM_CALLS = 8
 #: turno largo es silencio que nadie puede cortar — el botón de detener es de escritorio.
 TECHO_CANAL_NO_ESCRITORIO = 5
 
-#: REQ-021/CA-22 — turnos previos de `agent_context` que ve el LLM. Alineado con el corte
-#: que ya usa `core/orchestrator.py` (`conversation[-5:]`).
-CONTEXT_TURNS = 5
+#: Turnos previos que ve el modelo. Eran 5 registros —dos o tres intercambios— y la
+#: respuesta del asistente se guardaba cortada a 200 caracteres: Johan le pidió "mejorá
+#: ese mensaje" y el agente no podía, porque solo veía las dos primeras líneas de lo que
+#: él mismo acababa de escribir. Ahora manda el TAMAÑO y no la cantidad: se incluyen los
+#: turnos más recientes hasta llenar `CONTEXT_CARACTERES`, y ninguno va cortado a menos
+#: que él solo supere `CONTEXT_CARACTERES_POR_TURNO`.
+CONTEXT_TURNS = 24
+CONTEXT_CARACTERES = 16_000
+CONTEXT_CARACTERES_POR_TURNO = 6_000
+
+#: Cuánto de la respuesta del asistente se guarda en `agent_context`. Era 200. Con eso,
+#: cualquier "resumime lo que dijiste" o "corregí el segundo punto" trabajaba sobre un
+#: recorte, y el agente contestaba como si no hubiera dicho nada.
+MAX_RESPUESTA_GUARDADA = 6_000
 
 #: REQ-027/CA-28/CA-29 — lo que se le pide al modelo en la llamada de cierre, que va
 #: SIEMPRE sin herramientas. Sin herramientas, "no reintentes" es una garantía estructural
@@ -221,19 +232,48 @@ def _build_tool_list(channel=None, modo_def: Optional[ModoComposer] = None) -> l
     return catalogo
 
 
+def acotar_turnos(turnos: list[dict], presupuesto: int = CONTEXT_CARACTERES,
+                  por_turno: int = CONTEXT_CARACTERES_POR_TURNO) -> list[dict]:
+    """Return los turnos más recientes que caben en `presupuesto` caracteres, en orden.
+
+    Se recorre de atrás hacia adelante —lo más reciente pesa más— y se corta cuando ya no
+    cabe el siguiente. Un turno más largo que `por_turno` se recorta por el final con una
+    marca, en vez de descartarse: un mensaje largo pegado por el usuario es justamente lo
+    que después va a pedir que se mejore.
+    """
+    elegidos: list[dict] = []
+    usado = 0
+    for turno in reversed(turnos):
+        if not isinstance(turno, dict):
+            continue
+        contenido = str(turno.get("content") or "")
+        if len(contenido) > por_turno:
+            contenido = contenido[:por_turno] + " [...]"
+        if usado + len(contenido) > presupuesto and elegidos:
+            break
+        elegidos.append({**turno, "content": contenido})
+        usado += len(contenido)
+    elegidos.reverse()
+    return elegidos
+
+
 def _load_prior_turns(agent_name: str, user_id: str) -> list[dict]:
-    """Return los últimos `CONTEXT_TURNS` turnos ya cerrados de `agent_context` (CA-22).
+    """Return los últimos turnos ya cerrados de `agent_context` (CA-22), acotados por tamaño.
 
     Se lee UNA sola vez, antes del bucle: las dos escrituras de contexto ocurren al final
     de `run()`, así que lo leído es estrictamente anterior al turno en curso. Un fallo de
     la DB de contexto no puede tumbar el loop — se sigue sin historial.
+
+    Es el respaldo para los canales sin conversación propia (voz, CLI). El escritorio pasa
+    los turnos de la conversación ABIERTA por `prior_turns`, porque este contexto es por
+    usuario y mezclaba lo último de cualquier conversación con la actual.
     """
     try:
         context = agent_context_manager.get_context(agent_name, user_id)
         conversation = getattr(context, "conversation", None)
         if not isinstance(conversation, list):
             return []
-        return [t for t in conversation[-CONTEXT_TURNS:] if isinstance(t, dict)]
+        return acotar_turnos([t for t in conversation[-CONTEXT_TURNS:] if isinstance(t, dict)])
     except Exception as e:
         logger.warning(f"No se pudo leer el contexto previo de {agent_name}/{user_id}: {e}")
         return []
@@ -452,7 +492,8 @@ def _llamada_de_cierre(
 
 
 def run(task: str, channel, user_id: str = "default", agent_name: str = "reasoning_loop",
-        estado: Optional[dict] = None, modo: Optional[str] = None) -> str:
+        estado: Optional[dict] = None, modo: Optional[str] = None,
+        prior_turns: Optional[list[dict]] = None) -> str:
     """Punto de entrada del bucle de razonamiento.
 
     `estado`, si se pasa, es un dict que el bucle RELLENA: `{"denied": True}` cuando corto
@@ -500,7 +541,10 @@ def run(task: str, channel, user_id: str = "default", agent_name: str = "reasoni
     aviso_final: dict = {}   # REQ-022/CA-12 — se "fija" solo en la vuelta que gana
     ultimo_aviso: dict = {}  # REQ-027/CA-42 — el ultimo cambio visto, por si gana el cierre
     denegacion: Optional[str] = None
-    prior_turns = _load_prior_turns(agent_name, user_id)   # REQ-021/CA-22
+    # Los turnos de la conversación abierta, si el caller los trae (escritorio); si no, el
+    # contexto por usuario de siempre. Lo que llega de fuera también se acota por tamaño.
+    prior_turns = acotar_turnos(prior_turns) if prior_turns is not None \
+        else _load_prior_turns(agent_name, user_id)
 
     for call_number in range(1, presupuesto + 1):
         # Punto de corte del boton de detener: antes de gastar otra llamada al modelo o
@@ -599,7 +643,7 @@ def run(task: str, channel, user_id: str = "default", agent_name: str = "reasoni
     # cuántas iteraciones internas hubo.
     agent_context_manager.update_context(agent_name, user_id, {"role": "user", "content": task})
     agent_context_manager.update_context(
-        agent_name, user_id, {"role": "assistant", "content": final_text[:200]}
+        agent_name, user_id, {"role": "assistant", "content": final_text[:MAX_RESPUESTA_GUARDADA]}
     )
 
     return final_text

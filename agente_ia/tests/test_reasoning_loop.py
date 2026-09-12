@@ -25,20 +25,60 @@ def test_ca22_sin_historial_el_prompt_es_el_de_siempre():
     assert reasoning_loop._build_prompt("qué hora es", [], []) == "qué hora es"
 
 
-def test_ca22_el_prompt_incluye_los_ultimos_n_turnos():
-    """REQ-021/CA-22: con 7 turnos en `agent_context`, el prompt lleva los últimos 5 y no
-    los 2 primeros."""
-    turnos = [{"role": "user", "content": f"turno {i}"} for i in range(7)]
+def test_ca22_el_prompt_incluye_los_turnos_recientes_hasta_llenar_el_presupuesto():
+    """El corte es por TAMAÑO, no por cantidad: entran los turnos más recientes hasta
+    llenar el presupuesto de caracteres, y los más viejos se caen primero.
 
-    prompt = reasoning_loop._build_prompt(
-        "y entonces?", [], turnos[-reasoning_loop.CONTEXT_TURNS:]
-    )
+    Antes eran 5 registros —dos o tres intercambios— y Johan le pidió "mejorá ese mensaje"
+    a un agente que ya no tenía el mensaje.
+    """
+    turnos = [{"role": "user", "content": f"turno {i} " + "x" * 90} for i in range(7)]
 
-    assert "turno 0" not in prompt
-    assert "turno 1" not in prompt
+    acotados = reasoning_loop.acotar_turnos(turnos, presupuesto=520)
+    prompt = reasoning_loop._build_prompt("y entonces?", [], acotados)
+
+    assert "turno 0 " not in prompt and "turno 1 " not in prompt
     for i in range(2, 7):
-        assert f"turno {i}" in prompt
+        assert f"turno {i} " in prompt
     assert "Mensaje actual del usuario: y entonces?" in prompt
+
+
+def test_un_mensaje_largo_no_se_descarta_se_recorta_con_marca():
+    """Un mensaje pegado por el usuario es justo lo que después pide que se mejore."""
+    turnos = [{"role": "user", "content": "a" * 10_000}]
+    acotados = reasoning_loop.acotar_turnos(turnos, presupuesto=16_000, por_turno=6_000)
+    assert len(acotados) == 1
+    assert acotados[0]["content"].endswith(" [...]")
+    assert len(acotados[0]["content"]) == 6_000 + len(" [...]")
+
+
+def test_la_respuesta_del_asistente_se_guarda_entera_y_no_cortada_a_200():
+    """Con 200 caracteres, "corregí el segundo punto" trabajaba sobre un recorte."""
+    assert reasoning_loop.MAX_RESPUESTA_GUARDADA >= 4_000
+
+
+def test_run_usa_los_turnos_de_la_conversacion_abierta_si_se_los_dan():
+    """El escritorio pasa la conversación ABIERTA: el contexto por usuario mezclaba
+    conversaciones y el agente citaba cosas de otro chat."""
+    final_response = LLMToolResponse(text="listo", tool_calls=[])
+
+    with patch("core.reasoning_loop.generate_response", return_value=final_response) as mock_gen,          patch("core.reasoning_loop._load_prior_turns") as mock_global,          patch("core.reasoning_loop.agent_context_manager"):
+        reasoning_loop.run("mejorá ese mensaje", "desktop", "johan",
+                           prior_turns=[{"role": "assistant", "content": "el mensaje entero"}])
+
+    mock_global.assert_not_called()
+    prompt = str(mock_gen.call_args_list[0])
+    assert "el mensaje entero" in prompt
+
+
+def test_sin_turnos_de_fuera_run_cae_al_contexto_por_usuario():
+    """Voz y CLI no tienen conversación propia: siguen con `agent_context`."""
+    final_response = LLMToolResponse(text="listo", tool_calls=[])
+
+    with patch("core.reasoning_loop.generate_response", return_value=final_response),          patch("core.reasoning_loop._load_prior_turns", return_value=[]) as mock_global,          patch("core.reasoning_loop.agent_context_manager"):
+        reasoning_loop.run("hola", "desktop", "johan")
+
+    mock_global.assert_called_once()
 
 
 def test_ca22_los_turnos_previos_conviven_con_el_historial_de_tools():
@@ -602,7 +642,10 @@ def test_ca17_la_firma_de_run_no_cambio():
     import inspect
 
     parametros = list(inspect.signature(reasoning_loop.run).parameters)
-    assert parametros == ["task", "channel", "user_id", "agent_name", "estado", "modo"]
+    # `prior_turns` se sumó igual que `modo`: `resolve()` solo lo pasa cuando viene, así que
+    # un doble con la firma vieja sigue sin recibir kwargs que no espera.
+    assert parametros == ["task", "channel", "user_id", "agent_name", "estado", "modo",
+                          "prior_turns"]
 
 
 def test_ca18_una_vuelta_es_una_llamada_aunque_el_presupuesto_sea_40():
