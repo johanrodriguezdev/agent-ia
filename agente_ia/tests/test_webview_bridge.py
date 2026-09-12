@@ -95,6 +95,57 @@ def test_select_conversation_llama_get_conversation_turns_y_emite_turns_loaded(b
 
 
 # ---------------------------------------------------------------------------
+# El modelo ve la conversación ABIERTA, entera
+# ---------------------------------------------------------------------------
+#
+# Johan le pidió al agente "mejorá ese mensaje" y el agente no tenía el mensaje: recibía el
+# contexto por usuario (cinco registros de cualquier conversación, con las respuestas
+# cortadas a 200 caracteres). Los turnos completos estaban guardados por conversación desde
+# REQ-013; solo faltaba dárselos.
+
+def test_el_historial_que_se_manda_al_modelo_es_el_de_la_conversacion_abierta(bridge, monkeypatch):
+    from ai.memory_manager import memory
+
+    respuesta_larga = "Estimado cliente: " + "x" * 900
+    fake_turns = [SimpleNamespace(id=1, role="user", text="redactá un correo", timestamp="t1"),
+                  SimpleNamespace(id=2, role="assistant", text=respuesta_larga, timestamp="t2"),
+                  SimpleNamespace(id=3, role=None, text="ruido sin rol", timestamp="t3")]
+    pedidos = []
+
+    def _turnos(conversation_id, user_id="default", limit=200):
+        pedidos.append((conversation_id, user_id))
+        return fake_turns
+
+    monkeypatch.setattr(memory, "get_conversation_turns", _turnos)
+    bridge._conversation_id = "conv-7"
+
+    historial = bridge._historial_de_la_conversacion()
+
+    assert pedidos == [("conv-7", bridge_module.OWNER_USER_ID)]
+    assert historial == [{"role": "user", "content": "redactá un correo"},
+                         {"role": "assistant", "content": respuesta_larga}]   # entera, no 200
+
+
+def test_sin_conversacion_abierta_no_se_manda_historial(bridge):
+    bridge._conversation_id = None
+    assert bridge._historial_de_la_conversacion() is None
+
+
+def test_send_message_le_pasa_la_conversacion_a_resolve(bridge, monkeypatch, fake_run_async):
+    from ai.memory_manager import memory
+
+    monkeypatch.setattr(memory, "get_conversation_turns",
+                        lambda conversation_id, user_id="default", limit=200: [
+                            SimpleNamespace(id=1, role="assistant", text="el mensaje", timestamp="t")])
+    bridge._conversation_id = "conv-9"
+
+    bridge.send_message("mejorá ese mensaje")
+
+    llamada = [c for c in fake_run_async if getattr(c["fn"], "__name__", "") == "resolve"][0]
+    assert llamada["kwargs"]["historial"] == [{"role": "assistant", "content": "el mensaje"}]
+
+
+# ---------------------------------------------------------------------------
 # CA-11: paginación "Ver más"
 # ---------------------------------------------------------------------------
 
