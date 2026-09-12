@@ -401,9 +401,69 @@ def test_pptx_sobre_plantilla_rellena_y_conserva_el_tema(carpeta, tmp_path):
     assert "con el tema de plantilla.pptx" in r.detalle
 
 
-def test_pdf_de_presentacion_sin_powerpoint_lo_dice(carpeta):
-    with pytest.raises(documentos.DocumentoRechazado, match="PowerPoint"):
-        documentos.crear_presentacion("x.pdf", _PRESENTACION, carpeta=carpeta)
+def test_pdf_de_presentacion_sin_powerpoint_se_maqueta_y_lo_dice(carpeta):
+    """Sin PowerPoint no hay tema, pero sí PDF: una página apaisada por diapositiva."""
+    r = documentos.crear_presentacion("x.pdf", _PRESENTACION, carpeta=carpeta)
+
+    import pymupdf
+
+    pdf = pymupdf.open(r.ruta)
+    assert pdf.page_count == 4                          # portada + 3
+    assert "Producción" in pdf[1].get_text()
+    assert pdf[0].rect.width > pdf[0].rect.height       # apaisado
+    assert any("Sin PowerPoint" in a for a in r.avisos)
+
+
+def test_pdf_de_hoja_sin_excel_se_maqueta_y_avisa_de_las_formulas(carpeta):
+    r = documentos.crear_hoja("ventas.pdf", _VENTAS, carpeta=carpeta)
+
+    import pymupdf
+
+    pdf = pymupdf.open(r.ruta)
+    texto = pdf[0].get_text()
+    assert "Ventas" in texto and "Enero" in texto
+    assert "1.200.000" in texto                          # los números, a la colombiana
+    assert "2.550.000" in texto                          # =SUM(B2:B3), calculada sin Excel
+    assert "400.000" in texto                            # =B2-C2
+    assert not any("fórmula" in a for a in r.avisos)     # nada quedó sin calcular
+    assert any("gráfico" in a for a in r.avisos)
+
+
+def test_una_formula_que_no_se_sabe_calcular_se_muestra_escrita_y_se_avisa(carpeta):
+    hoja = {"hojas": [{"nombre": "X", "encabezados": ["A", "B"],
+                       "filas": [[1, "=VLOOKUP(A2,A:B,2)"], [2, 3]]}]}
+    r = documentos.crear_hoja("x.pdf", hoja, carpeta=carpeta)
+
+    import pymupdf
+
+    assert "VLOOKUP" in pymupdf.open(r.ruta)[0].get_text()
+    assert any("fórmula" in a for a in r.avisos)
+
+
+def test_el_evaluador_de_formulas_no_es_eval():
+    """Cualquier cosa fuera de la gramática devuelve None: nunca se ejecuta texto ajeno."""
+    f = documentos._calcular_formula
+    celdas = {"A1": 2, "A2": 3, "A3": "=A1*A2"}
+    assert f("=A1+A2", celdas) == 5
+    assert f("=A3", celdas) == 6                         # una fórmula que referencia otra
+    assert f("=SUMA(A1:A2)*2", celdas) == 10
+    assert f("=-A1", celdas) == -2
+    assert f("=A1/0", celdas) is None
+    assert f("=__import__('os')", celdas) is None
+    assert f("=A1+texto", celdas) is None
+
+
+def test_pdf_de_hoja_con_excel_se_convierte(carpeta, monkeypatch):
+    def _convertir(aplicacion, origen, destino):
+        assert aplicacion == "Excel" and origen.endswith(".xlsx")
+        Path(destino).write_bytes(b"%PDF-1.4 simulado")
+        return True
+
+    monkeypatch.setattr(documentos, "_con_office", _convertir)
+    r = documentos.crear_hoja("ventas.pdf", _VENTAS, carpeta=carpeta)
+
+    assert Path(r.ruta).read_bytes().startswith(b"%PDF")
+    assert "convertido con Excel" in r.detalle
 
 
 # ------------------------------------------------------------------- otros archivos
@@ -461,3 +521,256 @@ def test_la_herramienta_devuelve_el_rechazo_en_palabras_del_modelo(monkeypatch, 
          "carpeta": carpeta})
 
     assert "relleno" in salida
+
+
+# =============================================================================== gráficos
+#
+# En PowerPoint el gráfico es NATIVO —el usuario lo puede editar—; en Word y en el PDF sin
+# Office es una imagen dibujada con matplotlib. Ninguna de las dos formas se prueba por
+# píxeles: se prueba que el gráfico exista, que las cifras salgan a la colombiana y que un
+# gráfico sin datos no reviente el documento.
+
+_GRAFICO = {"tipo": "grafico", "tipo_grafico": "barras", "titulo": "Producción por región",
+            "categorias": ["Oriental", "Norte"],
+            "series": [{"nombre": "2025", "valores": ["828.000", "551.000"]}], "pie": "Figura 1"}
+
+
+def test_un_grafico_en_word_es_una_imagen_con_su_pie(carpeta):
+    from docx import Document
+
+    spec = {"titulo": "Producción", "bloques": [
+        {"tipo": "parrafo", "texto": "La producción creció en las dos regiones durante el año "
+                                     "gracias a las hectáreas nuevas con riego por goteo."},
+        _GRAFICO]}
+    r = documentos.crear_documento("produccion.docx", spec, carpeta=carpeta)
+    doc = Document(r.ruta)
+
+    assert len(doc.inline_shapes) == 1
+    assert any(p.text == "Figura 1" for p in doc.paragraphs)
+
+
+def test_un_grafico_sin_datos_no_tumba_el_word(carpeta):
+    spec = {"titulo": "X", "bloques": [
+        {"tipo": "parrafo", "texto": "Un párrafo suficientemente largo como para que el documento "
+                                     "tenga contenido real y pase la validación de tamaño mínimo, "
+                                     "que exige más de ciento veinte caracteres de prosa."},
+        {"tipo": "grafico", "titulo": "Vacío"}]}
+    r = documentos.crear_documento("x.docx", spec, carpeta=carpeta)
+
+    assert Path(r.ruta).exists()
+    assert any("no traía datos" in a for a in r.avisos)
+
+
+def test_un_grafico_en_powerpoint_es_nativo(carpeta):
+    from pptx import Presentation
+
+    pres = {"titulo": "Resultados", "diapositivas": [
+        {"titulo": "Por región", "grafico": _GRAFICO},
+        {"titulo": "Cierre", "texto": "Gracias por su atención a todos los asistentes."}]}
+    r = documentos.crear_presentacion("g.pptx", pres, carpeta=carpeta)
+    prs = Presentation(r.ruta)
+
+    graficos = [sh for sh in prs.slides[1].shapes if sh.has_chart]
+    assert len(graficos) == 1
+    chart = graficos[0].chart
+    assert [c for c in chart.plots[0].categories] == ["Oriental", "Norte"]
+    assert list(chart.plots[0].series[0].values) == [828000, 551000]     # a la colombiana
+
+
+def test_una_torta_en_powerpoint_lleva_porcentajes(carpeta):
+    from pptx import Presentation
+
+    pres = {"titulo": "R", "diapositivas": [
+        {"titulo": "Participación", "grafico": {"tipo_grafico": "torta", "categorias": ["A", "B"],
+                                                "valores": [3, 1]}},
+        {"titulo": "Cierre", "texto": "Gracias por su atención a todos los asistentes."}]}
+    r = documentos.crear_presentacion("t.pptx", pres, carpeta=carpeta)
+    chart = [sh for sh in Presentation(r.ruta).slides[1].shapes if sh.has_chart][0].chart
+
+    assert chart.plots[0].has_data_labels
+    assert chart.plots[0].data_labels.show_percentage
+
+
+def test_el_grafico_como_imagen_se_dibuja(tmp_path):
+    destino = str(tmp_path / "g.png")
+    assert documentos._grafico_como_imagen(_GRAFICO, destino) is True
+    assert Path(destino).stat().st_size > 1000
+
+
+def test_un_grafico_sin_series_no_se_dibuja(tmp_path):
+    assert documentos._grafico_como_imagen({"titulo": "nada"}, str(tmp_path / "g.png")) is False
+
+
+# ============================================================ la región decide los números
+
+def test_la_convencion_sigue_a_la_region(monkeypatch):
+    import config_manager
+
+    monkeypatch.setattr(config_manager, "get_region", lambda: "es-CO")
+    assert documentos._valor_de_celda("870.000") == 870000
+    assert documentos.convencion().separador_csv == ";"
+    assert documentos.convencion().formatear(1250000.5, 1) == "1.250.000,5"
+
+    monkeypatch.setattr(config_manager, "get_region", lambda: "en-US")
+    assert documentos._valor_de_celda("870.000") == 870.0
+    assert documentos._valor_de_celda("870,000") == 870000
+    assert documentos.convencion().separador_csv == ","
+    assert documentos.convencion().formatear(1250000.5, 1) == "1,250,000.5"
+
+    monkeypatch.setattr(config_manager, "get_region", lambda: "es-MX")   # México escribe a la inglesa
+    assert documentos._valor_de_celda("1,250,000") == 1250000
+
+
+def test_una_region_desconocida_cae_en_su_idioma(monkeypatch):
+    import config_manager
+
+    monkeypatch.setattr(config_manager, "get_region", lambda: "es-XX")
+    assert documentos.convencion().decimal == ","
+    monkeypatch.setattr(config_manager, "get_region", lambda: "xx-YY")
+    assert documentos.convencion().decimal == "."
+
+
+def test_el_csv_usa_el_separador_de_la_region(carpeta, monkeypatch):
+    import config_manager
+
+    monkeypatch.setattr(config_manager, "get_region", lambda: "en-US")
+    r = documentos.crear_hoja("v.csv", _VENTAS, carpeta=carpeta)
+    assert Path(r.ruta).read_text(encoding="utf-8-sig").splitlines()[0] == "Mes,Ventas,Costos,Margen"
+
+
+# ======================================================================= editar existente
+
+def _word_base(carpeta):
+    return documentos.crear_documento("base.docx", {"titulo": "Informe", "bloques": [
+        {"tipo": "titulo", "nivel": 1, "texto": "1. Antecedentes"},
+        {"tipo": "parrafo", "texto": "El proyecto arrancó en enero de 2025 con un presupuesto "
+                                     "inicial de 320 millones de pesos aprobado por la junta."},
+        {"tipo": "titulo", "nivel": 1, "texto": "2. Conclusiones"},
+        {"tipo": "parrafo", "texto": "Se recomienda continuar con la segunda fase durante el "
+                                     "primer trimestre de 2026, ajustando el cronograma."},
+        {"tipo": "parrafo", "texto": "BORRADOR — no distribuir."}]}, carpeta=carpeta).ruta
+
+
+def test_editar_word_reemplaza_agrega_donde_se_pide_y_quita(carpeta):
+    from docx import Document
+
+    r = documentos.editar_documento(_word_base(carpeta), {
+        "reemplazos": {"320 millones": "345 millones"},
+        "quitar": ["BORRADOR"],
+        "agregar": [{"tipo": "parrafo", "texto": "En marzo se aprobó una adición de 25 millones "
+                                                 "para el componente de riego, que explica la "
+                                                 "diferencia con el presupuesto inicial."}],
+        "despues_de": "arrancó en enero"})
+    textos = [p.text for p in Document(r.ruta).paragraphs if p.text.strip()]
+
+    assert "345 millones" in textos[2]
+    assert textos[3].startswith("En marzo")                 # justo después del ancla
+    assert textos[4] == "2. Conclusiones"
+    assert not any("BORRADOR" in t for t in textos)
+    assert "1 reemplazos" in r.detalle and "1 párrafos quitados" in r.detalle
+
+
+def test_editar_deja_el_original_intacto_por_defecto(carpeta):
+    from docx import Document
+
+    original = _word_base(carpeta)
+    r = documentos.editar_documento(original, {"reemplazos": {"320": "999"}})
+
+    assert Path(r.ruta).name == "base (2).docx"
+    assert any("320 millones" in p.text for p in Document(original).paragraphs)
+    assert "quedó intacto" in r.detalle
+
+
+def test_editar_en_sitio_sobrescribe_el_original(carpeta):
+    from docx import Document
+
+    original = _word_base(carpeta)
+    r = documentos.editar_documento(original, {"reemplazos": {"320": "999"}}, en_sitio=True)
+
+    assert r.ruta == original
+    assert any("999 millones" in p.text for p in Document(original).paragraphs)
+
+
+def test_editar_word_con_un_ancla_que_no_existe_deja_el_contenido_al_final_y_avisa(carpeta):
+    from docx import Document
+
+    r = documentos.editar_documento(_word_base(carpeta), {
+        "agregar": "Un párrafo nuevo con contenido suficiente para que no lo tome por relleno "
+                   "ni por un documento vacío en la validación.",
+        "despues_de": "sección inexistente"})
+    textos = [p.text for p in Document(r.ruta).paragraphs if p.text.strip()]
+
+    assert textos[-1].startswith("Un párrafo nuevo")
+    assert any("No encontré" in a for a in r.avisos)
+
+
+def test_editar_sin_cambios_lo_dice(carpeta):
+    with pytest.raises(documentos.DocumentoRechazado, match="ningún cambio"):
+        documentos.editar_documento(_word_base(carpeta), {})
+
+
+def test_editar_con_relleno_se_rechaza(carpeta):
+    with pytest.raises(documentos.DocumentoRechazado, match="relleno"):
+        documentos.editar_documento(_word_base(carpeta), {"reemplazos": {"320": "[insertar]"}})
+
+
+def test_editar_fuera_de_las_carpetas_permitidas_se_rechaza(carpeta, tmp_path, monkeypatch):
+    original = _word_base(carpeta)
+    monkeypatch.setattr(documentos, "_bases_permitidas", lambda: [tmp_path / "otra"])
+    with pytest.raises(documentos.DocumentoRechazado, match="no lo edito"):
+        documentos.editar_documento(original, {"reemplazos": {"a": "b"}})
+
+
+def test_editar_excel_celdas_y_filas(carpeta):
+    from openpyxl import load_workbook
+
+    origen = documentos.crear_hoja("v.xlsx", {"hojas": [{"nombre": "Ventas",
+                                                          "encabezados": ["Mes", "Ventas"],
+                                                          "filas": [["Enero", 100], ["Febrero", 200]]}]},
+                                   carpeta=carpeta).ruta
+    r = documentos.editar_documento(origen, {"celdas": {"Ventas!B3": "250"},
+                                             "agregar": {"Ventas": [["Marzo", "1.300"]]},
+                                             "reemplazos": {"Febrero": "Feb"}}, en_sitio=True)
+    ws = load_workbook(origen)["Ventas"]
+
+    assert ws["B3"].value == 250
+    assert ws["A3"].value == "Feb"
+    assert [c.value for c in ws[4]] == ["Marzo", 1300]
+    assert "1 celdas escritas" in r.detalle
+
+
+def test_editar_powerpoint_quita_por_titulo_y_agrega_sin_corromper(carpeta):
+    """Caso real: borrar la 2 de tres y agregar una chocaba con el nombre de la 3."""
+    from pptx import Presentation
+
+    origen = documentos.crear_presentacion("p.pptx", {"titulo": "R", "diapositivas": [
+        {"titulo": "Producción", "puntos": ["1.850.000 t"]},
+        {"titulo": "Borrador", "texto": "quitar esto"},
+        {"titulo": "Cierre", "texto": "Gracias."}]}, carpeta=carpeta).ruta
+    r = documentos.editar_documento(origen, {"reemplazos": {"Gracias.": "Muchas gracias."},
+                                             "quitar": ["Borrador"],
+                                             "agregar": [{"titulo": "Anexo", "puntos": ["Datos", "Método"]}]})
+    prs = Presentation(r.ruta)
+
+    assert [s.shapes.title.text for s in prs.slides] == ["R", "Producción", "Cierre", "Anexo"]
+    partes = sorted(str(s.part.partname) for s in prs.slides)
+    assert len(partes) == len(set(partes)) == 4
+
+
+def test_editar_powerpoint_quita_por_numero(carpeta):
+    from pptx import Presentation
+
+    origen = documentos.crear_presentacion("p.pptx", {"titulo": "R", "diapositivas": [
+        {"titulo": "Uno", "texto": "Contenido uno."}, {"titulo": "Dos", "texto": "Contenido dos."}]},
+        carpeta=carpeta).ruta
+    r = documentos.editar_documento(origen, {"quitar": ["2"]})
+
+    assert [s.shapes.title.text for s in Presentation(r.ruta).slides] == ["R", "Dos"]
+
+
+def test_document_edit_registrada_y_amarilla():
+    from agents.tool_registry import get_tool
+    from core.security_manager import RiskLevel, security_manager
+
+    assert get_tool("document_edit") is not None
+    assert security_manager.classify_action("document_edit") == RiskLevel.YELLOW

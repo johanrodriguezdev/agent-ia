@@ -2775,3 +2775,43 @@ register_tool(ToolSpec(
     risk_level=RiskLevel.YELLOW,
     invoke=_document_to_pdf_invoke,
 ))
+
+
+def _document_edit_invoke(params: dict) -> str:
+    from core.documentos import editar_documento
+
+    ruta = str(params.get("ruta") or params.get("path") or "").strip()
+    if not ruta:
+        return f"Necesito la ruta del documento que querés editar{vocative()}."
+    return _con_documento("document_edit", lambda: editar_documento(
+        ruta, params.get("cambios") or {}, en_sitio=bool(params.get("en_sitio")),
+        carpeta=params.get("carpeta"),
+    ))
+
+
+register_tool(ToolSpec(
+    name="document_edit",
+    description=(
+        "Edita un documento de Office que YA existe (.docx, .xlsx, .pptx) sin rehacerlo. "
+        "Word: 'reemplazos' {texto: nuevo} conservando el formato, 'agregar' (bloques o "
+        "Markdown) con 'despues_de' (texto del párrafo tras el que va), 'quitar' [textos de "
+        "párrafos]. Excel: 'celdas' {'Hoja!B4': valor}, 'agregar' {hoja: [filas]}, "
+        "'reemplazos'. PowerPoint: 'reemplazos', 'agregar' [diapositivas], 'quitar' "
+        "[títulos o números]. Por defecto deja el original intacto y guarda una copia "
+        "editada al lado; con 'en_sitio' sobrescribe el original."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "ruta": {"type": "string", "description": "Ruta al .docx, .xlsx o .pptx."},
+            "cambios": {"description": "Objeto con los cambios, según el tipo de archivo."},
+            "en_sitio": {"type": "boolean",
+                         "description": "True para sobrescribir el original (sin deshacer)."},
+            "carpeta": {"type": "string", "description": "Dónde dejar la copia editada (opcional)."},
+        },
+        "required": ["ruta", "cambios"],
+    },
+    # YELLOW: modifica un documento del usuario. La confirmación muestra la ruta.
+    risk_level=RiskLevel.YELLOW,
+    invoke=_document_edit_invoke,
+))
