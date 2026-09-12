@@ -241,3 +241,449 @@ def test_un_control_que_falla_no_tumba_el_recorrido(monkeypatch):
     elementos, _ = ui_tree.leer_ventana_activa()
 
     assert [e.nombre for e in elementos] == ["Bueno"]
+
+
+# ═════════════════════════════════════════════════════════════════════════
+#  Preguntar de una vez en vez de recorrer a mano
+# ═════════════════════════════════════════════════════════════════════════
+#
+# El recorrido a mano baja hijo por hijo y se detiene en MAX_PROFUNDIDAD. Alcanza para un
+# diálogo y no alcanza para nada más: medido sobre una ventana de Chrome con una página
+# cargada, devolvía 44 elementos de 3.467 —el 1,3 %— porque el contenido cuelga más abajo de
+# doce niveles. Y no se cortaba por tiempo, así que no había ningún aviso de que faltaba
+# algo: simplemente el agente decía que no encontraba lo que tenía delante.
+
+class _RectCache:
+    def __init__(self, x, y, ancho=80, alto=20):
+        self.left, self.top = x, y
+        self.right, self.bottom = x + ancho, y + alto
+
+
+class _ElementoCache:
+    def __init__(self, nombre, tipo_id, x=10, y=10, ancho=80, alto=20):
+        self.CachedName = nombre
+        self.CachedControlType = tipo_id
+        self.CachedBoundingRectangle = _RectCache(x, y, ancho, alto)
+
+
+class _Array:
+    def __init__(self, elementos):
+        self._e = elementos
+        self.Length = len(elementos)
+
+    def GetElement(self, i):
+        return self._e[i]
+
+
+class _Condicion:
+    pass
+
+
+class _ClienteFalso:
+    def CreatePropertyCondition(self, *a):
+        return _Condicion()
+
+    def CreateOrCondition(self, a, b):
+        return _Condicion()
+
+    def CreateCacheRequest(self):
+        class _C:
+            def AddProperty(self, _p):
+                pass
+        return _C()
+
+
+class _VentanaFalsa:
+    def __init__(self, elementos):
+        padre = self
+
+        class _El:
+            def FindAllBuildCache(self, _ambito, _cond, _cache):
+                return _Array(padre._elementos)
+        self._elementos = elementos
+        self.Element = _El()
+        self.Name = "Ventana de prueba"
+
+
+def _montar_rapido(monkeypatch, elementos):
+    """Deja el camino rápido operativo con un cliente y unos elementos simulados."""
+    import uiautomation as auto
+
+    monkeypatch.setattr(ui_tree, "cliente_uia", lambda: _ClienteFalso())
+    # Los ids de tipo se leen de la librería real, así que el mapeo que se prueba es el bueno.
+    return auto.ControlType
+
+
+def test_se_ven_los_controles_aunque_cuelguen_muy_hondo(monkeypatch):
+    """El caso que se rompía: lo que está a más de doce niveles de profundidad."""
+    tipos = _montar_rapido(monkeypatch, None)
+    ventana = _VentanaFalsa([
+        _ElementoCache("Aceptar", tipos.ButtonControl, 10, 40),
+        _ElementoCache("Historia de Python", tipos.HyperlinkControl, 30, 900),
+    ])
+
+    elementos = ui_tree._preguntar_de_una_vez(ventana, "Ventana")
+
+    assert [e.nombre for e in elementos] == ["Aceptar", "Historia de Python"]
+    assert elementos[0].tipo == "ButtonControl"
+
+
+def test_lo_invisible_no_entra(monkeypatch):
+    """Un control sin área no se puede pulsar, y el modelo podría intentarlo igual."""
+    tipos = _montar_rapido(monkeypatch, None)
+    ventana = _VentanaFalsa([
+        _ElementoCache("Oculto", tipos.ButtonControl, 0, 0, ancho=0, alto=0),
+        _ElementoCache("Visible", tipos.ButtonControl, 5, 5),
+    ])
+
+    elementos = ui_tree._preguntar_de_una_vez(ventana, "Ventana")
+
+    assert [e.nombre for e in elementos] == ["Visible"]
+
+
+def test_lo_que_no_tiene_nombre_tampoco(monkeypatch):
+    tipos = _montar_rapido(monkeypatch, None)
+    ventana = _VentanaFalsa([
+        _ElementoCache("   ", tipos.ButtonControl, 5, 5),
+        _ElementoCache("Guardar", tipos.ButtonControl, 9, 9),
+    ])
+
+    assert [e.nombre for e in ui_tree._preguntar_de_una_vez(ventana, "V")] == ["Guardar"]
+
+
+def test_una_hoja_de_calculo_no_devuelve_mil_celdas(monkeypatch):
+    """Hay tope por tipo: miles de celdas iguales no ayudan a decidir nada."""
+    tipos = _montar_rapido(monkeypatch, None)
+    ventana = _VentanaFalsa(
+        [_ElementoCache(f"Celda {i}", tipos.EditControl, 10, i) for i in range(500)]
+    )
+
+    elementos = ui_tree._preguntar_de_una_vez(ventana, "Excel")
+
+    assert len(elementos) == ui_tree._MAX_POR_TIPO
+
+
+def test_el_mismo_control_no_se_lista_dos_veces(monkeypatch):
+    tipos = _montar_rapido(monkeypatch, None)
+    ventana = _VentanaFalsa([
+        _ElementoCache("Buscar", tipos.ButtonControl, 10, 10),
+        _ElementoCache("Buscar", tipos.ButtonControl, 10, 10),
+    ])
+
+    assert len(ui_tree._preguntar_de_una_vez(ventana, "V")) == 1
+
+
+def test_los_controles_salen_en_orden_de_lectura(monkeypatch):
+    tipos = _montar_rapido(monkeypatch, None)
+    ventana = _VentanaFalsa([
+        _ElementoCache("Abajo", tipos.ButtonControl, 10, 500),
+        _ElementoCache("Arriba", tipos.ButtonControl, 10, 20),
+    ])
+
+    assert [e.nombre for e in ui_tree._preguntar_de_una_vez(ventana, "V")] == \
+        ["Arriba", "Abajo"]
+
+
+def test_sin_cliente_nativo_se_recorre_a_mano(monkeypatch):
+    """Si una versión de la librería mueve la API privada, esto sigue funcionando."""
+    monkeypatch.setattr(ui_tree, "cliente_uia", lambda: None)
+
+    assert ui_tree._preguntar_de_una_vez(_VentanaFalsa([]), "V") == []
+
+
+def test_leer_ventana_activa_cae_al_recorrido_si_no_hay_nada(monkeypatch):
+    """El respaldo tiene que usarse de verdad, no quedar de adorno."""
+    recorrido = {"n": 0}
+
+    def _falso_recorrer(control, elementos, ventana, limite, profundidad=0):
+        recorrido["n"] += 1
+        elementos.append(ui_tree.Elemento(nombre="Del recorrido", tipo="ButtonControl", x=1, y=1))
+
+    monkeypatch.setattr(ui_tree, "disponible", lambda: True)
+    monkeypatch.setattr(ui_tree, "_preguntar_de_una_vez", lambda v, t: [])
+    monkeypatch.setattr(ui_tree, "_recorrer", _falso_recorrer)
+
+    import uiautomation as auto
+
+    monkeypatch.setattr(auto, "GetForegroundControl", lambda: _VentanaFalsa([]))
+
+    elementos, _titulo = ui_tree.leer_ventana_activa()
+
+    assert recorrido["n"] == 1
+    assert [e.nombre for e in elementos] == ["Del recorrido"]
+
+
+def test_leer_ventana_activa_no_recorre_si_ya_tiene_lo_que_hace_falta(monkeypatch):
+    recorrido = {"n": 0}
+    monkeypatch.setattr(ui_tree, "disponible", lambda: True)
+    monkeypatch.setattr(ui_tree, "_preguntar_de_una_vez",
+                        lambda v, t: [ui_tree.Elemento(nombre="Rápido", tipo="ButtonControl", x=1, y=1)])
+    monkeypatch.setattr(ui_tree, "_recorrer",
+                        lambda *a, **k: recorrido.update(n=recorrido["n"] + 1))
+
+    import uiautomation as auto
+
+    monkeypatch.setattr(auto, "GetForegroundControl", lambda: _VentanaFalsa([]))
+
+    elementos, _titulo = ui_tree.leer_ventana_activa()
+
+    assert recorrido["n"] == 0
+    assert [e.nombre for e in elementos] == ["Rápido"]
+
+
+def test_una_libreria_distinta_no_rompe_la_lectura_de_pantalla(monkeypatch):
+    """Si `uiautomation` no es como se espera, se recorre a mano en vez de reventar.
+
+    Pasó en la propia suite: los tests inyectan un módulo simulado sin `ControlType`, y la
+    primera versión leía ese atributo fuera del `try`. Un cambio de versión de la librería
+    habría dejado al agente sin ver la pantalla, con un AttributeError.
+    """
+    class _Roto:
+        pass
+
+    monkeypatch.setattr(ui_tree, "cliente_uia", lambda: _ClienteFalso())
+    monkeypatch.setitem(__import__("sys").modules, "uiautomation", _Roto)
+
+    assert ui_tree._preguntar_de_una_vez(_VentanaFalsa([]), "V") == []
+
+
+# ═════════════════════════════════════════════════════════════════════════
+#  Operar un control, no solo mirarlo
+# ═════════════════════════════════════════════════════════════════════════
+
+class _PatronFalso:
+    def __init__(self):
+        self.llamadas = []
+
+    def Invoke(self):
+        self.llamadas.append("Invoke")
+
+    def Select(self):
+        self.llamadas.append("Select")
+
+
+class _ControlFalso:
+    def __init__(self, fallar_foco=False):
+        self.enfocado = False
+        self._fallar = fallar_foco
+
+    def SetFocus(self):
+        if self._fallar:
+            raise RuntimeError("no se puede enfocar")
+        self.enfocado = True
+
+
+def _montar_operar(monkeypatch, elemento, control=None, patrones=None):
+    clics, escrito = [], []
+    monkeypatch.setattr(ui_tree, "disponible", lambda: True)
+    monkeypatch.setattr(ui_tree, "buscar", lambda o: (elemento, [elemento] if elemento else []))
+    monkeypatch.setattr(ui_tree, "control_por_nombre", lambda raiz, n, tipos=None: control)
+    monkeypatch.setattr(ui_tree, "patron",
+                        lambda c, n: (patrones or {}).get(n))
+    monkeypatch.setattr(ui_tree.time, "sleep", lambda _s: None)
+
+    import uiautomation as auto
+
+    monkeypatch.setattr(auto, "GetForegroundControl", lambda: object())
+
+    import automation.pc_controller as pc
+
+    monkeypatch.setattr(pc, "click_position", lambda x, y: clics.append((x, y)))
+    monkeypatch.setattr(pc, "type_text", lambda t: escrito.append(t))
+    return clics, escrito
+
+
+def test_se_pulsa_por_el_patron_y_no_por_coordenadas():
+    """Invocar el control no depende de dónde esté la ventana ni de que nada lo tape."""
+    import pytest as _pytest
+
+    mp = _pytest.MonkeyPatch()
+    try:
+        elemento = ui_tree.Elemento(nombre="Guardar", tipo="ButtonControl", x=50, y=60)
+        invocar = _PatronFalso()
+        clics, _ = _montar_operar(mp, elemento, _ControlFalso(), {"InvokePattern": invocar})
+
+        salida = ui_tree.operar("Guardar")
+
+        assert invocar.llamadas == ["Invoke"]
+        assert clics == []
+        assert "Guardar" in salida
+    finally:
+        mp.undo()
+
+
+def test_una_pestana_se_selecciona_en_vez_de_invocarse(monkeypatch):
+    """Hay cosas que no se pulsan: se seleccionan."""
+    elemento = ui_tree.Elemento(nombre="Hoja 2", tipo="TabItemControl", x=10, y=10)
+    seleccionar = _PatronFalso()
+    clics, _ = _montar_operar(monkeypatch, elemento, _ControlFalso(),
+                              {"SelectionItemPattern": seleccionar})
+
+    salida = ui_tree.operar("Hoja 2")
+
+    assert seleccionar.llamadas == ["Select"]
+    assert clics == []
+    assert "Hoja 2" in salida
+
+
+def test_sin_patron_se_pulsa_por_coordenadas(monkeypatch):
+    """El respaldo tiene que funcionar: hay controles que no exponen nada."""
+    elemento = ui_tree.Elemento(nombre="Raro", tipo="ButtonControl", x=120, y=340)
+    clics, _ = _montar_operar(monkeypatch, elemento, _ControlFalso(), {})
+
+    ui_tree.operar("Raro")
+
+    assert clics == [(120, 340)]
+
+
+def test_escribir_enfoca_el_campo_sin_hacer_clic(monkeypatch):
+    elemento = ui_tree.Elemento(nombre="Usuario", tipo="EditControl", x=10, y=10)
+    control = _ControlFalso()
+    clics, escrito = _montar_operar(monkeypatch, elemento, control, {})
+
+    ui_tree.operar("Usuario", "johan")
+
+    assert control.enfocado is True
+    assert escrito == ["johan"]
+    assert clics == []
+
+
+def test_si_no_se_puede_enfocar_se_hace_clic_antes_de_escribir(monkeypatch):
+    elemento = ui_tree.Elemento(nombre="Usuario", tipo="EditControl", x=33, y=44)
+    clics, escrito = _montar_operar(monkeypatch, elemento, _ControlFalso(fallar_foco=True), {})
+
+    ui_tree.operar("Usuario", "johan")
+
+    assert clics == [(33, 44)]
+    assert escrito == ["johan"]
+
+
+def test_lo_que_no_esta_no_se_pulsa(monkeypatch):
+    otros = [ui_tree.Elemento(nombre="Aceptar", tipo="ButtonControl", x=1, y=1)]
+    clics = []
+    monkeypatch.setattr(ui_tree, "disponible", lambda: True)
+    monkeypatch.setattr(ui_tree, "buscar", lambda o: (None, otros))
+
+    import automation.pc_controller as pc
+
+    monkeypatch.setattr(pc, "click_position", lambda x, y: clics.append((x, y)))
+
+    salida = ui_tree.operar("Suscribirse")
+
+    assert clics == []
+    assert "Aceptar" in salida
+
+
+def test_sin_objetivo_no_se_pulsa_nada():
+    assert "nombre" in ui_tree.operar("")
+
+
+def test_sin_arbol_no_se_pulsa_a_ciegas(monkeypatch):
+    monkeypatch.setattr(ui_tree, "disponible", lambda: False)
+    salida = ui_tree.operar("Aceptar")
+    assert "a ciegas" in salida
+
+
+def test_pc_act_registrada_y_amarilla():
+    from agents.tool_registry import get_tool
+    from core.security_manager import ChannelType, RiskLevel, security_manager
+
+    assert get_tool("pc_act") is not None
+    assert security_manager.classify_action("pc_act") == RiskLevel.YELLOW
+    assert not security_manager.is_action_allowed("pc_act", ChannelType.TELEGRAM)
+
+
+# ═════════════════════════════════════════════════════════════════════════
+#  Escribir lo que se quiso escribir
+# ═════════════════════════════════════════════════════════════════════════
+#
+# Medido en la máquina de Johan, que tiene el Bloqueo de mayúsculas puesto y teclado
+# latinoamericano: escribir "prueba del agente" en el Bloc de notas producía "PRUEBA DEL
+# AGENTE". Un formulario rellenado así está mal rellenado y el agente ni se entera.
+
+class _PatronValor:
+    def __init__(self, valor):
+        self.Value = valor
+
+
+def test_se_avisa_si_el_campo_no_quedo_como_se_queria(monkeypatch):
+    monkeypatch.setattr(ui_tree, "patron",
+                        lambda c, n: _PatronValor("PRUEBA DEL AGENTE") if n == "ValuePattern"
+                        else None)
+
+    aviso = ui_tree.comprobar_escrito(object(), "prueba del agente")
+
+    assert aviso is not None
+    assert "no es exactamente" in aviso
+
+
+def test_si_el_campo_quedo_bien_no_se_dice_nada(monkeypatch):
+    monkeypatch.setattr(ui_tree, "patron",
+                        lambda c, n: _PatronValor("prueba del agente") if n == "ValuePattern"
+                        else None)
+
+    assert ui_tree.comprobar_escrito(object(), "prueba del agente") is None
+
+
+def test_un_campo_que_no_publica_su_contenido_no_inventa_un_veredicto(monkeypatch):
+    """Decir "quedó mal" sin poder leerlo sería tan falso como decir que quedó bien."""
+    monkeypatch.setattr(ui_tree, "patron", lambda c, n: None)
+
+    assert ui_tree.comprobar_escrito(object(), "hola") is None
+
+
+def test_escribir_tildes_y_enes_no_depende_del_teclado(monkeypatch):
+    """Se inyecta el carácter, no se simula la tecla: la distribución no puede estropearlo."""
+    from automation import pc_controller
+
+    enviados = []
+
+    class _U32:
+        def SendInput(self, cuantos, arreglo, tamano):
+            enviados.append(arreglo[0].u.ki.wScan)
+            return cuantos
+
+    import ctypes
+
+    monkeypatch.setattr(ctypes, "windll", type("W", (), {"user32": _U32()})())
+    monkeypatch.setattr(pc_controller.time, "sleep", lambda _s: None)
+
+    assert pc_controller._escribir_unicode("añ") is True
+    # Dos eventos por carácter (pulsar y soltar), con el código del carácter de verdad.
+    assert enviados == [ord("a"), ord("a"), ord("ñ"), ord("ñ")]
+
+
+def test_el_salto_de_linea_se_manda_como_tecla(monkeypatch):
+    """Mandado como carácter Unicode, muchas aplicaciones lo ignoran o pintan un cuadrito."""
+    from automation import pc_controller
+
+    teclas = []
+
+    class _U32:
+        def SendInput(self, cuantos, arreglo, tamano):
+            teclas.append(arreglo[0].u.ki.wVk)
+            return cuantos
+
+    import ctypes
+
+    monkeypatch.setattr(ctypes, "windll", type("W", (), {"user32": _U32()})())
+    monkeypatch.setattr(pc_controller.time, "sleep", lambda _s: None)
+
+    pc_controller._escribir_unicode("\n")
+
+    assert teclas == [0x0D, 0x0D]        # VK_RETURN al pulsar y al soltar
+
+
+def test_si_windows_rechaza_una_tecla_se_dice_que_no_se_pudo(monkeypatch):
+    from automation import pc_controller
+
+    class _U32:
+        def SendInput(self, cuantos, arreglo, tamano):
+            return 0
+
+    import ctypes
+
+    monkeypatch.setattr(ctypes, "windll", type("W", (), {"user32": _U32()})())
+    monkeypatch.setattr(pc_controller.time, "sleep", lambda _s: None)
+
+    assert pc_controller._escribir_unicode("hola") is False

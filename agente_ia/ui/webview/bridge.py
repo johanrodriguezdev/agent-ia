@@ -169,6 +169,10 @@ class Bridge(QObject):
     chips_loaded = pyqtSignal(str)                   # json: {modes: [...], quick_actions: [...]} (REQ-026)
     error_occurred = pyqtSignal(str)
     window_maximized_changed = pyqtSignal(bool)
+    #: REQ-033 — estado del modo autonomía, como JSON. La ventana lo muestra mientras esté
+    #: encendido: Johan eligió que no expire solo, así que la mitigación es que sea
+    #: imposible no verlo.
+    autonomy_changed = pyqtSignal(str)
 
     # ------------------------------------------------------------ Python → JS (REQ-016)
     tasks_loaded = pyqtSignal(str)                   # json: lista cruda de task_manager.list_all_tasks()
@@ -300,6 +304,13 @@ class Bridge(QObject):
             "quick_actions": _build_quick_actions_payload(),
         }))
         self.theme_changed.emit(resolve_theme_name(config_manager.get_ui_theme()))
+        self._emitir_autonomia()
+        # El estado de la ventana también: `window_maximized_changed` solo se emite cuando
+        # el estado CAMBIA, así que una página recién cargada —el arranque con geometría
+        # maximizada guardada, o una recarga tras un crash del render— no sabía que estaba
+        # maximizada y dibujaba el gutter de tamaño normal a pantalla completa.
+        if self._main_window is not None:
+            self.window_maximized_changed.emit(self._main_window.isMaximized())
         self._load_conversations(offset=0)
 
         # Primer arranque sin `config.json` (ni variables de entorno): sin una sola clave de
@@ -353,7 +364,8 @@ class Bridge(QObject):
 
         from core.resolution import resolve
         run_async(resolve, self._on_resolve_done, self._on_resolve_error, text,
-                   ChannelType.DESKTOP, user_id=OWNER_USER_ID, modo=(modo or None))
+                   ChannelType.DESKTOP, user_id=OWNER_USER_ID, modo=(modo or None),
+                   historial=self._historial_de_la_conversacion())
 
     def _on_stream_chunk(self, pedazo: str) -> None:
         """Recibe un pedazo de respuesta DESDE EL HILO que habla con el modelo.
@@ -541,6 +553,28 @@ class Bridge(QObject):
         # No se pronuncia (un error no es una respuesta del agente), pero tampoco se deja
         # la conversación muerta: en manos libres la ventana se abre igual (CA-28).
         self._open_conversation_window()
+
+    def _historial_de_la_conversacion(self) -> Optional[list]:
+        """Return los turnos de la conversación abierta, para que el modelo los vea.
+
+        Antes el modelo recibía el contexto por USUARIO de `agent_context`: los últimos
+        cinco registros de cualquier conversación, con las respuestas cortadas a 200
+        caracteres. Johan le pidió "mejorá ese mensaje" y el agente no tenía el mensaje.
+        Los turnos completos de cada conversación estaban guardados desde REQ-013; solo
+        faltaba dárselos.
+        """
+        if not self._conversation_id:
+            return None
+        from ai.memory_manager import memory
+
+        try:
+            turnos = memory.get_conversation_turns(self._conversation_id, user_id=OWNER_USER_ID,
+                                                   limit=60)
+        except Exception as e:
+            logger.warning(f"no se pudo leer la conversación {self._conversation_id}: {e}")
+            return None
+        return [{"role": t.role or "user", "content": t.text or ""} for t in turnos
+                if getattr(t, "role", None) in ("user", "assistant")]
 
     def _ensure_conversation_id(self) -> str:
         from ai.memory_manager import memory
@@ -1679,6 +1713,69 @@ class Bridge(QObject):
             logger.warning("start_move(): windowHandle() no disponible todavía")
             return
         window_handle.startSystemMove()
+
+    # ------------------------------------------------------------ modo autonomía (REQ-033)
+    def _emitir_autonomia(self) -> None:
+        from core.autonomy import estado
+
+        try:
+            self.autonomy_changed.emit(json.dumps(estado()))
+        except Exception as e:
+            logger.error(f"no se pudo emitir el estado de autonomía: {e}")
+
+    @pyqtSlot(str, str)
+    def set_autonomy_mode(self, nivel: str, pin: str) -> None:
+        """Enciende o apaga el modo autonomía. Lo llama la pantalla de Configuración.
+
+        Es deliberado que esto **no** sea una `ToolSpec`: si el agente pudiera encender su
+        propia autonomía, bastaría una instrucción inyectada en una página que esté leyendo
+        para que se suelte solo. Se enciende desde la pantalla, que es un acto del humano.
+        """
+        from core.autonomy import (NIVEL_NORMAL, NIVEL_TOTAL, NIVELES_VALIDOS,
+                                   guardar_modo, preparar_rama)
+        from core.security_manager import security_manager
+
+        if nivel not in NIVELES_VALIDOS:
+            logger.warning(f"set_autonomy_mode: nivel desconocido {nivel!r}, se ignora")
+            self.error_occurred.emit("Ese nivel de autonomía no existe.")
+            return
+
+        if nivel == NIVEL_TOTAL:
+            if not security_manager.has_pin():
+                self.error_occurred.emit(
+                    "Para el nivel total hace falta un PIN maestro configurado "
+                    "(ORION_AUTH_PIN). Sin PIN no habría nada que verificar."
+                )
+                return
+            if not security_manager.verify_pin(pin or ""):
+                logger.warning("PIN incorrecto al intentar encender el modo autonomía total")
+                self.error_occurred.emit("PIN incorrecto.")
+                return
+
+        rama = ""
+        if nivel == NIVEL_TOTAL:
+            try:
+                rama, _anterior = preparar_rama()
+            except RuntimeError as e:
+                self.error_occurred.emit(str(e))
+                return
+
+        try:
+            guardar_modo(nivel, rama)
+        except (ValueError, OSError) as e:
+            logger.error(f"no se pudo guardar el modo autonomía: {e}")
+            self.error_occurred.emit("No pude guardar el cambio.")
+            return
+
+        self._emitir_autonomia()
+        if nivel == NIVEL_NORMAL:
+            self.notice_shown.emit("info", "Modo autonomía apagado: vuelvo a preguntar antes de actuar.")
+        else:
+            self.notice_shown.emit(
+                "info",
+                f"Modo autonomía encendido ({nivel})."
+                + (f" Trabajo sobre la rama {rama}." if rama else ""),
+            )
 
     @pyqtSlot()
     def window_minimize(self) -> None:

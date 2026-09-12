@@ -295,3 +295,103 @@ def test_task_complete_invoke_regex_existente_sin_cambios(monkeypatch):
 
     assert calls == [(3, "_test_user")]
     assert "#3" in result
+
+
+# ─────────────────────────────────────────────
+#  Quién ejecuta y por dónde lo pone el gate, no el llamador
+# ─────────────────────────────────────────────
+
+def test_el_gate_inyecta_quien_ejecuta_y_por_donde():
+    """El contrato lo garantiza `execute_tool()`, no la buena memoria de cada llamador.
+
+    Cinco herramientas (`task_create`, `task_list`, `task_complete`, `task_complete_all`,
+    `intent_list`) leen `params["user_id"]` con corchetes y reventaban con KeyError si el
+    llamador se olvidaba de ponerlo. Lo ponía el bucle de razonamiento en cada llamada,
+    pero era una convención sostenida en un solo sitio: cualquier camino nuevo hacia
+    `execute_tool()` heredaba el traceback.
+    """
+    from agents.tool_registry import ToolSpec, execute_tool, register_tool, unregister_tool
+
+    visto = {}
+    register_tool(ToolSpec(
+        name="_prueba_identidad",
+        description="herramienta de prueba",
+        parameters_schema={"type": "object", "properties": {}},
+        risk_level=RiskLevel.GREEN,
+        invoke=lambda p: visto.update(p) or "listo",
+    ))
+    try:
+        execute_tool("_prueba_identidad", {"algo": 1}, ChannelType.DESKTOP, "johan")
+    finally:
+        unregister_tool("_prueba_identidad")
+
+    assert visto["user_id"] == "johan"
+    assert visto["channel"] == ChannelType.DESKTOP.value
+    assert visto["algo"] == 1
+
+
+def test_el_modelo_no_puede_decir_como_que_usuario_se_ejecuta():
+    """Un `user_id` venido en los argumentos no puede pisar al del llamador confiable."""
+    from agents.tool_registry import ToolSpec, execute_tool, register_tool, unregister_tool
+
+    visto = {}
+    register_tool(ToolSpec(
+        name="_prueba_suplantacion",
+        description="herramienta de prueba",
+        parameters_schema={"type": "object", "properties": {}},
+        risk_level=RiskLevel.GREEN,
+        invoke=lambda p: visto.update(p) or "listo",
+    ))
+    try:
+        execute_tool("_prueba_suplantacion",
+                     {"user_id": "otro", "channel": "telegram"},
+                     ChannelType.DESKTOP, "johan")
+    finally:
+        unregister_tool("_prueba_suplantacion")
+
+    assert visto["user_id"] == "johan"
+    assert visto["channel"] == ChannelType.DESKTOP.value
+
+
+def test_una_herramienta_de_tareas_ya_no_revienta_sin_user_id(monkeypatch):
+    """El caso concreto que se rompía: llamar sin `user_id` en los parámetros."""
+    from agents.tool_registry import execute_tool
+
+    from tasks.task_manager import TaskManager
+
+    monkeypatch.setattr(TaskManager, "list_tasks", lambda self, *a, **kw: [])
+
+    salida = execute_tool("task_list", {}, ChannelType.DESKTOP, "johan")
+
+    assert isinstance(salida, str)
+
+
+def test_un_tool_remoto_no_recibe_quien_es_el_usuario():
+    """Sus parámetros son la carga que sale por la red hacia un tercero.
+
+    Meterle el `user_id` —que puede ser el correo o el id de Telegram del usuario— sería
+    mandarle a un servidor ajeno un dato que nunca pidió y que su esquema no declara.
+    """
+    from agents.tool_registry import ToolSpec, execute_tool, register_tool, unregister_tool
+
+    visto = {}
+    spec = ToolSpec(
+        name="_prueba_remota",
+        description="herramienta remota simulada",
+        parameters_schema={"type": "object", "properties": {}},
+        risk_level=RiskLevel.GREEN,
+        invoke=lambda p: visto.update(p) or "listo",
+        origin="mcp_remote",
+    )
+    # Se mete directo en el registro: `register_tool` le exige a un remoto nombre calificado
+    # y allow-list, y lo que se prueba acá es la EJECUCIÓN, no el alta.
+    from agents.tool_registry import _REGISTRY
+
+    _REGISTRY["_prueba_remota"] = spec
+    security_manager.register_action("_prueba_remota", RiskLevel.GREEN)
+    try:
+        execute_tool("_prueba_remota", {"q": "hola"}, ChannelType.DESKTOP, "johan")
+    finally:
+        unregister_tool("_prueba_remota")
+
+    assert visto == {"q": "hola"}

@@ -115,3 +115,10 @@ uiautomation
 # ui/webview/frontend/vendor/.
 pywinpty; sys_platform == "win32"
 ptyprocess; sys_platform != "win32"
+# OCR con el motor de Windows (Windows.Media.Ocr): leer texto dibujado en pantalla,
+# lienzos, imagenes y PDF escaneados sin modelo ni red. Solo Windows.
+winsdk; sys_platform == "win32"
+# Dibujar las paginas de un PDF escaneado para pasarlas por el OCR.
+pymupdf
+# Presentaciones de PowerPoint (REQ-040).
+python-pptx

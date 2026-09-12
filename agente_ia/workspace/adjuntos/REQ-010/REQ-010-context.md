@@ -72,3 +72,28 @@ degradé de forma consistente en los acentos visuales ya existentes de la GUI JA
 2026-08-05 | SPEC_APROBADO → EN_ARQUITECTURA | orion-baseline | Baseline documentado sin fallos preexistentes, handoff a orion-architect
 2026-08-05 | EN_ARQUITECTURA → EN_ARQUITECTURA (esperando aprobación) | orion-architect | Propuesta técnica completa redactada en propuestas/arquitectura-010.md; pendiente aprobación humana explícita de Johan (incluye 2 puntos a confirmar: fallback CA-02 si falla prueba manual, e inclusión de system_status_card.py)
 2026-08-05 | EN_ARQUITECTURA → ARQUITECTURA_APROBADA | orion-architect | Johan aprobó la arquitectura tal cual y confirmó explícitamente incluir system_status_card.py en el recoloreo (expansión de alcance documentada). Rama de trabajo asignada: feature/REQ-010-branding-noddoo. Handoff a orion-dev con arquitectura=workspace/adjuntos/REQ-010/propuestas/arquitectura-010.md. Recordatorio para orion-dev: verificar CA-05 (los 2 PNG de assets/branding/ aún no confirmados en el repo) antes de escribir código, y documentar en desarrollo-log-010.md el mecanismo usado para CA-02 (taskbar) y el valor de color extraído para CA-06.
+
+---
+
+## Actualizacion 2026-09-09 — el problema ya esta resuelto, los criterios no se pueden cumplir
+
+Revisado al retomar los REQs parados. Ver el analisis completo en
+`workspace/adjuntos/estado-tracker-2026-09-09.md`.
+
+El objetivo del REQ —que la ventana, la barra de tareas y la bandeja dejen de mostrar el logo
+de Python y un cuadrado azul— **ya se cumple hoy**, por otro camino:
+`ui/webview/app_icon.py::dibujar()/app_icon()` mas `fijar_identidad_en_windows()`, que
+declara el AppUserModelID (sin eso la barra de tareas agrupa por proceso y sigue mostrando el
+icono de Python aunque la ventana tenga el suyo).
+
+Sus criterios, en cambio, ya no son implementables:
+
+- CA-03, CA-06, CA-07 y CA-08 nombran `_setup_tray_icon()` con QPixmap solido y
+  `header_bar.py`: codigo de la GUI PyQt eliminada en REQ-015.
+- CA-04 pide un `.ico` multi-resolucion con el logo de Noddoo, y eso **contradice una
+  decision posterior y deliberada** documentada en `app_icon.py`: no hay binario con un logo
+  fijo porque el nombre del agente es del usuario (hoy VIERNES, ayer ORION) y una marca
+  dibujada no envejece con el nombre. Ademas el nombre del producto sigue sin definirse.
+
+**Propuesta para Johan:** cerrarlo como superado por REQ-015, o reescribir su alcance cuando
+el nombre del producto este decidido. No requiere codigo.

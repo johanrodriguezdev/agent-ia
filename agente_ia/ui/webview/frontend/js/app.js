@@ -13,6 +13,7 @@ import {
   onConversationListUpdated, onConversationCleared, onConversationRemoved,
   onTurnsLoaded, onMessageAppended, onTypingStarted, onTypingStopped, onProgressUpdated,
   onConfirmationRequested, onFileAttached, onErrorOccurred, onWindowMaximizedChanged,
+  onAutonomyChanged,
   onTasksLoaded, onProjectsLoaded, onProjectConversationsLoaded, onProjectRemoved,
   onSecurityOverridesLoaded, onSecurityOverrideSaved, onSecurityOverrideSaveRejected,
   onEmailCapabilitiesLoaded, onEmailCapabilitySaved, onEmailCapabilitySaveRejected,
@@ -38,7 +39,8 @@ import {
 } from "./composer.js";
 import { initTheme, applyTheme } from "./theme.js";
 import { showConfirmModal } from "./confirm_modal.js";
-import { initWindowChrome, setMaximizedState } from "./window_chrome.js";
+import { initWindowChrome, setAutonomyIndicator, setMaximizedState } from "./window_chrome.js";
+import { fijarNombreDelAgente } from "./agente.js";
 import { openTasksPanel, renderTasks } from "./tasks_panel.js";
 import {
   toggleTerminalPanel, escribirSalida, manejarEstadoTerminal, renderTerminalTabs,
@@ -55,7 +57,7 @@ import {
   openSettingsPanel, renderSecurityOverrides, handleSecurityOverrideSaved,
   handleSecurityOverrideRejected, renderProfile, handleProfileSaved,
   renderEmailCapabilities, handleEmailCapabilitySaved, handleEmailCapabilityRejected,
-  renderTaskModels, renderConnections,
+  renderTaskModels, renderConnections, renderAutonomy,
 } from "./settings_panel.js";
 
 const GREETINGS_BY_HOUR = [
@@ -69,12 +71,31 @@ function timeBasedGreeting() {
   return match ? match.text : "Buenas noches";
 }
 
+//: Cada cuanto se vuelve a mirar el reloj. La app esta pensada para quedar abierta todo el
+//: dia (arranca con Windows y vive en la bandeja), asi que el saludo se calculaba una sola
+//: vez al cargar la pagina y a las nueve de la noche seguia diciendo "Buenos dias"
+//: (REQ-012). Un minuto es de sobra: nadie nota el cambio de franja al segundo.
+const MS_ENTRE_REVISIONES_DE_SALUDO = 60_000;
+
+function refrescarSaludo() {
+  const el = document.getElementById("empty-state-greeting");
+  if (!el) return;
+  const saludo = timeBasedGreeting();
+  // Solo si cambio: repintar el mismo texto cada minuto no se ve, pero pisa la seleccion
+  // del usuario si justo estaba copiando algo.
+  if (el.textContent !== saludo) el.textContent = saludo;
+}
+
 function setAgentIdentity(name) {
   // CA-46: avatar = círculo con la inicial del agente. El valor inicial lo inyecta
   // `MainWindow` como variable global (ver `main_window.py::_inject_agent_name_script`);
   // cuando el usuario lo cambia en Configuración, `profile_loaded` trae el nombre nuevo y
   // esta misma función lo repinta sin reiniciar.
   const agentName = (name || window.__ORION_AGENT_NAME__ || "ORION").trim();
+  // REQ-037 — se publica para todo el resto de la interfaz. Antes esta función repintaba
+  // tres nodos y nada más, así que un panel que quisiera nombrar al agente tenía que
+  // escribirlo a mano — y quedaba con el nombre viejo al renombrarlo.
+  fijarNombreDelAgente(agentName);
   const upper = agentName.toUpperCase();
 
   document.getElementById("agent-name-label").textContent = upper;
@@ -175,6 +196,13 @@ async function bootstrap() {
     if (capa) capa.hidden = !activo;
   });
   onWindowMaximizedChanged(setMaximizedState);
+  // REQ-033 — el estado del modo autonomía va a dos lugares: la insignia de la barra, que
+  // no se puede perder de vista, y la pantalla de Configuración si está abierta.
+  onAutonomyChanged((json) => {
+    const estado = JSON.parse(json);
+    setAutonomyIndicator(estado);
+    renderAutonomy(estado);
+  });
 
   // REQ-016: herramientas de la barra superior (Tareas/Flujos/Proyectos) + señales de
   // datos de sus modales. Antes eran botones con emoji dentro del sidebar.
@@ -222,6 +250,12 @@ async function bootstrap() {
   // señal se perdería (Qt no reproduce señales para suscriptores tardíos). No se usa en
   // producción.
   window.__ORION_APP_READY__ = true;
+
+  // El saludo mira el reloj cada minuto (REQ-012). Ver `refrescarSaludo()`.
+  setInterval(refrescarSaludo, MS_ENTRE_REVISIONES_DE_SALUDO);
+  // Mismo criterio que `__ORION_APP_READY__`: un test no puede esperar un minuto ni
+  // adelantar el reloj del sistema, pero si puede fingir la hora y disparar la revision.
+  window.__ORION_REFRESCAR_SALUDO__ = refrescarSaludo;
 }
 
 bootstrap();

@@ -8,12 +8,19 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 from ai import provider_health
-from core import streaming
+from core import streaming, tool_history
 
 logger = logging.getLogger(__name__)
 
 _response_cache: OrderedDict = OrderedDict()
 CACHE_MAX_SIZE = 100
+
+#: REQ-027/CA-33 — tope de tokens de salida, único para los 5 adaptadores. Es un TECHO, no
+#: un objetivo: subirlo no encarece una respuesta corta, solo deja de cortarla. 4096 y no
+#: 8192 porque varios modelos gratuitos de OpenRouter tienen un tope de salida menor y
+#: rechazan la petición con error duro — sería una regresión justo en los modelos que se
+#: usan por ser gratis.
+MAX_TOKENS_SALIDA = 4096
 
 
 @dataclass(frozen=True)
@@ -53,7 +60,28 @@ def _cached_call(prov_name, messages, system_prompt, image_path, model_name):
     return result
 
 
+def _debe_cachear(tools, messages) -> bool:
+    """REQ-027/CA-40 (generaliza CA-09 de REQ-007): la cache no ve ni una llamada con
+    herramientas ni un historial de herramientas.
+
+    Lo segundo es lo que agrega REQ-027 y no es cosmetico: la llamada de cierre va con
+    `tools=None` y hoy entraria a la cache, asi que cachearla seria devolver manana la
+    respuesta de hoy ante un historial identico. Ademas mantiene `_cache_key()` —que hace
+    `json.dumps` de `messages`— a salvo de contenido estructurado, cuyo fallo de
+    serializacion se registraria como fallo del PROVEEDOR y lo mandaria a cooldown.
+    """
+    return not tools and not tool_history.tiene_historial_de_herramientas(messages)
+
+
 def _uncached_call(prov_name, messages, system_prompt, image_path, model_name, tools=None):
+    # REQ-027/CA-07: si esta llamada no lleva herramientas, el historial se aplana a texto.
+    # Un unico punto cubre tres casos que si no serian tres parches: (1) `gemini`/`ollama`,
+    # que nunca reciben tools; (2) la llamada de cierre, que va con `tools=None` a
+    # CUALQUIER proveedor —y la API de Anthropic rechaza bloques `tool_use`/`tool_result`
+    # en una peticion que no declara `tools`—; (3) cualquier caller interno que algun dia
+    # reciba un historial estructurado. Sin bloques, `aplanar()` devuelve la MISMA lista.
+    if not tools:
+        messages = tool_history.aplanar(messages)
     if prov_name == "gemini":
         return _ask_gemini(messages, system_prompt, image_path, model_name)
     elif prov_name == "ollama":
@@ -310,16 +338,16 @@ def generate_response(messages, system_prompt, image_path=None, tools=None, tare
         effective_tools = tools if (tools and tools_supported) else None
 
         try:
-            if effective_tools:
-                # CA-09: nunca se cachea una llamada con tools — bypass total de
+            if _debe_cachear(effective_tools, messages):
+                response = _cached_call(activo, messages, system_prompt, image_path, modelo)
+            else:
+                # CA-09 de REQ-007 + CA-40 de REQ-027: bypass total de
                 # _cached_call()/_response_cache en vez de incorporar un hash del schema de
                 # tools a la cache key (ver desarrollo-log-007.md para la justificacion).
                 response = _uncached_call(
                     activo, messages, system_prompt, image_path, modelo,
                     tools=effective_tools,
                 )
-            else:
-                response = _cached_call(activo, messages, system_prompt, image_path, modelo)
         except Exception as e:
             provider_health.registrar_fallo(activo, e, _modelo_para_cooldown(activo, modelo))
             if indice < ultimo:
@@ -555,6 +583,166 @@ def con_aviso_de_cambio(texto: str, aviso: Optional[dict], corto: bool = False) 
     return f"{texto}\n\n{frase}" if frase else texto
 
 
+def _indice_del_ultimo_plano(messages) -> Optional[int]:
+    """Return el índice del último mensaje de TEXTO (no estructurado), o None si no hay.
+
+    Es el mensaje que recibe el trato especial de siempre: la imagen y, en la familia
+    `openai`, el `content` como lista de bloques. Sin historial de herramientas el último
+    mensaje plano ES el último mensaje, así que los adaptadores producen exactamente la
+    misma llamada que antes de REQ-027 (CA-08). Con historial, el último mensaje es el de
+    resultados y la imagen no debe pegarse ahí (CA-09).
+    """
+    for i in range(len(messages) - 1, -1, -1):
+        if not tool_history.es_estructurado(messages[i]):
+            return i
+    return None
+
+
+def _mensajes_para_anthropic(messages, image_path):
+    """Traduce la lista neutral al formato de Anthropic (REQ-027/CA-03).
+
+    - mensaje plano -> `{"role", "content": [{"type": "text", ...}]}` — igual que antes
+    - `llamada`     -> bloque `tool_use` dentro de un `assistant`
+    - `resultado`   -> bloque `tool_result` dentro de un `user`
+    """
+    messages = tool_history.con_ids_normalizados(messages)
+    indice_plano = _indice_del_ultimo_plano(messages)
+
+    salida = []
+    for mensaje in messages:
+        if not tool_history.es_estructurado(mensaje):
+            salida.append({
+                "role": mensaje["role"],
+                "content": [{"type": "text", "text": mensaje["content"]}],
+            })
+            continue
+
+        bloques = []
+        for bloque in mensaje["content"]:
+            tipo = bloque.get("tipo")
+            if tipo == tool_history.TIPO_TEXTO:
+                bloques.append({"type": "text", "text": bloque["texto"]})
+            elif tipo == tool_history.TIPO_LLAMADA:
+                bloques.append({
+                    "type": "tool_use",
+                    "id": bloque["id"],
+                    "name": bloque["nombre"],
+                    "input": tool_history.argumentos_para_el_modelo(bloque),
+                })
+            elif tipo == tool_history.TIPO_RESULTADO:
+                bloques.append({
+                    "type": "tool_result",
+                    "tool_use_id": bloque["id"],
+                    "content": bloque["salida"],
+                })
+        salida.append({"role": mensaje["role"], "content": bloques})
+
+    # CA-09: la imagen va al último mensaje de TEXTO del usuario, nunca a uno que
+    # transporta resultados de herramientas.
+    if (image_path and os.path.exists(image_path) and indice_plano is not None
+            and salida[indice_plano]["role"] == "user"):
+        import base64
+        with open(image_path, "rb") as f:
+            image_data = base64.standard_b64encode(f.read()).decode("utf-8")
+        salida[indice_plano]["content"].insert(0, {
+            "type": "image",
+            "source": {"type": "base64", "media_type": "image/jpeg", "data": image_data},
+        })
+
+    return salida
+
+
+def _mensajes_para_openai(messages, system_prompt, image_path, *, imagen_como_bloque,
+                          aviso_sin_vision=""):
+    """Traduce la lista neutral al protocolo del SDK `openai` (REQ-027/CA-04).
+
+    Una sola función para `openai`, `deepseek` y `openrouter`: los tres hablan el mismo
+    protocolo. La asimetría de `imagen_como_bloque` es fea pero se conserva a propósito —
+    CA-08 exige que con el formato viejo la llamada salga byte a byte igual, y hoy DeepSeek
+    manda el último mensaje como string plano mientras los otros dos lo mandan como lista
+    de bloques.
+
+    - `llamada`   -> `assistant` con `tool_calls`
+    - `resultado` -> un `{"role": "tool", "tool_call_id", "content"}` por resultado
+    """
+    messages = tool_history.con_ids_normalizados(messages)
+    indice_plano = _indice_del_ultimo_plano(messages)
+
+    salida = [{"role": "system", "content": system_prompt}]
+    for i, mensaje in enumerate(messages):
+        if tool_history.es_estructurado(mensaje):
+            _agregar_estructurado_openai(salida, mensaje)
+        elif i == indice_plano:
+            salida.append(_ultimo_mensaje_openai(
+                mensaje, image_path, imagen_como_bloque, aviso_sin_vision,
+            ))
+        else:
+            salida.append({"role": mensaje["role"], "content": mensaje["content"]})
+
+    if indice_plano is None and not messages:
+        # Sin ningún mensaje, el comportamiento de siempre era mandar un `user` vacío.
+        salida.append(_ultimo_mensaje_openai(
+            {"role": "user", "content": ""}, image_path, imagen_como_bloque, aviso_sin_vision,
+        ))
+    return salida
+
+
+def _agregar_estructurado_openai(salida, mensaje):
+    """Vuelca un mensaje neutral con bloques al protocolo del SDK `openai`."""
+    textos, tool_calls, resultados = [], [], []
+    for bloque in mensaje["content"]:
+        tipo = bloque.get("tipo")
+        if tipo == tool_history.TIPO_TEXTO:
+            textos.append(bloque["texto"])
+        elif tipo == tool_history.TIPO_LLAMADA:
+            tool_calls.append({
+                "id": bloque["id"],
+                "type": "function",
+                "function": {
+                    "name": bloque["nombre"],
+                    "arguments": json.dumps(
+                        tool_history.argumentos_para_el_modelo(bloque), ensure_ascii=False,
+                    ),
+                },
+            })
+        elif tipo == tool_history.TIPO_RESULTADO:
+            resultados.append({
+                "role": "tool",
+                "tool_call_id": bloque["id"],
+                "content": bloque["salida"],
+            })
+
+    if tool_calls or textos:
+        entrada = {"role": mensaje["role"], "content": "\n".join(textos) if textos else None}
+        if tool_calls:
+            entrada["tool_calls"] = tool_calls
+        salida.append(entrada)
+    salida.extend(resultados)
+
+
+def _ultimo_mensaje_openai(mensaje, image_path, imagen_como_bloque, aviso_sin_vision):
+    """El último mensaje de texto, con el trato de imagen que cada adaptador ya tenía."""
+    texto = mensaje.get("content") or ""
+    tiene_imagen = bool(image_path and os.path.exists(image_path))
+
+    if not imagen_como_bloque:
+        # DeepSeek: string plano y, si hay imagen, el aviso de que no la puede ver.
+        if tiene_imagen:
+            texto += aviso_sin_vision
+        return {"role": "user", "content": texto}
+
+    contenido = [{"type": "text", "text": texto}]
+    if tiene_imagen:
+        import base64
+        with open(image_path, "rb") as f:
+            image_data = base64.standard_b64encode(f.read()).decode("utf-8")
+        contenido.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:image/jpeg;base64,{image_data}"},
+        })
+    return {"role": "user", "content": contenido}
+
+
 def _ask_anthropic(messages, system_prompt, image_path, model_name, tools=None):
     import anthropic
     from config_manager import get_api_key
@@ -565,19 +753,8 @@ def _ask_anthropic(messages, system_prompt, image_path, model_name, tools=None):
 
     model = model_name if model_name else "claude-3-5-sonnet-20241022"
 
-    # Adaptar mensajes a formato Anthropic
-    anthropic_msgs = []
-    for m in messages:
-        anthropic_msgs.append({"role": m["role"], "content": [{"type": "text", "text": m["content"]}]})
-
-    if image_path and os.path.exists(image_path) and anthropic_msgs and anthropic_msgs[-1]["role"] == "user":
-        import base64
-        with open(image_path, "rb") as f:
-            image_data = base64.standard_b64encode(f.read()).decode("utf-8")
-        anthropic_msgs[-1]["content"].insert(0, {
-            "type": "image",
-            "source": {"type": "base64", "media_type": "image/jpeg", "data": image_data}
-        })
+    # REQ-027/CA-03: la traducción (incluida la imagen) vive en `_mensajes_para_anthropic`.
+    anthropic_msgs = _mensajes_para_anthropic(messages, image_path)
 
     # REQ-007/CA-04: convierte `parameters_schema` de cada tool al `input_schema` que
     # espera la API de Anthropic, sin reescribir el JSON Schema a mano.
@@ -592,7 +769,7 @@ def _ask_anthropic(messages, system_prompt, image_path, model_name, tools=None):
     kwargs = {"tools": api_tools} if api_tools else {}
     response = client.messages.create(
         model=model,
-        max_tokens=1500,
+        max_tokens=MAX_TOKENS_SALIDA,
         system=system_prompt,
         messages=anthropic_msgs,
         **kwargs,
@@ -707,24 +884,10 @@ def _ask_openai(messages, system_prompt, image_path, model_name, tools=None):
     client = OpenAI(api_key=api_key)
     model = model_name if model_name else "gpt-4o-mini"
 
-    openai_msgs = [{"role": "system", "content": system_prompt}]
-    for m in messages[:-1]:
-        openai_msgs.append({"role": m["role"], "content": m["content"]})
-
-    last_msg = {"role": "user", "content": []}
-    last_text = messages[-1]["content"] if messages else ""
-    last_msg["content"].append({"type": "text", "text": last_text})
-
-    if image_path and os.path.exists(image_path):
-        import base64
-        with open(image_path, "rb") as f:
-            image_data = base64.standard_b64encode(f.read()).decode("utf-8")
-        last_msg["content"].append({
-            "type": "image_url",
-            "image_url": {"url": f"data:image/jpeg;base64,{image_data}"}
-        })
-
-    openai_msgs.append(last_msg)
+    # REQ-027/CA-04: traducción compartida con `_ask_deepseek`/`_ask_openrouter`.
+    openai_msgs = _mensajes_para_openai(
+        messages, system_prompt, image_path, imagen_como_bloque=True,
+    )
 
     # REQ-007/CA-05: formato de tools `{"type":"function","function":{...}}` del SDK
     # `openai` — compartido con `_ask_deepseek` porque ambos usan el mismo SDK.
@@ -753,7 +916,7 @@ def _ask_openai(messages, system_prompt, image_path, model_name, tools=None):
     response = client.chat.completions.create(
         model=model,
         messages=openai_msgs,
-        max_tokens=1500,
+        max_tokens=MAX_TOKENS_SALIDA,
         **kwargs,
     )
     msg = response.choices[0].message
@@ -793,24 +956,11 @@ def _ask_openrouter(messages, system_prompt, image_path, model_name, tools=None)
     client = OpenAI(api_key=api_key, base_url="https://openrouter.ai/api/v1")
     model = model_name if model_name else _MODELO_POR_PROVEEDOR["openrouter"]
 
-    openrouter_msgs = [{"role": "system", "content": system_prompt}]
-    for m in messages[:-1]:
-        openrouter_msgs.append({"role": m["role"], "content": m["content"]})
-
-    last_msg = {"role": "user", "content": []}
-    last_text = messages[-1]["content"] if messages else ""
-    last_msg["content"].append({"type": "text", "text": last_text})
-
-    if image_path and os.path.exists(image_path):
-        import base64
-        with open(image_path, "rb") as f:
-            image_data = base64.standard_b64encode(f.read()).decode("utf-8")
-        last_msg["content"].append({
-            "type": "image_url",
-            "image_url": {"url": f"data:image/jpeg;base64,{image_data}"},
-        })
-
-    openrouter_msgs.append(last_msg)
+    # REQ-027/CA-04: misma traduccion que `_ask_openai` — los tres hablan el protocolo
+    # de OpenAI, asi que la construccion de mensajes es una sola.
+    openrouter_msgs = _mensajes_para_openai(
+        messages, system_prompt, image_path, imagen_como_bloque=True,
+    )
 
     # Mismo formato de tools que `_ask_openai`/`_ask_deepseek`: los tres usan el SDK `openai`.
     api_tools = None
@@ -831,7 +981,7 @@ def _ask_openrouter(messages, system_prompt, image_path, model_name, tools=None)
     response = client.chat.completions.create(
         model=model,
         messages=openrouter_msgs,
-        max_tokens=1500,
+        max_tokens=MAX_TOKENS_SALIDA,
         **kwargs,
     )
     msg = response.choices[0].message
@@ -864,7 +1014,7 @@ def _llamada_en_streaming(client, model, mensajes, api_tools):
     """
     kwargs = {"tools": api_tools, "tool_choice": "auto"} if api_tools else {}
     stream = client.chat.completions.create(
-        model=model, messages=mensajes, max_tokens=1500, stream=True, **kwargs,
+        model=model, messages=mensajes, max_tokens=MAX_TOKENS_SALIDA, stream=True, **kwargs,
     )
 
     partes_texto = []
@@ -930,17 +1080,12 @@ def _ask_deepseek(messages, system_prompt, image_path, model_name, tools=None):
     client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
     model = model_name if model_name else "deepseek-chat"
 
-    deepseek_msgs = [{"role": "system", "content": system_prompt}]
-    for m in messages[:-1]:
-        deepseek_msgs.append({"role": m["role"], "content": m["content"]})
-
-    # DeepSeek oficial aún no tiene un endpoint de visión público idéntico,
-    # por lo que pasaremos por ahora todo como texto
-    last_text = messages[-1]["content"] if messages else ""
-    if image_path and os.path.exists(image_path):
-        last_text += "\n[Aviso: El usuario envió una imagen, pero DeepSeek-Chat actual es de texto. Dile que no puedes ver imágenes por ahora]"
-
-    deepseek_msgs.append({"role": "user", "content": last_text})
+    # REQ-027/CA-04: misma traduccion que `_ask_openai`, pero con el ultimo mensaje como
+    # string plano y con el aviso de que DeepSeek no ve imagenes — exactamente lo de antes.
+    deepseek_msgs = _mensajes_para_openai(
+        messages, system_prompt, image_path, imagen_como_bloque=False,
+        aviso_sin_vision="\n[Aviso: El usuario envió una imagen, pero DeepSeek-Chat actual es de texto. Dile que no puedes ver imágenes por ahora]",
+    )
 
     # REQ-007/CA-05: mismo formato de tools que `_ask_openai` (ambos usan el SDK `openai`).
     api_tools = None
@@ -971,7 +1116,7 @@ def _ask_deepseek(messages, system_prompt, image_path, model_name, tools=None):
     response = client.chat.completions.create(
         model=model,
         messages=deepseek_msgs,
-        max_tokens=1500,
+        max_tokens=MAX_TOKENS_SALIDA,
         **kwargs,
     )
     msg = response.choices[0].message

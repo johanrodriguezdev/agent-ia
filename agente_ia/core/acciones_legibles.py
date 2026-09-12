@@ -45,6 +45,23 @@ _DESCRIPCIONES: Dict[str, str] = {
     "PC_SCROLL": "desplace la pantalla",
     "pc_scroll": "desplace la pantalla",
     "pc_enable_tree": "lea lo que hay en pantalla",
+    # El objetivo concreto lo agrega `format_details` desde el parámetro `objetivo`.
+    "pc_act": "pulse o escriba en algo de la ventana que tenés delante",
+
+    # ── Navegador (REQ-038) ──
+    # No dice "haga clic en la página" a secas: lo que se autoriza es actuar DENTRO de la
+    # sesión del usuario, con sus cuentas abiertas. El objetivo concreto lo agrega
+    # `format_details` a partir del parámetro `objetivo`.
+    "browser_act": "haga clic o escriba dentro de la página abierta",
+    "browser_tab_close": "cierre una pestaña del navegador",
+
+    # ── Documentos (REQ-040) ──
+    "document_create": "cree un documento",
+    "spreadsheet_create": "cree una hoja de cálculo",
+    "presentation_create": "cree una presentación",
+    "file_create": "cree un archivo",
+    "document_to_pdf": "convierta un documento a PDF",
+    "document_edit": "edite un documento que ya existe",
 
     # ── Terminal ──
     "terminal_open": "abra una terminal",
@@ -56,6 +73,28 @@ _DESCRIPCIONES: Dict[str, str] = {
     "delete_folder": "borre una carpeta",
     "save_file_desktop": "guarde un archivo en el escritorio",
     "write_file_direct": "escriba un archivo",
+    # REQ-029 — las dos amarillas de las herramientas de repositorio. Las 6 verdes (leer,
+    # listar, buscar, git status/diff/log) nunca preguntan, así que no necesitan traducción.
+    "file_write": "cree o reescriba un archivo del repositorio",
+    "file_edit": "cambie un fragmento de un archivo del repositorio",
+    # REQ-030 — la frase dice "para trabajar" a propósito: quien confirma tiene que
+    # entender que está dando permiso permanente sobre esa carpeta, no autorizando una
+    # operación suelta.
+    "workspace_add_folder": "habilite una carpeta para trabajar con sus archivos",
+    "workspace_remove_folder": "deje de tener acceso a una carpeta de trabajo",
+    # REQ-031 — la frase dice "mande datos" a propósito: lo que hay que entender al
+    # confirmar es que algo sale del equipo hacia afuera, no que se hace una petición.
+    "http_request": "llame a un servicio de internet y le mande datos",
+    # REQ-032 — la frase nombra la carpeta a proposito: lo que hay que entender al
+    # confirmar es que algo se va a EJECUTAR en tu proyecto, no que se abre una app.
+    "project_run": "ejecute un comando dentro de la carpeta del proyecto",
+    # REQ-035 — las dos del refactor. "borre" y "mueva" en castellano llano: lo que hay que
+    # entender al confirmar es que un archivo va a dejar de estar donde estaba.
+    "file_delete": "borre un archivo del repositorio",
+    "file_move": "mueva o renombre un archivo del repositorio",
+    # REQ-036 — la unica amarilla de las tres: leer la salida y detener lo que el propio
+    # agente levanto no necesitan permiso aparte.
+    "project_start": "deje corriendo un programa del proyecto en segundo plano",
 
     # ── Código y habilidades ──
     "EXECUTE_CODE": "ejecute un programa que acabo de escribir",

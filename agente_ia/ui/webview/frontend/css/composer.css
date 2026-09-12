@@ -213,6 +213,14 @@
   background-color: var(--bg-hover);
 }
 
+/* REQ-028: reconectando el micrófono. Sin esta regla el botón se pintaría igual que
+   "inactivo" —ninguna de las de arriba matchea— y el manos libres parecería apagado
+   justo mientras sigue vivo reintentando. Reusa `--danger`, ya definido en los dos
+   temas, sin agregar tokens nuevos. */
+#wake-toggle-btn[data-wake-state="RECONNECTING"] {
+  color: var(--danger);
+}
+
 #attachment-chip {
   display: flex;
   align-items: center;

@@ -37,7 +37,17 @@ def test_mapeo_modo_a_tools_segun_arquitectura_026():
     que incluía `info_skill` por error)."""
     por_id = {m.id: m for m in listar_modos()}
 
-    assert por_id["codigo"].tool_names == ("EXECUTE_CODE",)
+    # REQ-029/CA-15 — el modo "codigo" pasó a ofrecer primero las 8 herramientas de
+    # repositorio (archivos + git) y dejó `EXECUTE_CODE` al final: en este modo lo
+    # habitual es trabajar sobre un repo que ya existe, no generar un script suelto.
+    # REQ-032 — se suman las dos que cierran el ciclo de desarrollo: ver la forma del
+    # proyecto antes de tocarlo, y correrlo despues de tocarlo.
+    assert por_id["codigo"].tool_names == (
+        "project_tree", "code_search",
+        "file_search", "file_read", "file_list", "file_edit", "file_write",
+        "project_run",
+        "git_status", "git_diff", "git_log", "EXECUTE_CODE",
+    )
     assert por_id["investigacion"].tool_names == (
         "web_search", "web_read", "wikipedia_search", "BROWSE_WEB",
     )
@@ -83,3 +93,21 @@ def test_listar_modos_es_estable_entre_llamadas():
     """`_MODOS` es una tupla módulo-level (frozen dataclasses) — dos llamadas devuelven
     el mismo catálogo, no una copia distinta cada vez que podría desincronizarse."""
     assert listar_modos() == listar_modos()
+
+
+def test_ca12_cada_modo_declara_su_presupuesto():
+    """REQ-027/CA-12: el presupuesto vive en el catálogo, junto a `tool_names` y `tarea`,
+    y no en una tabla paralela en otro módulo que haya que mantener sincronizada."""
+    esperado = {"codigo": 40, "investigacion": 25, "flujos": 12, "tareas": 10}
+    assert {m.id: m.presupuesto for m in listar_modos()} == esperado
+
+
+def test_ca12_el_presupuesto_es_obligatorio_al_declarar_un_modo():
+    """D-9: un modo nuevo que se olvide de declararlo tiene que explotar al construirlo, no
+    heredar en silencio el presupuesto más bajo."""
+    import pytest
+
+    with pytest.raises(TypeError):
+        ModoComposer(
+            id="x", label="X", tool_names=(), tarea=None, prompt_hint="",
+        )

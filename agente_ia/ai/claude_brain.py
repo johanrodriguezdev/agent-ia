@@ -115,7 +115,12 @@ RECUERDOS RELEVANTES DE CONVERSACIONES PASADAS (Memoria Semántica):
 
 #: Tope de rondas de herramientas por mensaje. Mismo criterio que `core/reasoning_loop.py`:
 #: acota el coste y evita que un modelo confundido encadene llamadas sin fin.
-MAX_TOOL_ROUNDS = 3
+#: REQ-027/CA-16 — rondas de herramientas del bucle propio de Telegram/Discord.
+#: Sube de 3 a 5 por el mismo criterio que el techo de los canales remotos: no es el
+#: mismo numero que `reasoning_loop.MAX_LLM_CALLS` ni cuenta lo mismo (aca son rondas
+#: de herramientas, y la llamada de cierre ya existia y va aparte). Este modulo NO
+#: conoce el concepto de modo del composer: es de escritorio.
+MAX_TOOL_ROUNDS = 5
 
 
 def _resolver_con_tools(history, system_prompt, image_path, channel, user_id):

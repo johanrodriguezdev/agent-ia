@@ -13,9 +13,11 @@ Sin red, sin micrófono, sin `sleep` real (.claude/rules/testing.md).
 """
 
 import datetime
+import types
 
 import pytest
 
+from tasks import task_manager
 from tasks.task_manager import _parse_natural_date, parse_natural_task
 from tasks.task_slots import SLOT_WHEN, scan_task_slots
 
@@ -23,6 +25,31 @@ from tasks.task_slots import SLOT_WHEN, scan_task_slots
 def _manana_a_las(hour: int) -> datetime.datetime:
     base = datetime.datetime.now() + datetime.timedelta(days=1)
     return base.replace(hour=hour, minute=0, second=0, microsecond=0)
+
+
+@pytest.fixture
+def reloj(monkeypatch):
+    """Congela la hora que ve `tasks/task_manager.py`. Devuelve la funcion que la fija.
+
+    `_parse_natural_date()` lee el reloj dos veces —el `RELATIVE_BASE` de dateparser y el
+    `_al_futuro()` que empuja al dia siguiente lo que ya paso—, asi que un test sobre "hoy
+    a las 5" daba un resultado distinto segun la hora a la que se corriera la suite: hasta
+    las 17:00 era hoy, despues era manana. Y lo de despues es lo CORRECTO en produccion
+    (ver `_MARGEN_PASADO`): el que estaba mal era el test, que solo pasaba media jornada.
+
+    Se sustituye el nombre `datetime` DENTRO del modulo, no el modulo real de la libreria
+    estandar: el resto de la suite sigue viendo la hora de verdad.
+    """
+    def _fijar(momento: datetime.datetime) -> None:
+        congelado = type("_DatetimeCongelado", (datetime.datetime,), {
+            "now": classmethod(lambda cls, tz=None: momento),
+        })
+        monkeypatch.setattr(task_manager, "datetime", types.SimpleNamespace(
+            datetime=congelado, timedelta=datetime.timedelta, date=datetime.date,
+        ))
+
+    return _fijar
+
 
 
 # ─────────────────────────────────────────────
@@ -291,12 +318,28 @@ def test_pasado_manana_no_cae_en_manana():
     assert _parse_natural_date("recuerdame llamar al banco pasado manana").date() == esperado
 
 
-def test_la_hora_dicha_se_respeta():
+def test_la_hora_dicha_se_respeta(reloj):
     """Decir el día no puede borrar la hora."""
+    reloj(datetime.datetime(2026, 3, 10, 9, 0))
+
     fecha = _parse_natural_date("recuerdame llamar al banco hoy a las 5")
 
-    assert fecha.date() == datetime.date.today()
+    assert fecha.date() == datetime.date(2026, 3, 10)
     assert fecha.hour == 17, "las 5 de la tarde"
+
+
+def test_una_hora_de_hoy_que_ya_paso_se_va_a_manana(reloj):
+    """La otra mitad de la regla, la que hacia fallar al test anterior media jornada.
+
+    "hoy a las 5" dicho a las seis de la tarde es un recordatorio para las 5 de MANANA: un
+    aviso en el pasado no le sirve a nadie. Estaba sin fijar por test justamente porque el
+    reloj real no dejaba probar las dos mitades en la misma corrida."""
+    reloj(datetime.datetime(2026, 3, 10, 18, 0))
+
+    fecha = _parse_natural_date("recuerdame llamar al banco hoy a las 5")
+
+    assert fecha.date() == datetime.date(2026, 3, 11)
+    assert fecha.hour == 17, "las 5 de la tarde, pero de manana"
 
 
 def test_manana_a_las_9_es_manana_y_no_hoy():
@@ -306,3 +349,17 @@ def test_manana_a_las_9_es_manana_y_no_hoy():
 
     assert fecha.date() == datetime.date.today() + datetime.timedelta(days=1)
     assert fecha.hour == 9
+
+
+def test_hoy_no_se_sale_de_hoy_ni_a_las_once_de_la_noche():
+    """A las 23:04, "hoy" devolvía mañana a las 00:04: `ahora + 1 hora` cruzaba medianoche."""
+    from tasks.task_manager import _hoy_sin_hora
+
+    noche = datetime.datetime(2026, 9, 10, 23, 4, 39)
+    assert _hoy_sin_hora(noche).date() == noche.date()
+
+    manana_temprano = datetime.datetime(2026, 9, 10, 7, 0)
+    assert _hoy_sin_hora(manana_temprano).hour == 9        # la hora por defecto
+
+    media_tarde = datetime.datetime(2026, 9, 10, 15, 0)
+    assert _hoy_sin_hora(media_tarde) == datetime.datetime(2026, 9, 10, 16, 0)

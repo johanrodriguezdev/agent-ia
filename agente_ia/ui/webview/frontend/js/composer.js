@@ -115,6 +115,10 @@ export function setWakeState(state) {
     INACTIVE: "Modo manos libres: inactivo",
     LISTENING_WAKE: "Modo manos libres: escuchando wake word",
     AWAKE: "Modo manos libres: despierto",
+    // REQ-028: perdió el micrófono y está reintentando solo. No puede caer en el
+    // `|| labels.INACTIVE` de abajo: el botón diría "inactivo" mientras el manos libres
+    // sigue vivo, que es justo el aviso silencioso que este REQ vino a arreglar.
+    RECONNECTING: "Modo manos libres: reconectando el micrófono",
   };
   const label = labels[state] || labels.INACTIVE;
   btn.title = label;

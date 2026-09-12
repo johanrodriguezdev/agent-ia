@@ -33,6 +33,25 @@ function edgeAt(x, y) {
   return null;
 }
 
+const ETIQUETAS_AUTONOMIA = {
+  proyectos: "AUTONOMÍA: PROYECTOS",
+  total: "AUTONOMÍA: TOTAL",
+};
+
+export function setAutonomyIndicator(estado) {
+  const insignia = document.getElementById("autonomy-badge");
+  if (!insignia) return;
+  const etiqueta = ETIQUETAS_AUTONOMIA[estado && estado.nivel];
+  insignia.hidden = !etiqueta;
+  insignia.textContent = etiqueta || "";
+  insignia.dataset.nivel = (estado && estado.nivel) || "normal";
+  // El `title` dice desde cuándo: con un modo que no expira solo, "encendido desde el
+  // martes" es el dato que hace que alguien se acuerde de apagarlo.
+  insignia.title = etiqueta
+    ? `Modo autonomía encendido desde ${estado.desde || "hace un rato"}`
+    : "";
+}
+
 export function setMaximizedState(maximized) {
   document.documentElement.dataset.maximized = maximized ? "true" : "false";
 }

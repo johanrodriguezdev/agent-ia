@@ -167,6 +167,30 @@ def set_weather_city(city: str) -> None:
     save_config(config)
 
 
+#: Región por defecto. El proyecto nació para Colombia, y eso decide cosas concretas: que
+#: "870.000" sea ochocientos setenta mil y no 870 con decimales, que la coma sea el decimal,
+#: y que un CSV se separe con punto y coma para que Excel en español lo abra bien.
+#:
+#: Está acá, y no fijo en el código, porque Johan lo pidió pensando en otro país mañana: un
+#: usuario en Estados Unidos escribe "870,000" y "12.5", y lo que para uno es de miles para
+#: el otro es decimal. Es el primer ajuste regional; el multiidioma completo —respuestas,
+#: interfaz, voz— es un análisis aparte.
+REGION_POR_DEFECTO = "es-CO"
+
+
+def get_region() -> str:
+    """Return la región configurada (`es-CO`, `es-MX`, `en-US`...). Decide las convenciones
+    numéricas al producir documentos."""
+    config = load_config()
+    return str(config.get("region") or REGION_POR_DEFECTO).strip() or REGION_POR_DEFECTO
+
+
+def set_region(region: str) -> None:
+    config = load_config()
+    config["region"] = str(region or "").strip() or REGION_POR_DEFECTO
+    save_config(config)
+
+
 def get_ui_theme() -> str:
     """Return the persisted UI theme name for the desktop panel (REQ-013/CA-02).
 

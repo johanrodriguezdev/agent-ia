@@ -123,6 +123,57 @@ CHANNEL_ACTION_EXCEPTIONS: set[tuple[ChannelType, str]] = {
     (ChannelType.TELEGRAM, "pc_click"),
 }
 
+# REQ-029/CA-06, CA-07 — acciones que NO EXISTEN fuera del escritorio, ni siquiera siendo
+# verdes. Es la operación INVERSA de `CHANNEL_ACTION_EXCEPTIONS`: aquella suma (habilita
+# una acción amarilla en un canal que no la tendría), esta RESTA y nada más.
+#
+# Hacía falta porque hasta REQ-029 el nivel de riesgo era la única palanca por canal, y
+# no alcanza para las herramientas de archivos. `file_read` es verde con razón —leer
+# dentro de una carpeta que el humano ya autorizó no merece una confirmación por archivo—,
+# pero verde en este sistema no significa solo "sin preguntar": significa además
+# "alcanzable desde Telegram, Discord, voz y API". Un `file_read` verde sin esta tabla
+# deja que un mensaje de Telegram —o una inyección en una página leída durante una
+# investigación— se lleve cualquier archivo de las carpetas habilitadas. Leer un archivo
+# es mandarlo al proveedor del modelo, así que el canal importa tanto como el nivel.
+#
+# La invariante que la mantiene segura está en `is_action_allowed()`: esta tabla SOLO
+# puede devolver False. Nunca habilita nada que `CHANNEL_ALLOWED_LEVELS` negara.
+DESKTOP_ONLY_ACTIONS: set[str] = {
+    "file_list",
+    "file_read",
+    "file_search",
+    "file_write",
+    "file_edit",
+    "git_status",
+    "git_diff",
+    "git_log",
+    # REQ-030 — habilitar o quitar una carpeta de trabajo es, literalmente, decidir hasta
+    # dónde llegan las 8 de arriba. Tiene que pedirse delante del computador, nunca por un
+    # mensaje remoto.
+    "workspace_add_folder",
+    "workspace_remove_folder",
+    # REQ-032 — ejecutar un comando en la carpeta del proyecto y mirar su estructura.
+    # Ejecutar desde un canal remoto es exactamente lo que el modelo de canales existe para
+    # impedir, y el arbol es una lectura del disco: los dos, solo delante del computador.
+    "project_run",
+    "project_tree",
+    # REQ-034 — el indice de codigo: leer un repositorio entero y buscar dentro. Es una
+    # lectura masiva del disco, asi que vive donde viven las otras: solo escritorio.
+    "code_index",
+    "code_search",
+    # REQ-035 — borrar y mover archivos del proyecto.
+    "file_delete",
+    "file_move",
+    # REQ-036 — procesos en segundo plano: levantar un servidor, mirarlo y bajarlo.
+    "project_start",
+    "project_output",
+    "project_stop",
+    # REQ-040 — mirar cómo está hecha una plantilla es leer un archivo del usuario (sus
+    # encabezados, sus primeros párrafos). Verde con razón, y por lo mismo que `file_read`:
+    # solo delante del computador.
+    "document_inspect",
+}
+
 _CHANNEL_STR_MAP: Dict[str, ChannelType] = {
     "desktop": ChannelType.DESKTOP,
     "telegram": ChannelType.TELEGRAM,
@@ -152,6 +203,18 @@ _DETAILS_ALLOWED_KEYS = (
     # autorizando a ciegas. Va también al log de auditoría, que es donde después se
     # reconstruye qué se ejecutó en la máquina.
     "command",
+    # REQ-029/CA-08 — dónde se va a escribir. `path` ya estaba; `ruta` se agrega para que
+    # una herramienta futura con el parámetro en español no pierda el detalle en silencio.
+    # Autorizar un `file_write` sin ver la ruta sería autorizar a ciegas, exactamente el
+    # mismo motivo por el que `command` está en esta lista.
+    "ruta",
+    # REQ-038 — sobre qué se va a pulsar dentro de una página, y qué se va a escribir ahí.
+    # Un "sí" a «hacer clic en la página» sin ver que el objetivo es «Eliminar cuenta» no
+    # es una autorización, y el texto tecleado puede terminar en un campo público.
+    "objetivo", "texto",
+    # REQ-040 — qué archivo se va a crear, sobre qué plantilla y dónde. Autorizar "crear un
+    # documento" sin ver que se llama «renuncia.docx» y va al Escritorio sería a ciegas.
+    "nombre", "plantilla", "carpeta",
 )
 
 # Un `task`/`raw_text` puede traer código largo: se trunca para que el prompt siga siendo
@@ -388,6 +451,17 @@ class SecurityManager:
         level = self.classify_action(action_name)
         if level is None:
             return False
+        # REQ-029/CA-06, CA-07 — se evalúa PRIMERO, antes que la excepción quirúrgica de
+        # REQ-018 y antes que `CHANNEL_ALLOWED_LEVELS`, y su único resultado posible es
+        # `False`: no puede habilitar nada, solo quitar. Ese orden es lo que impide que
+        # una entrada en `CHANNEL_ACTION_EXCEPTIONS` reabra por Telegram una herramienta
+        # de archivos, y que la propia tabla se use algún día para sumar permisos.
+        #
+        # La comparación es contra `ChannelType.DESKTOP` exacto, no contra "todo lo que se
+        # parezca al escritorio": un canal sin resolver, desconocido o `None` cae del lado
+        # restrictivo, que es el mismo criterio fail-closed de `resolve_channel()`.
+        if action_name in DESKTOP_ONLY_ACTIONS and channel is not ChannelType.DESKTOP:
+            return False
         # REQ-018/CA-02 — excepción quirúrgica evaluada antes que la política general de canal.
         if (channel, action_name) in CHANNEL_ACTION_EXCEPTIONS:
             return True
@@ -412,6 +486,14 @@ class SecurityManager:
 
         if level is None:
             return f"«{action_name}» no está clasificada, y lo que no está clasificado no se ejecuta."
+        # REQ-029/CA-06 — antes que cualquier explicación por nivel: si la acción es de
+        # escritorio y el canal no lo es, ese ES el motivo, y decir "ese canal solo lee y
+        # resume" (la explicación de EMAIL) sería contar otra cosa.
+        if action_name in DESKTOP_ONLY_ACTIONS and channel is not ChannelType.DESKTOP:
+            return (
+                f"«{action_name}» solo funciona delante del computador: las herramientas "
+                f"de archivos y de git no están disponibles desde {canal}."
+            )
         if level == RiskLevel.RED:
             return f"«{action_name}» es una acción de riesgo alto y no se ejecuta desde {canal}."
         if level == RiskLevel.YELLOW:
@@ -484,6 +566,20 @@ class SecurityManager:
                 logger.warning(f"Acción '{action_name}' no permitida en canal {channel.value}")
                 self._log_audit(action_name, channel, "bloqueada_canal", user_id, details)
                 return False
+            # REQ-033 — el modo autonomía aprueba las acciones de trabajo sin preguntar.
+            # Va DESPUÉS del chequeo de canal a propósito: la autonomía NO le da permisos a
+            # un canal que no los tenía; solo se saltea la pregunta donde la acción ya estaba
+            # permitida. Un mensaje de Telegram no hereda nada de esto.
+            from core import autonomy
+
+            if autonomy.aprueba_sin_preguntar(action_name, channel):
+                self._log_audit(action_name, channel, "aprobada_por_autonomia", user_id, details)
+                logger.warning(
+                    f"Acción amarilla '{action_name}' aprobada SIN preguntar por el modo "
+                    f"autonomía ('{autonomy.modo_actual()}') en {channel.value}. {details}"
+                )
+                return True
+
             # En español llano, no con el nombre interno de la función. Pedirle permiso a
             # alguien en un idioma que no habla no es pedirle permiso: o dice que sí a
             # ciegas, o dice que no por las dudas. El DETALLE concreto sigue yendo —es lo
@@ -512,6 +608,20 @@ class SecurityManager:
         if level == RiskLevel.RED:
             self._log_audit(action_name, channel, "intento_rojo", user_id, details)
             logger.warning(f"Intento de acción roja '{action_name}' desde {channel.value}")
+            # REQ-033 — el nivel total del modo autonomía autoriza SOLO `modify_source_code`,
+            # solo en el escritorio. El PIN maestro ya se pidió al encender el modo: pedirlo
+            # otra vez a las 3 de la mañana es pedírselo a nadie. Los otros nueve rojos de
+            # REQ-005 no pasan por acá ni con la autonomía encendida.
+            from core import autonomy
+
+            if autonomy.aprueba_rojo(action_name, channel):
+                self._log_audit(action_name, channel, "autorizada_rojo_autonomia", user_id, details)
+                logger.critical(
+                    f"Acción ROJA '{action_name}' autorizada por el modo autonomía TOTAL "
+                    f"en {channel.value}. {details}"
+                )
+                return True
+
             if channel == ChannelType.DESKTOP and self.has_pin():
                 from core.acciones_legibles import pregunta as _pregunta_roja
 
@@ -569,6 +679,27 @@ def _register_default_actions():
     # detiene: sin confirmación humana no hay shell. Cada línea que después entre a la
     # sesión queda auditada aparte, vía `log_action("terminal_command", ...)`.
     sm.register_action("terminal_open", RiskLevel.YELLOW)
+    # REQ-029 — herramientas de repositorio, confinadas a las carpetas que el humano
+    # habilita en `code_workspaces.json` (`core/workspace_config.py`). Se registran ACÁ
+    # además de en `agents/tool_registry.py`, y a propósito: si un día alguien registrara
+    # una de ellas con un nivel distinto, el desacuerdo entre los dos lugares queda fijado
+    # por test (`tests/test_workspace_tools_seguridad.py`) en vez de pasar inadvertido.
+    #
+    # Leer y consultar es verde: el permiso ya se dio al habilitar la carpeta, y pedir
+    # confirmación por archivo en un repo de mil archivos no es una decisión, es un
+    # obstáculo (mismo criterio que la terminal embebida, `security-levels.md`). Escribir
+    # y editar es amarillo: es irreversible y se confirma con la ruta a la vista (CA-08).
+    #
+    # Que sean verdes NO las hace alcanzables desde Telegram, Discord, voz o API: las 8
+    # están en `DESKTOP_ONLY_ACTIONS`, que se evalúa antes que todo lo demás.
+    sm.register_action("file_list", RiskLevel.GREEN)
+    sm.register_action("file_read", RiskLevel.GREEN)
+    sm.register_action("file_search", RiskLevel.GREEN)
+    sm.register_action("file_write", RiskLevel.YELLOW)
+    sm.register_action("file_edit", RiskLevel.YELLOW)
+    sm.register_action("git_status", RiskLevel.GREEN)
+    sm.register_action("git_diff", RiskLevel.GREEN)
+    sm.register_action("git_log", RiskLevel.GREEN)
     sm.register_action("create_skill", RiskLevel.YELLOW)
     sm.register_action("modify_skill", RiskLevel.YELLOW)
     sm.register_action("delete_skill", RiskLevel.YELLOW)

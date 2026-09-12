@@ -1,17 +1,35 @@
 """
 core/reasoning_loop.py
-Bucle de razonamiento real con LLM (REQ-007, CA-01 a CA-13).
+Bucle de razonamiento real con LLM (REQ-007, CA-01 a CA-13; REQ-027, CA-01 a CA-45).
 
 Reemplaza el for-loop de `_DynamicAgentInstance.execute()` (que probaba tools en orden fijo
-sin ningún criterio) por un ciclo decide->ejecuta->evalúa dirigido por el LLM, con un
-presupuesto duro de 5 llamadas totales (CONFIRMADO 2) y ejecución de tools EXCLUSIVAMENTE vía
-`agents/tool_registry.py::execute_tool()` (CA-06) — nunca `ToolSpec.invoke` directo.
+sin ningún criterio) por un ciclo decide->ejecuta->evalúa dirigido por el LLM, con ejecución
+de tools EXCLUSIVAMENTE vía `agents/tool_registry.py::execute_tool()` (CA-06) — nunca
+`ToolSpec.invoke` directo.
+
+REQ-027 cambió tres cosas que hasta entonces limitaban el bucle a encadenar cuatro
+herramientas por turno:
+
+1. **El historial viaja nativo.** Antes, cada llamada al modelo era un mensaje único y
+   autocontenido con las herramientas ya ejecutadas reescritas como texto. Ahora el turno
+   es una conversación de verdad: el modelo ve sus propias llamadas y los resultados como
+   lo que son. El formato dentro del bucle es NEUTRAL (`core/tool_history.py`) y cada
+   adaptador de `ai/llm_provider.py` lo traduce, porque `generate_response()` puede cambiar
+   de proveedor a mitad de turno por cooldown o respaldo (REQ-022).
+2. **El presupuesto depende del modo activo** (`_presupuesto_de_llamadas()`), con techo
+   fijo en todo canal que no sea escritorio. Cuenta llamadas al modelo, no herramientas.
+3. **Se ejecutan TODAS las tool calls de una vuelta**, en secuencia y cada una por su
+   propio gate (`_ejecutar_vuelta()`). Antes se ejecutaba la primera y el resto se
+   descartaba, así que el modelo tenía que volver a pedirlas gastando otra vuelta.
+
+Más una llamada de cierre sin herramientas (`_llamada_de_cierre()`) que redacta la
+respuesta con lo reunido cuando el presupuesto se agota o una acción se deniega.
 """
 import logging
 from typing import Optional
 
 from agents.tool_registry import execute_tool
-from core import streaming
+from core import streaming, tool_history
 from core.cancelacion import abortar_si_cancelado
 from ai.llm_provider import (
     LLMToolResponse, con_aviso_de_cambio, es_respuesta_de_fallo, generate_response,
@@ -26,11 +44,53 @@ from core.identity import build_identity_block
 
 logger = logging.getLogger(__name__)
 
-MAX_LLM_CALLS = 5
+#: REQ-027/CA-11 — presupuesto por defecto (escritorio, sin modo estratégico activo).
+#: Cuenta LLAMADAS AL MODELO, no herramientas: una vuelta que ejecuta cuatro herramientas
+#: gasta una sola unidad. Era 5, y con 5 una cadena normal ("buscá → leé → resumí →
+#: respondé") ya gastaba las 4 herramientas disponibles: cualquier callejón sin salida
+#: reventaba el techo antes de terminar.
+MAX_LLM_CALLS = 8
 
-#: REQ-021/CA-22 — turnos previos de `agent_context` que ve el LLM. Alineado con el corte
-#: que ya usa `core/orchestrator.py` (`conversation[-5:]`).
-CONTEXT_TURNS = 5
+#: REQ-027/CA-15 — techo de todo canal que no sea escritorio: el valor de antes de
+#: REQ-027, o sea cero regresión. Escrito como "todo lo que no sea DESKTOP tiene techo" y
+#: no como una lista de canales remotos: así un canal en el que nadie pensó (`API`,
+#: `EMAIL`, `UNKNOWN`) hereda el comportamiento de hoy y nunca el 40. En voz, además, un
+#: turno largo es silencio que nadie puede cortar — el botón de detener es de escritorio.
+TECHO_CANAL_NO_ESCRITORIO = 5
+
+#: Turnos previos que ve el modelo. Eran 5 registros —dos o tres intercambios— y la
+#: respuesta del asistente se guardaba cortada a 200 caracteres: Johan le pidió "mejorá
+#: ese mensaje" y el agente no podía, porque solo veía las dos primeras líneas de lo que
+#: él mismo acababa de escribir. Ahora manda el TAMAÑO y no la cantidad: se incluyen los
+#: turnos más recientes hasta llenar `CONTEXT_CARACTERES`, y ninguno va cortado a menos
+#: que él solo supere `CONTEXT_CARACTERES_POR_TURNO`.
+CONTEXT_TURNS = 24
+CONTEXT_CARACTERES = 16_000
+CONTEXT_CARACTERES_POR_TURNO = 6_000
+
+#: Cuánto de la respuesta del asistente se guarda en `agent_context`. Era 200. Con eso,
+#: cualquier "resumime lo que dijiste" o "corregí el segundo punto" trabajaba sobre un
+#: recorte, y el agente contestaba como si no hubiera dicho nada.
+MAX_RESPUESTA_GUARDADA = 6_000
+
+#: REQ-027/CA-28/CA-29 — lo que se le pide al modelo en la llamada de cierre, que va
+#: SIEMPRE sin herramientas. Sin herramientas, "no reintentes" es una garantía estructural
+#: y no una frase que el modelo pueda desobedecer.
+_INSTRUCCION_CIERRE_PRESUPUESTO = (
+    "Se agotaron los intentos disponibles. Responde ahora al usuario con la mejor "
+    "respuesta posible a partir de lo que ya averiguaste, sin usar más herramientas. "
+    "Si quedó algo sin resolver, dilo con claridad."
+)
+_INSTRUCCION_CIERRE_DENEGACION = (
+    "La acción fue denegada y la secuencia se detuvo. Informa al usuario de que no "
+    "puedes ejecutarla y por qué, con lo que ya averiguaste. No la reintentes ni "
+    "propongas un rodeo para conseguir lo mismo."
+)
+
+#: REQ-027/D-6 — resultado de una herramienta que la denegación dejó sin ejecutar. No es
+#: cortesía con el modelo: Anthropic y el SDK `openai` rechazan con 400 un turno en el que
+#: un `tool_use` se queda sin su `tool_result`, así que el par tiene que existir igual.
+_NO_EJECUTADA = "No ejecutada: la secuencia se cortó por una acción denegada."
 
 
 def _addressing_clause() -> str:
@@ -172,39 +232,80 @@ def _build_tool_list(channel=None, modo_def: Optional[ModoComposer] = None) -> l
     return catalogo
 
 
+def acotar_turnos(turnos: list[dict], presupuesto: int = CONTEXT_CARACTERES,
+                  por_turno: int = CONTEXT_CARACTERES_POR_TURNO) -> list[dict]:
+    """Return los turnos más recientes que caben en `presupuesto` caracteres, en orden.
+
+    Se recorre de atrás hacia adelante —lo más reciente pesa más— y se corta cuando ya no
+    cabe el siguiente. Un turno más largo que `por_turno` se recorta por el final con una
+    marca, en vez de descartarse: un mensaje largo pegado por el usuario es justamente lo
+    que después va a pedir que se mejore.
+    """
+    elegidos: list[dict] = []
+    usado = 0
+    for turno in reversed(turnos):
+        if not isinstance(turno, dict):
+            continue
+        contenido = str(turno.get("content") or "")
+        if len(contenido) > por_turno:
+            contenido = contenido[:por_turno] + " [...]"
+        if usado + len(contenido) > presupuesto and elegidos:
+            break
+        elegidos.append({**turno, "content": contenido})
+        usado += len(contenido)
+    elegidos.reverse()
+    return elegidos
+
+
 def _load_prior_turns(agent_name: str, user_id: str) -> list[dict]:
-    """Return los últimos `CONTEXT_TURNS` turnos ya cerrados de `agent_context` (CA-22).
+    """Return los últimos turnos ya cerrados de `agent_context` (CA-22), acotados por tamaño.
 
     Se lee UNA sola vez, antes del bucle: las dos escrituras de contexto ocurren al final
     de `run()`, así que lo leído es estrictamente anterior al turno en curso. Un fallo de
     la DB de contexto no puede tumbar el loop — se sigue sin historial.
+
+    Es el respaldo para los canales sin conversación propia (voz, CLI). El escritorio pasa
+    los turnos de la conversación ABIERTA por `prior_turns`, porque este contexto es por
+    usuario y mezclaba lo último de cualquier conversación con la actual.
     """
     try:
         context = agent_context_manager.get_context(agent_name, user_id)
         conversation = getattr(context, "conversation", None)
         if not isinstance(conversation, list):
             return []
-        return [t for t in conversation[-CONTEXT_TURNS:] if isinstance(t, dict)]
+        return acotar_turnos([t for t in conversation[-CONTEXT_TURNS:] if isinstance(t, dict)])
     except Exception as e:
         logger.warning(f"No se pudo leer el contexto previo de {agent_name}/{user_id}: {e}")
         return []
 
 
-def _build_prompt(
-    task: str, history: list[dict], prior_turns: Optional[list[dict]] = None,
-) -> str:
-    """Cada llamada al LLM dentro del loop es un mensaje único y autocontenido (no se
-    mantiene una conversación multi-turno nativa del proveedor) — decisión de
-    arquitectura-007.md, sección 'Riesgos y mitigación', para evitar mantener 3 protocolos
-    de continuación (tool_use/tool_result de Anthropic, role='tool' de OpenAI/DeepSeek) sin
-    cobertura de test previa.
+def _presupuesto_de_llamadas(modo_def: Optional[ModoComposer], canal) -> int:
+    """Return cuántas llamadas al modelo puede gastar este turno (REQ-027/CA-13/14/15).
 
-    REQ-021/CA-22: `prior_turns` son los últimos turnos ya cerrados de `agent_context`
-    (que hasta ahora se escribían y nunca se releían), para que el LLM pueda sostener el
-    hilo. Sin historial de tools y sin turnos previos, el prompt sigue siendo el de antes
-    de REQ-021 byte a byte.
+    `presupuesto = min(techo_del_canal, presupuesto_del_modo_o_default)`. El `min()` no
+    recorta nada en la práctica —un `modo` solo llega desde el composer de escritorio—,
+    pero está para que sea estructuralmente imposible que un canal remoto termine con 40
+    llamadas si mañana alguien propaga un modo desde otro lado.
+
+    La llamada de cierre NO sale de acá: va aparte, fuera del presupuesto (CA-30).
     """
-    if not history and not prior_turns:
+    del_modo = modo_def.presupuesto if modo_def is not None else MAX_LLM_CALLS
+    if canal == ChannelType.DESKTOP:
+        return del_modo
+    return min(TECHO_CANAL_NO_ESCRITORIO, del_modo)
+
+
+def _encabezado_de_tarea(
+    task: str, prior_turns: Optional[list[dict]], con_historial: bool,
+) -> str:
+    """La parte del prompt anterior al historial de herramientas (REQ-021/CA-22).
+
+    `con_historial` decide entre "Mensaje actual del usuario:" y "Tarea original del
+    usuario:". Es la misma distinción que hacía `_build_prompt()` antes de REQ-027, y es lo
+    que permite que el aplanado de CA-07 salga byte a byte igual que antes sin retocar ni
+    un string.
+    """
+    if not con_historial and not prior_turns:
         return task
 
     if prior_turns:
@@ -213,33 +314,186 @@ def _build_prompt(
             role = "Usuario" if turn.get("role") == "user" else "Asistente"
             lines.append(f"- {role}: {turn.get('content', '')}")
         lines.append("")
-        if not history:
+        if not con_historial:
             lines.append(f"Mensaje actual del usuario: {task}")
             return "\n".join(lines)
         lines.append(f"Tarea original del usuario: {task}")
         lines.append("")
         lines.append("Acciones ya ejecutadas en este intento:")
-        _append_history_lines(lines, history)
         return "\n".join(lines)
 
-    lines = [f"Tarea original del usuario: {task}", "", "Acciones ya ejecutadas en este intento:"]
-    _append_history_lines(lines, history)
+    return "\n".join(
+        [f"Tarea original del usuario: {task}", "", "Acciones ya ejecutadas en este intento:"]
+    )
+
+
+def _build_prompt(
+    task: str, history: list[dict], prior_turns: Optional[list[dict]] = None,
+) -> str:
+    """Envoltorio de compatibilidad: firma y salida idénticas a las de antes de REQ-027.
+
+    Ya no lo usa `run()` —desde REQ-027 el historial viaja nativo dentro de `messages`—,
+    pero sigue siendo la definición de "cómo se ve un turno aplanado", y los tests que
+    fijan ese texto (`test_ca22_*`) lo siguen ejerciendo tal cual (CA-10).
+    """
+    encabezado = _encabezado_de_tarea(task, prior_turns, bool(history))
+    if not history:
+        return encabezado
+    lines = [encabezado]
+    tool_history.lineas_de_historial(lines, history)
     return "\n".join(lines)
 
 
 def _append_history_lines(lines: list[str], history: list[dict]) -> None:
-    """Añade a `lines` el detalle de las tools ya ejecutadas y la instrucción de cierre."""
-    for i, h in enumerate(history, 1):
-        lines.append(f"{i}. {h['tool']}({h['params']}) -> {h['result']}")
-    lines.append("")
-    lines.append(
-        "Continúa resolviendo la tarea con esta información. Si ya puedes responder, "
-        "hazlo directamente sin usar más herramientas."
-    )
+    """Añade a `lines` el detalle de las tools ya ejecutadas y la instrucción de cierre.
+
+    El cuerpo se mudó a `core/tool_history.py` para que exista UNA sola copia del texto:
+    si derivara entre el camino nativo y el aplanado, dos proveedores verían historiales
+    distintos del mismo turno. Se conserva el nombre porque hay tests que lo llaman.
+    """
+    tool_history.lineas_de_historial(lines, history)
+
+
+def _mensajes_del_turno(
+    task: str, prior_turns: list[dict], historial: list[dict],
+) -> list[dict]:
+    """Return lo que se le manda a `generate_response()` en esta vuelta (REQ-027/CA-01).
+
+    El encabezado como único mensaje plano, seguido del historial neutral de herramientas.
+    Los adaptadores de `ai/llm_provider.py` lo traducen al protocolo de cada proveedor —o
+    lo aplanan a texto si la llamada no lleva herramientas.
+    """
+    encabezado = _encabezado_de_tarea(task, prior_turns, bool(historial))
+    return [{"role": "user", "content": encabezado}] + historial
+
+
+def _ejecutar_vuelta(
+    tool_calls: list, numero_de_vuelta: int, canal, user_id: str, task: str,
+) -> tuple[list[dict], list[dict], Optional[str]]:
+    """Ejecuta EN SECUENCIA todas las tool calls de una vuelta (REQ-027/CA-20 a CA-27).
+
+    Return `(llamadas, resultados, motivo_de_denegacion)`.
+
+    `llamadas` y `resultados` tienen SIEMPRE la misma longitud y los mismos ids, incluso
+    cuando la secuencia se cortó: a las que no llegaron a ejecutarse se les registra un
+    resultado sintético. No es cortesía con el modelo — Anthropic y el SDK `openai`
+    rechazan con 400 un turno donde un `tool_use` se queda sin su `tool_result` (D-6 de
+    arquitectura-027.md). Sin esto, la llamada de cierre pasaría los tests con mocks y
+    fallaría siempre contra un proveedor real.
+
+    Nunca ejecuta en paralelo: una confirmación humana concurrente con otra ejecución es
+    exactamente lo que el gate de REQ-005 no debe permitir.
+
+    INVARIANTE DE SEGURIDAD: `canal` y `user_id` son los del caller confiable y se
+    inyectan en CADA una de las N llamadas, nunca solo en la primera — el modelo no
+    negocia sobre qué canal ni como qué usuario se ejecuta nada.
+    """
+    llamadas: list[dict] = []
+    resultados: list[dict] = []
+    denegacion: Optional[str] = None
+
+    for i, call in enumerate(tool_calls):
+        # El id lo normaliza el bucle y no el adaptador (D-5): si viniera vacío del modelo
+        # —pasa con modelos gratuitos de OpenRouter— y cada adaptador se inventara el suyo,
+        # no habría con qué emparejar la llamada con su resultado. Además, así el mismo id
+        # sobrevive a un cambio de proveedor a mitad de turno (REQ-022).
+        id_llamada = call.id or f"tc_{numero_de_vuelta}_{i}"
+        params = dict(call.arguments or {})
+        params["channel"] = canal.value
+        params["user_id"] = user_id
+        # Lo que dijo el humano, TAL CUAL. Igual que `channel` y `user_id`, lo pone el
+        # caller y no el modelo: es un dato de la invocación, no un argumento negociable.
+        # `dispatcher` lo usa como segundo intento cuando el modelo reformula la orden y la
+        # reformulación no la reconoce el clasificador — ver `router/dispatcher.py`.
+        params["texto_original"] = task
+        llamadas.append(tool_history.bloque_llamada(id_llamada, call.name, params))
+
+        if denegacion is not None:
+            # CA-25: la denegación corta la secuencia. La herramienta no se ejecuta, pero
+            # su resultado existe igual (D-6).
+            resultados.append(
+                tool_history.bloque_resultado(id_llamada, call.name, _NO_EJECUTADA)
+            )
+            continue
+
+        # CA-27: el botón de detener se evalúa ENTRE herramientas, no solo entre vueltas.
+        # Con varias herramientas por vuelta, esperar a la vuelta siguiente sería esperar a
+        # que terminen todas.
+        abortar_si_cancelado(
+            f"reasoning_loop, vuelta {numero_de_vuelta}, antes de '{call.name}'"
+        )
+
+        try:
+            resultado = execute_tool(call.name, params, canal, user_id)
+        except ActionDenied as e:
+            denegacion = e.reason or "denegada"
+            resultados.append(
+                tool_history.bloque_resultado(
+                    id_llamada, call.name, f"Denegada: {denegacion}"
+                )
+            )
+            continue
+        except Exception as e:
+            # CA-26: una tool que falla no corta la secuencia — se informa como resultado
+            # fallido y las demás siguen. Solo la denegación corta.
+            logger.warning(f"Tool '{call.name}' falló en la vuelta {numero_de_vuelta}: {e}")
+            resultado = f"Error ejecutando '{call.name}': {e}"
+
+        resultados.append(tool_history.bloque_resultado(id_llamada, call.name, resultado))
+
+    return llamadas, resultados, denegacion
+
+
+def _llamada_de_cierre(
+    task: str, prior_turns: list[dict], historial: list[dict], instruccion: str,
+    system_prompt: str, tarea: str, aviso: dict,
+) -> Optional[str]:
+    """Una última llamada al modelo SIN herramientas para que redacte con lo que reunió.
+
+    Return el texto, o `None` si no sirve —proveedor caído, texto vacío, o una respuesta
+    que igual trajo tool calls—, en cuyo caso el caller usa el mensaje enlatado de siempre
+    (CA-31).
+
+    Va con `tools=None` a propósito y no por ahorro: sin herramientas, la garantía de "no
+    reintenta la acción denegada" es estructural y no depende de que el modelo obedezca una
+    frase del prompt (CA-29). Está FUERA del presupuesto y es como máximo una por turno
+    (CA-30), así que no puede encadenar.
+
+    La instrucción se cuelga del último mensaje en vez de ir como un `user` aparte: con
+    historial, el último mensaje es el de resultados —también de rol `user`— y Anthropic
+    exige alternancia estricta de roles.
+    """
+    mensajes = _mensajes_del_turno(task, prior_turns, historial)
+    ultimo = mensajes[-1]
+    if tool_history.es_estructurado(ultimo):
+        mensajes = mensajes[:-1] + [tool_history.con_texto_agregado(ultimo, instruccion)]
+    else:
+        mensajes = mensajes[:-1] + [
+            {**ultimo, "content": f"{ultimo.get('content', '')}\n\n{instruccion}"}
+        ]
+
+    # `permitido()`: esto ES la respuesta al usuario, así que se muestra mientras se
+    # escribe, igual que la de una vuelta normal.
+    with streaming.permitido():
+        respuesta = generate_response(
+            mensajes, system_prompt, tools=None, tarea=tarea, aviso=aviso,
+        )
+
+    if isinstance(respuesta, LLMToolResponse):
+        # Sin `tools` no debería pedir herramientas; si igual lo hace, no hay respuesta que
+        # mostrar y se cae al enlatado en vez de inventar una.
+        texto = respuesta.text if not respuesta.tool_calls else None
+    else:
+        texto = respuesta
+
+    if not texto or es_respuesta_de_fallo(texto):
+        return None
+    return texto
 
 
 def run(task: str, channel, user_id: str = "default", agent_name: str = "reasoning_loop",
-        estado: Optional[dict] = None, modo: Optional[str] = None) -> str:
+        estado: Optional[dict] = None, modo: Optional[str] = None,
+        prior_turns: Optional[list[dict]] = None) -> str:
     """Punto de entrada del bucle de razonamiento.
 
     `estado`, si se pasa, es un dict que el bucle RELLENA: `{"denied": True}` cuando corto
@@ -264,13 +518,35 @@ def run(task: str, channel, user_id: str = "default", agent_name: str = "reasoni
     modo_def = get_mode(modo)
     resolved_channel = security_manager.resolve_channel(channel)
     tools = _build_tool_list(resolved_channel, modo_def)
+    presupuesto = _presupuesto_de_llamadas(modo_def, resolved_channel)
 
-    history: list[dict] = []
+    # D-10: UNA vez por turno, no una por vuelta. Con presupuesto 40 eran 40 lecturas de
+    # disco y 40 prefijos distintos —la fecha y la hora cambian al minuto—, o sea que se
+    # anulaba el cacheo de prefijo justo en el turno mas caro.
+    system_prompt = _build_system_prompt(modo_def)
+    # `tarea`: por defecto "razonamiento" —es LA respuesta al usuario, con herramientas y
+    # varias vueltas—, salvo que el modo activo fije la suya (REQ-026, solo Codigo e
+    # Investigacion lo hacen; Flujos y Tareas necesitan el modelo general de varias
+    # vueltas). Quien quiera mandarla a un modelo distinto del general —uno gratuito con
+    # tool-calling, por ejemplo— lo configura en `task_providers` sin tocar el resto.
+    tarea = modo_def.tarea if modo_def and modo_def.tarea else "razonamiento"
+
+    #: REQ-027/CA-01 — el historial de herramientas del turno, en formato NEUTRAL
+    #: (`core/tool_history.py`). Va dentro de `messages` y cada adaptador lo traduce al
+    #: protocolo de su proveedor, o lo aplana a texto si la llamada no lleva herramientas.
+    #: Neutral y no ya traducido porque `generate_response()` puede cambiar de proveedor a
+    #: mitad de turno por cooldown o respaldo (REQ-022).
+    historial: list[dict] = []
     final_text: Optional[str] = None
     aviso_final: dict = {}   # REQ-022/CA-12 — se "fija" solo en la vuelta que gana
-    prior_turns = _load_prior_turns(agent_name, user_id)   # REQ-021/CA-22
+    ultimo_aviso: dict = {}  # REQ-027/CA-42 — el ultimo cambio visto, por si gana el cierre
+    denegacion: Optional[str] = None
+    # Los turnos de la conversación abierta, si el caller los trae (escritorio); si no, el
+    # contexto por usuario de siempre. Lo que llega de fuera también se acota por tamaño.
+    prior_turns = acotar_turnos(prior_turns) if prior_turns is not None \
+        else _load_prior_turns(agent_name, user_id)
 
-    for call_number in range(1, MAX_LLM_CALLS + 1):
+    for call_number in range(1, presupuesto + 1):
         # Punto de corte del boton de detener: antes de gastar otra llamada al modelo o
         # ejecutar otra herramienta. Es donde parar es seguro — no deja nada a medias.
         abortar_si_cancelado(f"reasoning_loop, vuelta {call_number}")
@@ -280,78 +556,74 @@ def run(task: str, channel, user_id: str = "default", agent_name: str = "reasoni
         # herramientas, se ve que avanza en vez de parecer que se repite.
         progress_report("Pensando" if call_number == 1 else f"Pensando ({call_number})")
 
-        prompt = _build_prompt(task, history, prior_turns)
-        aviso_cambio: dict = {}   # REQ-022/CA-12 — vacío otra vez en cada vuelta
+        aviso_cambio: dict = {}   # REQ-022/CA-12 — vacio otra vez en cada vuelta
         # `permitido()`: lo que salga de ESTA llamada es la respuesta al usuario y se
         # muestra mientras se escribe. Las herramientas que se ejecuten despues pueden
         # consultar al modelo por su cuenta (resumir un correo, leer una captura) y eso NO
         # tiene que aparecer en la burbuja del chat: quedan fuera del bloque.
-        # `tarea`: por defecto "razonamiento" —es LA respuesta al usuario, con herramientas
-        # y varias vueltas—, salvo que el modo activo fije la suya (REQ-026, solo Código e
-        # Investigación lo hacen; Flujos y Tareas necesitan el modelo general de varias
-        # vueltas). Quien quiera mandarla a un modelo distinto del general —uno gratuito
-        # con tool-calling, por ejemplo— lo configura en `task_providers` sin tocar el
-        # resto del sistema.
-        tarea = modo_def.tarea if modo_def and modo_def.tarea else "razonamiento"
         with streaming.permitido():
             response = generate_response(
-                [{"role": "user", "content": prompt}], _build_system_prompt(modo_def),
+                _mensajes_del_turno(task, prior_turns, historial), system_prompt,
                 tools=tools,
                 tarea=tarea,
                 aviso=aviso_cambio,   # REQ-022/CA-12
             )
+        if aviso_cambio:
+            ultimo_aviso = aviso_cambio
 
         if not isinstance(response, LLMToolResponse):
-            # CONFIRMADO 1: degradación silenciosa (proveedor sin tool-calling) — texto
-            # plano, se acepta como respuesta final.
+            # CONFIRMADO 1 de REQ-007: degradacion silenciosa (proveedor sin tool-calling)
+            # — texto plano, se acepta como respuesta final.
             final_text = response
             aviso_final = aviso_cambio
             break
 
         if not response.tool_calls:
-            # El LLM respondió sin pedir ninguna tool: se acepta como final (caso borde de
+            # El LLM respondio sin pedir ninguna tool: se acepta como final (caso borde de
             # SPEC — no confundir "no quiso usar herramientas" con "hay que insistir").
             final_text = response.text or f"No obtuve una respuesta útil del modelo{vocative()}."
             aviso_final = aviso_cambio
             break
 
-        # Un tool call por iteración (decide -> ejecuta -> evalúa, CA-07). Si el modelo
-        # pidiera varias en el mismo turno, solo se ejecuta la primera en este ciclo; las
-        # demás quedan implícitas para que el modelo las vuelva a pedir en la siguiente
-        # iteración si aún hacen falta, dentro del límite de 5.
-        call = response.tool_calls[0]
-        params = dict(call.arguments or {})
-        params["channel"] = resolved_channel.value
-        params["user_id"] = user_id
-        # Lo que dijo el humano, TAL CUAL. Igual que `channel` y `user_id`, lo pone el
-        # caller y no el modelo: es un dato de la invocacion, no un argumento negociable.
-        # `dispatcher` lo usa como segundo intento cuando el modelo reformula la orden y la
-        # reformulacion no la reconoce el clasificador — ver `router/dispatcher.py`.
-        params["texto_original"] = task
+        # REQ-027/CA-20: se ejecutan TODAS las que pidio, en orden y en secuencia. Antes
+        # se ejecutaba solo `tool_calls[0]` y el resto se descartaba, asi que el modelo
+        # tenia que volver a pedirlas gastando otra vuelta entera del presupuesto.
+        llamadas, resultados, denegacion = _ejecutar_vuelta(
+            response.tool_calls, call_number, resolved_channel, user_id, task,
+        )
+        historial.append(tool_history.mensaje_de_llamadas(response.text, llamadas))
+        historial.append(tool_history.mensaje_de_resultados(resultados))   # CA-23
 
-        try:
-            result = execute_tool(call.name, params, resolved_channel, user_id)
-        except ActionDenied as e:
-            # CA-08: corta de inmediato. No reintenta, no prueba otra tool, no llama de
-            # nuevo al LLM.
-            final_text = f"⛔ No puedo ejecutar esa acción{vocative()}: {e.reason or 'denegada'}."
+        if denegacion is not None:
+            # CA-32: se marca ANTES del cierre. `core/resolution.py` necesita saber que
+            # hubo denegacion aunque el cierre redacte una respuesta normal.
             if estado is not None:
                 estado["denied"] = True
             break
-        except Exception as e:
-            # CA-13: tool call malformado / invoke interno falla — no crashea, se informa
-            # como resultado fallido de esta iteración y el LLM puede reintentar.
-            logger.warning(f"Tool '{call.name}' falló en iteración {call_number}: {e}")
-            result = f"Error ejecutando '{call.name}': {e}"
-
-        history.append({"tool": call.name, "params": params, "result": result})
 
     if final_text is None:
-        # CA-07: se agotaron las 5 llamadas sin una respuesta final del LLM.
-        final_text = (
-            f"No pude completar la tarea en el número de intentos disponibles{vocative()}. "
-            "¿Quiere que lo intente de otra forma?"
+        # CA-28/CA-29: una ultima llamada SIN herramientas para redactar con lo reunido.
+        # Esta FUERA del presupuesto y es como maximo una por turno (CA-30). Antes, agotar
+        # el presupuesto devolvia el texto enlatado y tiraba a la basura todas las vueltas
+        # de trabajo ya pagadas.
+        aviso_cierre: dict = {}
+        cierre = _llamada_de_cierre(
+            task, prior_turns, historial,
+            _INSTRUCCION_CIERRE_DENEGACION if denegacion is not None
+            else _INSTRUCCION_CIERRE_PRESUPUESTO,
+            system_prompt, tarea, aviso_cierre,
         )
+        if cierre:
+            final_text = cierre
+            aviso_final = aviso_cierre or ultimo_aviso   # CA-42
+        elif denegacion is not None:
+            # CA-31: el cierre no sirvio — el texto literal de siempre.
+            final_text = f"⛔ No puedo ejecutar esa acción{vocative()}: {denegacion}."
+        else:
+            final_text = (
+                f"No pude completar la tarea en el número de intentos disponibles{vocative()}. "
+                "¿Quiere que lo intente de otra forma?"
+            )
 
     # Sin proveedor no hubo razonamiento, hubo un error de red o de configuración. Se
     # avisa para que `core/resolution.py` pueda intentar el camino local: sin conexión,
@@ -371,7 +643,7 @@ def run(task: str, channel, user_id: str = "default", agent_name: str = "reasoni
     # cuántas iteraciones internas hubo.
     agent_context_manager.update_context(agent_name, user_id, {"role": "user", "content": task})
     agent_context_manager.update_context(
-        agent_name, user_id, {"role": "assistant", "content": final_text[:200]}
+        agent_name, user_id, {"role": "assistant", "content": final_text[:MAX_RESPUESTA_GUARDADA]}
     )
 
     return final_text
