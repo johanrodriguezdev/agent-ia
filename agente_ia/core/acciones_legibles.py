@@ -55,6 +55,13 @@ _DESCRIPCIONES: Dict[str, str] = {
     "browser_act": "haga clic o escriba dentro de la página abierta",
     "browser_tab_close": "cierre una pestaña del navegador",
 
+    # ── Documentos (REQ-040) ──
+    "document_create": "cree un documento",
+    "spreadsheet_create": "cree una hoja de cálculo",
+    "presentation_create": "cree una presentación",
+    "file_create": "cree un archivo",
+    "document_to_pdf": "convierta un documento a PDF",
+
     # ── Terminal ──
     "terminal_open": "abra una terminal",
     "terminal_run_command": "ejecute un comando en la terminal",

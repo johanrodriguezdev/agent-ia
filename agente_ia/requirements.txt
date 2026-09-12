@@ -120,3 +120,5 @@ ptyprocess; sys_platform != "win32"
 winsdk; sys_platform == "win32"
 # Dibujar las paginas de un PDF escaneado para pasarlas por el OCR.
 pymupdf
+# Presentaciones de PowerPoint (REQ-040).
+python-pptx

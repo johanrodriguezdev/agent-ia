@@ -168,6 +168,10 @@ DESKTOP_ONLY_ACTIONS: set[str] = {
     "project_start",
     "project_output",
     "project_stop",
+    # REQ-040 — mirar cómo está hecha una plantilla es leer un archivo del usuario (sus
+    # encabezados, sus primeros párrafos). Verde con razón, y por lo mismo que `file_read`:
+    # solo delante del computador.
+    "document_inspect",
 }
 
 _CHANNEL_STR_MAP: Dict[str, ChannelType] = {
@@ -208,6 +212,9 @@ _DETAILS_ALLOWED_KEYS = (
     # Un "sí" a «hacer clic en la página» sin ver que el objetivo es «Eliminar cuenta» no
     # es una autorización, y el texto tecleado puede terminar en un campo público.
     "objetivo", "texto",
+    # REQ-040 — qué archivo se va a crear, sobre qué plantilla y dónde. Autorizar "crear un
+    # documento" sin ver que se llama «renuncia.docx» y va al Escritorio sería a ciegas.
+    "nombre", "plantilla", "carpeta",
 )
 
 # Un `task`/`raw_text` puede traer código largo: se trunca para que el prompt siga siendo
