@@ -61,6 +61,29 @@
   color: var(--text-secondary);
 }
 
+/* -------------------------------------------------------------- estado vacío: composer alto */
+
+/* Sin mensajes (`body.chat-empty`, alternado por `chat.js::syncEmptyState()`), la barra de
+   entrada no queda pegada al borde inferior: el saludo y el composer se agrupan en una sola
+   pieza centrada verticalmente en la columna. En cuanto llega el primer mensaje la clase se
+   va y todo vuelve a fijarse: historial arriba, barra abajo. El reflujo ocurre en el primer
+   render del turno (composer.js/chat.js), no durante la escritura. */
+body.chat-empty #chat-area {
+  flex: 0 0 auto;
+}
+
+body.chat-empty #main-column {
+  justify-content: center;
+  /* El grupo queda un poco por encima del centro exacto: la barra de entrada "sube"
+     respecto al borde inferior sin quedar en el medio justo de la ventana. */
+  padding-bottom: 64px;
+}
+
+body.chat-empty #empty-state {
+  flex: none;
+  padding-bottom: 30px;
+}
+
 /* -------------------------------------------------------------- mensajes (CA-12, CA-14, CA-32) */
 
 #messages {

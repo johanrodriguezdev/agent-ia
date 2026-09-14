@@ -21,7 +21,7 @@ from PyQt6.QtCore import QEvent, Qt, QTimer, QUrl
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QApplication, QMainWindow, QMenu, QSystemTrayIcon
 
-from ui.webview.app_icon import app_icon
+from ui.webview.app_icon import app_icon, bandeja_icon
 from PyQt6.QtWebChannel import QWebChannel
 from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineScript, QWebEngineSettings
 from PyQt6.QtWebEngineWidgets import QWebEngineView
@@ -222,9 +222,10 @@ class MainWindow(QMainWindow):
         """Portado casi textual desde `JarvisMainWindow._setup_tray_icon()` (REQ-008/009,
         eliminado) — independiente del tipo de `centralWidget()` (CA-43)."""
         self.tray_icon = QSystemTrayIcon(self)
-        # Antes era un cuadrado azul liso de 16x16: entre los iconos ocultos de Windows,
-        # indistinguible de cualquier otra cosa. Ver `ui/webview/app_icon.py`.
-        self.tray_icon.setIcon(app_icon())
+        # Variante monocroma simplificada (REQ-041), no el icono de app reescalado: a
+        # 16-24 px el degradado se pierde y el trazo fino se funde en una mancha. Ver
+        # `ui/webview/app_icon.py::bandeja_icon()`.
+        self.tray_icon.setIcon(bandeja_icon())
         self.tray_icon.setToolTip(f"{self._agent_name} — Panel de control")
 
         menu = QMenu()

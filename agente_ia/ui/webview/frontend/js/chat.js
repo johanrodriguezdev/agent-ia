@@ -32,7 +32,11 @@ function isEmpty() {
 }
 
 function syncEmptyState() {
-  $("empty-state").style.display = isEmpty() ? "flex" : "none";
+  const empty = isEmpty();
+  $("empty-state").style.display = empty ? "flex" : "none";
+  // El composer sube a una pieza centrada con el saludo cuando no hay conversación y
+  // vuelve a fijarse abajo en cuanto llegan mensajes (ver chat.css, estado vacío).
+  document.body.classList.toggle("chat-empty", empty);
 }
 
 function isNearBottom() {

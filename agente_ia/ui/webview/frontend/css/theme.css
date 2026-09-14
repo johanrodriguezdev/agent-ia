@@ -86,15 +86,15 @@
   --radius-pill: 999px;
 
   --topbar-h: 44px;
-  --sidebar-w: 252px;
+  --sidebar-w: 280px;
   --sidebar-w-collapsed: 56px;
 
   /* Ancho de la columna de lectura: el chat y el composer comparten el mismo eje, así el
      texto no se estira de borde a borde cuando la ventana está maximizada. */
   --content-max: 760px;
 
-  --icon: 16px;
-  --icon-btn: 30px;
+  --icon: 18px;
+  --icon-btn: 34px;
 }
 
 body {
