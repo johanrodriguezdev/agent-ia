@@ -1360,6 +1360,40 @@ class Bridge(QObject):
         # con python -m ...") no le sirve a quien está delante de la pantalla.
         return f"{clave} autorizado. {resumen_para_humano(aplicar(clave))}"
 
+    @pyqtSlot(str, str, str, str)
+    def add_mcp_server(self, nombre: str, tipo: str, destino: str, variables: str) -> None:
+        """Declara un servidor desde el formulario (REQ-046), con el gate de `mcp_add_server`.
+
+        `variables` son NOMBRES separados por coma; se declaran como referencias
+        `${NOMBRE}` (env para un servidor local, `Authorization` para uno remoto) y el valor
+        se pega después en el bloque «Variables»: por acá no viaja ningún secreto. Va por
+        `run_async()` como todo lo que confirma.
+        """
+        run_async(
+            self._mcp_add_flow, self._on_mcp_done, self._on_mcp_error,
+            str(nombre or ""), str(tipo or ""), str(destino or ""), str(variables or ""),
+        )
+
+    def _mcp_add_flow(self, nombre: str, tipo: str, destino: str, variables: str) -> str:
+        from core.mcp_config import (
+            MCPConfigRechazada, agregar_servidor, aplicar, normalizar_nombre,
+            resumen_para_humano,
+        )
+
+        clave = normalizar_nombre(nombre)          # lanza MCPConfigRechazada → _on_mcp_error
+        nombres = [v for v in re.split(r"[,\s]+", variables) if v]
+        referencias = {v: f"${{{v}}}" for v in nombres}
+        es_http = tipo == "http"
+        detalle = {"name": clave, "url" if es_http else "command": destino}
+        if not self._mcp_confirmar("mcp_add_server", detalle):
+            return ""
+        if es_http:
+            cabeceras = {"Authorization": referencias[nombres[0]]} if nombres else None
+            agregar_servidor(clave, url=destino, headers=cabeceras)
+        else:
+            agregar_servidor(clave, command=destino, env=referencias or None)
+        return resumen_para_humano(aplicar(clave))
+
     @pyqtSlot(str, str)
     def save_mcp_variable(self, variable: str, valor: str) -> None:
         """Guarda el valor de una `${VARIABLE}` que algún servidor referencia.

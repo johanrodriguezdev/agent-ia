@@ -390,3 +390,16 @@
 }
 .mcp-vacio { font-style: italic; }
 .conexion-estado-error { color: var(--danger, #f85149); }
+
+/* REQ-046 — alta de servidor MCP desde la pantalla */
+.mcp-alta {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border, rgba(127, 127, 127, 0.25));
+}
+.mcp-alta-fila { display: flex; gap: 8px; }
+.mcp-alta-fila .settings-input { flex: 1; min-width: 0; }
+.mcp-alta-tipo { flex: 0 0 auto; }

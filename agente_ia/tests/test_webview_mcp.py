@@ -315,3 +315,46 @@ def test_probar_emite_el_resultado_en_la_fila(bridge, qtbot, entorno, monkeypatc
 
     assert blocker.args[0] == "notion"
     assert "FALLÓ" in blocker.args[1]
+
+
+# ── REQ-046: alta desde el formulario ───────────────────────────────
+
+def test_agregar_desde_la_pantalla_pasa_por_el_gate_con_el_comando(bridge, entorno, confirmacion, monkeypatch):
+    monkeypatch.setattr(mcp_manager, "estado", lambda: {})
+
+    bridge.add_mcp_server("Notion", "stdio", "npx -y @notionhq/notion-mcp-server", "NOTION_TOKEN")
+
+    pedido = confirmacion["pedidas"][0]
+    assert pedido["accion"] == "mcp_add_server"
+    assert "command=npx -y @notionhq/notion-mcp-server" in pedido["detalle"]
+    fila = mcp_config.listar_servidores()[0]
+    assert fila["nombre"] == "notion"
+    assert fila["destino"] == "npx -y @notionhq/notion-mcp-server"
+    assert fila["variables"] == [{"nombre": "NOTION_TOKEN", "origen": ""}]
+
+
+def test_agregar_remoto_desde_la_pantalla_usa_la_variable_como_authorization(bridge, entorno, confirmacion, monkeypatch):
+    monkeypatch.setattr(mcp_manager, "estado", lambda: {})
+
+    bridge.add_mcp_server("docs", "http", "https://mcp.ejemplo.com/mcp", "DOCS_TOKEN")
+
+    assert "url=https://mcp.ejemplo.com/mcp" in confirmacion["pedidas"][0]["detalle"]
+    config = json.loads(entorno.read_text(encoding="utf-8"))
+    assert config["mcp_servers"]["docs"]["headers"] == {"Authorization": "${DOCS_TOKEN}"}
+
+
+def test_agregar_denegado_no_escribe_nada(bridge, entorno, confirmacion):
+    confirmacion["respuesta"][0] = False
+
+    bridge.add_mcp_server("notion", "stdio", "npx x", "")
+
+    assert mcp_config.listar_servidores() == []
+
+
+def test_agregar_con_nombre_invalido_avisa_sin_confirmar(bridge, qtbot, entorno, confirmacion):
+    with qtbot.waitSignal(bridge.notice_shown, timeout=1000) as blocker:
+        bridge.add_mcp_server("mal nombre", "stdio", "npx x", "")
+
+    assert blocker.args[0] == "error"
+    assert confirmacion["pedidas"] == []
+    assert mcp_config.listar_servidores() == []

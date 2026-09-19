@@ -30,7 +30,7 @@ import {
   requestTaskModels, saveTaskModels,
   requestConnections, saveConnection, clearConnection,
   requestMcpServers, setMcpServerEnabled, removeMcpServer, probeMcpServer, loginMcpServer,
-  saveMcpAllowedTools, saveMcpVariable, clearMcpVariable,
+  saveMcpAllowedTools, saveMcpVariable, clearMcpVariable, addMcpServer,
   setAutonomyMode,
 } from "./bridge_client.js";
 import { icon } from "./icons.js";
@@ -765,9 +765,9 @@ function buildMcpCard(payload) {
     return card;
   }
   ayuda.textContent =
-    "Programas externos que le prestan herramientas al agente. Para agregar uno, pedíselo "
-    + "en el chat, por ejemplo: " + EJEMPLO_PEDIDO_MCP + " Nada queda habilitado hasta que "
-    + "digas qué herramientas aceptás.";
+    "Programas externos que le prestan herramientas al agente. Lo más fácil es pedírselo "
+    + "en el chat, por ejemplo: " + EJEMPLO_PEDIDO_MCP + " También podés agregarlo abajo. "
+    + "Nada queda habilitado hasta que digas qué herramientas aceptás.";
   card.appendChild(ayuda);
 
   if (!payload.servidores.length) {
@@ -775,7 +775,6 @@ function buildMcpCard(payload) {
     vacio.className = "settings-help mcp-vacio";
     vacio.textContent = "Todavía no hay ningún servidor declarado.";
     card.appendChild(vacio);
-    return card;
   }
 
   for (const servidor of payload.servidores) {
@@ -785,7 +784,94 @@ function buildMcpCard(payload) {
   if (payload.variables.length) {
     card.appendChild(buildMcpVariablesBlock(payload.variables));
   }
+
+  card.appendChild(buildMcpAddForm());
   return card;
+}
+
+// REQ-046 — agregar un servidor desde la pantalla. Es el segundo camino: el primero sigue
+// siendo pedírselo al agente. Pasa por el mismo modal que `mcp_add_server` (se ve el
+// comando o la URL antes de decir que sí); los secretos no se escriben acá: solo el
+// NOMBRE de la variable, y el valor se pega después en el bloque «Variables».
+function buildMcpAddForm() {
+  const form = document.createElement("form");
+  form.className = "mcp-alta";
+  form.id = "mcp-add-form";
+
+  const titulo = document.createElement("div");
+  titulo.className = "settings-row-label";
+  titulo.textContent = "Agregar un servidor";
+  form.appendChild(titulo);
+
+  const fila1 = document.createElement("div");
+  fila1.className = "mcp-alta-fila";
+
+  const nombre = document.createElement("input");
+  nombre.type = "text";
+  nombre.className = "settings-input";
+  nombre.placeholder = "nombre (notion, github…)";
+  nombre.setAttribute("aria-label", "Nombre del servidor");
+  nombre.autocomplete = "off";
+  nombre.maxLength = 40;
+
+  const tipo = document.createElement("select");
+  tipo.className = "settings-input mcp-alta-tipo";
+  tipo.setAttribute("aria-label", "Tipo de servidor");
+  for (const [valor, texto] of [["stdio", "Local (comando)"], ["http", "Remoto (URL)"]]) {
+    const opt = document.createElement("option");
+    opt.value = valor;
+    opt.textContent = texto;
+    tipo.appendChild(opt);
+  }
+  fila1.append(nombre, tipo);
+
+  const destino = document.createElement("input");
+  destino.type = "text";
+  destino.className = "settings-input";
+  destino.placeholder = "npx -y @notionhq/notion-mcp-server";
+  destino.setAttribute("aria-label", "Comando o URL del servidor");
+  destino.autocomplete = "off";
+  tipo.addEventListener("change", () => {
+    destino.placeholder = tipo.value === "http"
+      ? "https://mcp.ejemplo.com/mcp"
+      : "npx -y @notionhq/notion-mcp-server";
+  });
+
+  const variables = document.createElement("input");
+  variables.type = "text";
+  variables.className = "settings-input";
+  variables.placeholder = "variables que necesita, separadas por coma: NOTION_TOKEN";
+  variables.setAttribute("aria-label", "Variables de entorno o cabeceras que necesita");
+  variables.autocomplete = "off";
+
+  const ayuda = document.createElement("p");
+  ayuda.className = "settings-help";
+  ayuda.textContent =
+    "Poné solo el NOMBRE de cada variable: el valor se pega después en «Variables». "
+    + "Para un servidor remoto, la primera variable va como cabecera Authorization.";
+
+  const acciones = document.createElement("div");
+  acciones.className = "conexion-acciones";
+  const agregar = document.createElement("button");
+  agregar.type = "submit";
+  agregar.className = "panel-submit-btn";
+  agregar.textContent = "Agregar";
+  acciones.appendChild(agregar);
+
+  form.addEventListener("submit", (evt) => {
+    evt.preventDefault();
+    const n = nombre.value.trim();
+    const d = destino.value.trim();
+    if (!n || !d) {
+      showSettingsBanner("Hace falta el nombre y el comando o la URL.", true);
+      return;
+    }
+    agregar.disabled = true;
+    addMcpServer(n, tipo.value, d, variables.value.trim());
+  });
+
+  form.append(fila1, destino, variables, ayuda, acciones);
+  return form;
 }
 
 function estadoMcp(servidor) {

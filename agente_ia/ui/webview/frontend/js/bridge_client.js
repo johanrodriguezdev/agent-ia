@@ -190,6 +190,9 @@ export function saveMcpAllowedTools(nombre, patrones, canales) {
   _bridge.save_mcp_allowed_tools(nombre, patrones, canales);
 }
 export function saveMcpVariable(variable, valor) { _bridge.save_mcp_variable(variable, valor); }
+export function addMcpServer(nombre, tipo, destino, variables) {
+  _bridge.add_mcp_server(nombre, tipo, destino, variables);
+}
 export function clearMcpVariable(variable) { _bridge.clear_mcp_variable(variable); }
 export function onMcpServersLoaded(cb) { _bridge.mcp_servers_loaded.connect(cb); }
 export function onMcpProbeResult(cb) { _bridge.mcp_probe_result.connect(cb); }
