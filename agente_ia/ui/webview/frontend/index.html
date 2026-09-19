@@ -10,12 +10,15 @@
 <link rel="stylesheet" href="css/theme.css">
 <link rel="stylesheet" href="css/icons.css">
 <link rel="stylesheet" href="css/layout.css">
+<link rel="stylesheet" href="css/controles.css">
 <link rel="stylesheet" href="css/sidebar.css">
 <link rel="stylesheet" href="css/chat.css">
 <link rel="stylesheet" href="css/composer.css">
 <link rel="stylesheet" href="css/modal.css">
 <link rel="stylesheet" href="css/panels.css">
 <link rel="stylesheet" href="css/settings_panel.css">
+<link rel="stylesheet" href="css/marca.css">
+<link rel="stylesheet" href="css/map_panel.css">
 <link rel="stylesheet" href="vendor/xterm.css">
 <link rel="stylesheet" href="css/terminal.css">
 <link rel="stylesheet" href="css/toasts.css">
@@ -127,6 +130,25 @@
     <path d="M4.5 7h15"/><path d="M9.5 7V5.5h5V7"/>
     <path d="M6.5 7l1 11.5a1.5 1.5 0 0 0 1.5 1.4h6a1.5 1.5 0 0 0 1.5-1.4L18 7"/>
   </symbol>
+  <!-- REQ-052 — el Mapa de conexiones y los nodos que dibuja -->
+  <symbol id="ic-map" viewBox="0 0 24 24">
+    <circle cx="12" cy="12" r="2.6"/>
+    <circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="12" cy="20" r="2"/>
+    <path d="M10.1 10.5L6.5 7.4"/><path d="M13.9 10.5l3.6-3.1"/><path d="M12 14.6V18"/>
+  </symbol>
+  <symbol id="ic-monitor" viewBox="0 0 24 24">
+    <rect x="3" y="4.5" width="18" height="12.5" rx="2"/><path d="M8.5 20.5h7"/><path d="M12 17v3.5"/>
+  </symbol>
+  <symbol id="ic-mail" viewBox="0 0 24 24">
+    <rect x="3" y="5.5" width="18" height="13" rx="2"/><path d="M3.5 7.5l8.5 5.8 8.5-5.8"/>
+  </symbol>
+  <symbol id="ic-message" viewBox="0 0 24 24">
+    <path d="M4.5 5h15A1.5 1.5 0 0 1 21 6.5v8a1.5 1.5 0 0 1-1.5 1.5H10l-4.5 3.6V16h-1A1.5 1.5 0 0 1 3 14.5v-8A1.5 1.5 0 0 1 4.5 5z"/>
+  </symbol>
+  <symbol id="ic-plug" viewBox="0 0 24 24">
+    <path d="M9 3v4.5"/><path d="M15 3v4.5"/>
+    <path d="M6.5 7.5h11v3.5a5.5 5.5 0 0 1-11 0z"/><path d="M12 16.5V21"/>
+  </symbol>
 </svg>
 
 <div id="app-shell">
@@ -136,6 +158,7 @@
        `startSystemMove()` cuando el click era para un botón o para el input. -->
   <div id="window-chrome">
     <div id="chrome-left">
+      <span id="brand-mark" aria-hidden="true"></span>
       <span id="agent-name-label"></span>
       <!-- REQ-033 — el modo autonomia no expira solo (decision de Johan), asi que la
            mitigacion es que sea imposible no verlo mientras este encendido. -->
@@ -165,6 +188,10 @@
         </button>
         <button type="button" id="projects-btn" class="icon-btn" aria-label="Proyectos" title="Proyectos">
           <svg class="ic" aria-hidden="true"><use href="#ic-folder"/></svg>
+        </button>
+        <button type="button" id="map-btn" class="icon-btn" aria-label="Mapa de conexiones"
+                title="Mapa de conexiones">
+          <svg class="ic" aria-hidden="true"><use href="#ic-map"/></svg>
         </button>
         <button type="button" id="settings-btn" class="icon-btn" aria-label="Configuración" title="Configuración">
           <svg class="ic" aria-hidden="true"><use href="#ic-settings"/></svg>

@@ -17,7 +17,7 @@ import {
   onTasksLoaded, onProjectsLoaded, onProjectConversationsLoaded, onProjectRemoved,
   onSecurityOverridesLoaded, onSecurityOverrideSaved, onSecurityOverrideSaveRejected,
   onEmailCapabilitiesLoaded, onEmailCapabilitySaved, onEmailCapabilitySaveRejected,
-  onFlowsLoaded,
+  onFlowsLoaded, onConnectionMapLoaded,
   onProfileLoaded, onProfileSaved,
   onTerminalOutput, onTerminalState, onTerminalTabs,
   onNoticeShown, onMessageChunk, onConversationSearchResults, onModelsLoaded,
@@ -41,6 +41,7 @@ import { initTheme, applyTheme } from "./theme.js";
 import { showConfirmModal } from "./confirm_modal.js";
 import { initWindowChrome, setAutonomyIndicator, setMaximizedState } from "./window_chrome.js";
 import { fijarNombreDelAgente } from "./agente.js";
+import { montarMarca } from "./marca.js";
 import { openTasksPanel, renderTasks } from "./tasks_panel.js";
 import {
   toggleTerminalPanel, escribirSalida, manejarEstadoTerminal, renderTerminalTabs,
@@ -49,6 +50,7 @@ import {
 import { initToasts, mostrarAviso } from "./toasts.js";
 import { initShortcuts } from "./shortcuts.js";
 import { openFlowsPanel, renderFlows } from "./flows_panel.js";
+import { openMapPanel, renderConnectionMap } from "./map_panel.js";
 import {
   openProjectsPanel, renderProjects, renderProjectConversations, handleProjectRemoved,
   renderProjectItems, renderAssignableItems,
@@ -103,7 +105,12 @@ function setAgentIdentity(name) {
   const upper = agentName.toUpperCase();
 
   document.getElementById("agent-name-label").textContent = upper;
-  document.getElementById("empty-state-avatar").textContent = agentName.charAt(0).toUpperCase();
+  // REQ-052 — la marca en vez de la inicial: chica al lado del nombre, grande y con los
+  // anillos girando en la pantalla vacía. Se monta acá (y no una sola vez al arrancar)
+  // porque esta función es la que repinta la identidad al renombrar al agente.
+  montarMarca(document.getElementById("brand-mark"), { tamano: 20, trazo: 5.5, nodo: 11 });
+  montarMarca(document.getElementById("empty-state-avatar"),
+              { tamano: 72, trazo: 3.6, nodo: 9, animada: true });
   document.getElementById("empty-state-greeting").textContent = timeBasedGreeting();
 }
 
@@ -221,6 +228,9 @@ async function bootstrap() {
   const flowsBtn = document.getElementById("flows-btn");
   if (flowsBtn) flowsBtn.addEventListener("click", openFlowsPanel);
   document.getElementById("projects-btn").addEventListener("click", openProjectsPanel);
+  // REQ-052 — el Mapa de conexiones.
+  document.getElementById("map-btn").addEventListener("click", openMapPanel);
+  onConnectionMapLoaded((json) => renderConnectionMap(JSON.parse(json)));
   onTasksLoaded((json) => renderTasks(JSON.parse(json)));
   onProjectsLoaded((json) => {
     const projects = JSON.parse(json);

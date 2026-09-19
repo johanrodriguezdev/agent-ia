@@ -128,42 +128,31 @@
   color: var(--text-secondary);
 }
 
+/* Filas con texto largo (niveles de autonomía): título + párrafo, sin clase propia hasta
+   REQ-052 — el párrafo heredaba el tamaño del título y la fila se veía pesada. */
+.settings-row-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 3px;
+}
+
+.settings-row-description {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+/* El aspecto de los selectores, campos, interruptores y botones vive en controles.css
+   (REQ-052); acá solo el tamaño que cada uno ocupa en su fila. */
 .settings-row-select {
   flex: none;
-  border: 1px solid var(--border);
-  background-color: var(--bg-input);
-  color: var(--text-primary);
-  border-radius: 8px;
-  padding: 6px 10px;
-  font-size: 12px;
+  max-width: 240px;
 }
 
-.settings-row-select:disabled {
-  opacity: 0.6;
-}
-
-/* Interruptor de capacidad (correo). Se usa un checkbox y no un <select> a proposito:
-   estas filas son un si/no —la funcion existe o no existe—, no una escala de niveles
-   como las de arriba. El tamano minimo de click sigue la misma guia de accesibilidad
-   que el resto de los controles del panel. */
-.settings-row-check {
-  flex: none;
-  width: 20px;
-  height: 20px;
-  margin: 6px;
-  accent-color: var(--text-accent);
-  cursor: pointer;
-}
-
-.settings-row-check:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-.settings-row-check:focus-visible {
-  outline: 2px solid var(--text-accent);
-  outline-offset: 2px;
-}
+/* Interruptor de capacidad (correo) y de servidor MCP. Se usa un checkbox y no un
+   <select> a proposito: estas filas son un si/no —la funcion existe o no existe—, no una
+   escala de niveles como las de arriba. */
 
 /* -------------------------------------------------------------- sección "Perfil" */
 
@@ -173,18 +162,6 @@
   flex: none;
   width: 220px;
   max-width: 45%;
-  border: 1px solid var(--border);
-  background-color: var(--bg-input);
-  color: var(--text-primary);
-  border-radius: 8px;
-  padding: 7px 10px;
-  font-size: 12px;
-  font-family: inherit;
-}
-
-.settings-row-input:focus-visible {
-  outline: none;
-  border-color: var(--text-accent);
 }
 
 .settings-card-actions {
@@ -195,30 +172,15 @@
 
 .settings-primary-btn {
   border: none;
-  border-radius: var(--radius-md);
   background-color: var(--text-accent);
   color: #ffffff;
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  padding: 8px 20px;
-  cursor: pointer;
-  transition: opacity 150ms;
+  padding: 0 20px;
 }
 
 /* Ver la nota de `.composer-send-btn` en composer.css: en tema oscuro el texto del relleno
    de acento va con el fondo oscuro, no blanco. */
 :root[data-theme="dark"] .settings-primary-btn {
   color: var(--bg-primary);
-}
-
-.settings-primary-btn:hover {
-  opacity: 0.88;
-}
-
-.settings-primary-btn:focus-visible {
-  outline: 2px solid var(--text-accent);
-  outline-offset: 2px;
 }
 
 .settings-primary-btn:disabled {
@@ -309,14 +271,16 @@
   color: #ffffff;
 }
 
+/* "+ agregar": un selector con borde punteado, sin relleno. Es una acción de agregar,
+   no un campo con valor, y así se distingue de los chips que ya están. */
 .model-add {
-  border: 1px dashed var(--border);
+  height: 28px;
+  border-style: dashed;
+  border-radius: var(--radius-pill);
   background-color: transparent;
   color: var(--text-secondary);
-  border-radius: var(--radius-pill);
-  padding: 4px 10px;
   font-size: 12px;
-  max-width: 220px;
+  max-width: 240px;
 }
 
 .model-add:hover {
@@ -368,16 +332,12 @@
   font-size: 12px;
   word-break: break-all;
 }
-.mcp-permitidas { display: flex; flex-direction: column; gap: 6px; }
-.mcp-permitidas label { display: flex; flex-direction: column; gap: 4px; }
-.mcp-canales { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-.mcp-canal {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
-  color: var(--text-secondary);
-}
+.mcp-permitidas { display: flex; flex-direction: column; gap: 8px; }
+/* Solo la etiqueta del campo (no los chips de canal, que también son <label>). */
+.mcp-permitidas > label { display: flex; flex-direction: column; gap: 6px; }
+.mcp-permitidas .conexion-acciones { align-items: flex-start; }
+.mcp-canales { display: flex; flex: 1; flex-wrap: wrap; gap: 6px; align-items: center; }
+.mcp-permitidas .conexion-guardar { margin-left: auto; }
 .mcp-sondeo {
   margin: 0;
   padding: 8px 10px;

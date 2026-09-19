@@ -35,6 +35,12 @@ DARK_TOKENS: Dict[str, str] = {
     "success": "#3fb950",
     "warning": "#d29922",
     "danger": "#f85149",
+    # REQ-052 — las tres paradas del degradado de la marca (ver js/marca.js). En oscuro es
+    # el metálico del icono de app (`app_icon.py::_GRADIENT_DEF`); en claro, el mismo
+    # degradado invertido para que siga leyéndose sobre blanco.
+    "marca_1": "#ffffff",
+    "marca_2": "#b7b8bd",
+    "marca_3": "#5c5d63",
 }
 
 LIGHT_TOKENS: Dict[str, str] = {
@@ -51,6 +57,9 @@ LIGHT_TOKENS: Dict[str, str] = {
     "success": "#1a7f37",
     "warning": "#9a6700",
     "danger": "#cf222e",
+    "marca_1": "#17181a",
+    "marca_2": "#4d5057",
+    "marca_3": "#9aa0a6",
 }
 
 THEMES: Dict[str, Dict[str, str]] = {"dark": DARK_TOKENS, "light": LIGHT_TOKENS}

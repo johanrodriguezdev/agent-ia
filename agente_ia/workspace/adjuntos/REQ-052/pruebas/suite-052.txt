@@ -1,0 +1,10 @@
+REQ-052 — suite completa (2026-09-19)
+
+python -m pytest tests/ --ignore=tests/test_webview_smoke.py --ignore=tests/test_webview_buttons.py
+  3106 passed, 44 warnings in 214.35s
+
+python -m pytest tests/test_webview_buttons.py tests/test_webview_smoke.py
+  52 passed in 68.65s
+
+Nuevos: tests/test_mapa_conexiones.py (18), tests/test_marca_webview.py (6),
+3 tests en test_webview_buttons.py (mapa, refresco, marca) + map-btn en el inventario.

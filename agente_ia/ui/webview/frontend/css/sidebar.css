@@ -257,19 +257,14 @@
   color: #ffffff;
 }
 
+/* Aspecto base en controles.css (REQ-052); acá el tamaño de una fila de la lista. */
 .conv-rename-input {
   flex: 1;
   min-width: 0;
-  border: 1px solid var(--text-accent);
-  background-color: var(--bg-input);
-  color: var(--text-primary);
+  height: 28px;
+  padding: 0 8px;
+  border-color: var(--text-accent);
   border-radius: var(--radius-sm);
-  padding: 2px 6px;
-  font-size: 13px;
-}
-
-.conv-rename-input:focus {
-  outline: none;
 }
 
 /* Resultado de buscar en el historial: titulo arriba, el fragmento donde coincidio abajo.
@@ -353,12 +348,9 @@
 .project-new-input {
   width: 100%;
   margin: 2px 0 6px;
-  padding: 6px 8px;
-  border: 1px solid var(--text-accent);
-  border-radius: var(--radius-md);
-  background: var(--bg-input);
-  color: var(--text-primary);
-  font-size: 13px;
+  height: 30px;
+  padding: 0 10px;
+  border-color: var(--text-accent);
 }
 
 /* menú «Mover a proyecto» */

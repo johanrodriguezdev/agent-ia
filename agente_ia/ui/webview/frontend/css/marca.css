@@ -1,0 +1,90 @@
+/* ui/webview/frontend/css/marca.css
+   REQ-052 — la marca del agente dentro de la interfaz (ver js/marca.js).
+
+   Los colores del degradado son tokens del tema (`--marca-1/2/3`, theme.css): las
+   paradas del `<linearGradient>` no llevan color en el SVG, lo toman de acá. Así el mismo
+   SVG es metálico claro sobre el tema oscuro y metálico oscuro sobre el claro, y el cambio
+   de tema lo repinta sin tocar el DOM.
+
+   La animación gira cada anillo sobre su propio centro (`transform-box: fill-box`), a
+   ritmos distintos, muy despacio: es un pulso de "vivo", no un spinner. Se apaga con
+   `prefers-reduced-motion`. */
+
+.marca {
+  display: block;
+  flex: none;
+  overflow: visible;
+}
+
+.marca-parada-1 { stop-color: var(--marca-1); }
+.marca-parada-2 { stop-color: var(--marca-2); }
+.marca-parada-3 { stop-color: var(--marca-3); }
+
+.marca-anillo {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.marca-animada .marca-anillo-1 { animation: marca-giro 42s linear infinite; }
+.marca-animada .marca-anillo-2 { animation: marca-giro 56s linear infinite reverse; }
+.marca-animada .marca-anillo-3 { animation: marca-giro 70s linear infinite; }
+
+@keyframes marca-giro {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .marca-animada .marca-anillo { animation: none; }
+}
+
+/* -------------------------------------------------------------- barra superior */
+
+/* La marca chica al lado del nombre. El trazo va más grueso que en el icono grande
+   (mismo criterio que la bandeja del sistema): a 20 px, 3.2 unidades nativas se funden. */
+#brand-mark {
+  display: flex;
+  align-items: center;
+  flex: none;
+}
+
+/* -------------------------------------------------------------- pantalla vacía */
+
+/* Reemplaza al cuadrado con la inicial. Sin borde ni fondo: la marca se sostiene sola,
+   con un halo muy tenue detrás que en oscuro la separa del fondo y en claro casi no se
+   ve —que es lo que corresponde, el halo es del tema oscuro. */
+#empty-state-avatar {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  border: none;
+  background: transparent;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 8px;
+}
+
+#empty-state-avatar::before {
+  content: "";
+  position: absolute;
+  inset: -22px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--marca-2) 22%, transparent) 0%,
+    color-mix(in srgb, var(--marca-2) 6%, transparent) 42%,
+    transparent 70%
+  );
+  pointer-events: none;
+}
+
+:root[data-theme="light"] #empty-state-avatar::before,
+:root:not([data-theme]) #empty-state-avatar::before {
+  opacity: 0.3;
+}
+
+#empty-state-avatar .marca {
+  position: relative;
+  filter: drop-shadow(0 0 10px color-mix(in srgb, var(--marca-1) 18%, transparent));
+}

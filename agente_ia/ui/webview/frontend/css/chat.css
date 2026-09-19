@@ -31,22 +31,8 @@
   padding: 24px 16px 28px;
 }
 
-/* Cuadrado redondeado con la inicial del agente, no un círculo de acento: el bloque
-   neutro con borde pesa menos en una pantalla vacía y no compite con el composer. */
-#empty-state-avatar {
-  width: 46px;
-  height: 46px;
-  border-radius: var(--radius-md);
-  background-color: var(--bg-secondary);
-  border: 1px solid var(--border);
-  color: var(--text-primary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
-  font-weight: 600;
-  margin-bottom: 6px;
-}
+/* REQ-052 — el avatar de la pantalla vacía es la marca (los tres anillos), no la
+   inicial del agente en un cuadrado. Su estilo vive en marca.css. */
 
 #empty-state-greeting {
   font-size: 27px;

@@ -35,6 +35,9 @@ _MUST_NOT_USE_INNERHTML = [
     # una terminal (terminal_panel.js), el fragmento de una conversacion vieja
     # (sidebar.js, ya listado arriba). Mismo molde: textContent, nunca innerHTML.
     "toasts.js", "terminal_panel.js",
+    # REQ-052: el Mapa pinta nombres de servidores MCP y de flujos (configuración y
+    # comandos dictados); la marca se arma con createElementNS.
+    "map_panel.js", "sidebar_projects.js",
 ]
 
 _UNSAFE_PATTERN = re.compile(r"\.innerHTML\s*=|insertAdjacentHTML\s*\(")

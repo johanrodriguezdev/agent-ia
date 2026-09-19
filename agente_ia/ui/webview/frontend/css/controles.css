@@ -1,0 +1,329 @@
+/* ui/webview/frontend/css/controles.css
+   REQ-052 — los controles de formulario de toda la interfaz, en un solo lugar.
+
+   Hasta acá cada pantalla vestía sus campos a su manera y varios no tenían ningún estilo
+   (`.settings-input`, `.settings-row-action`, las casillas de canal de MCP): el motor
+   los pintaba con su aspecto por defecto —blancos, con borde de sistema— y en el tema
+   oscuro se veían como parches. Acá se define UNA receta para campos de texto, selectores,
+   interruptores, casillas y botones secundarios, con los tokens del tema, y cada hoja
+   específica solo ajusta tamaño o posición.
+
+   Receta: 34 px de alto, fondo `--bg-input`, borde de 1 px que sube a `--text-accent` con
+   un anillo suave al enfocar, radio 8 px. Sin sombras interiores ni degradados: el resto
+   de la ventana es plano y los controles no tienen por qué ser lo único que no lo sea.
+
+   Se carga después de layout.css y antes de las hojas de cada pantalla, que pueden
+   sobreescribir lo que necesiten. */
+
+:root {
+  --control-h: 34px;
+  --control-radius: 8px;
+  --control-ring: 0 0 0 3px color-mix(in srgb, var(--text-accent) 18%, transparent);
+}
+
+/* -------------------------------------------------------------- campos de texto */
+
+.settings-input,
+.settings-row-input,
+.conexion-input,
+.panel-form input,
+.project-new-input,
+.conv-rename-input,
+.task-input {
+  box-sizing: border-box;
+  height: var(--control-h);
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--control-radius);
+  background-color: var(--bg-input);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  transition: border-color 140ms, box-shadow 140ms, background-color 140ms;
+}
+
+.settings-input::placeholder,
+.settings-row-input::placeholder,
+.conexion-input::placeholder,
+.panel-form input::placeholder,
+.project-new-input::placeholder,
+.conv-rename-input::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.75;
+}
+
+.settings-input:hover,
+.settings-row-input:hover,
+.conexion-input:hover,
+.panel-form input:hover,
+.panel-form select:hover,
+.settings-row-select:hover {
+  border-color: color-mix(in srgb, var(--text-secondary) 45%, var(--border));
+}
+
+.settings-input:focus-visible,
+.settings-row-input:focus-visible,
+.conexion-input:focus-visible,
+.panel-form input:focus-visible,
+.panel-form select:focus-visible,
+.settings-row-select:focus-visible,
+.project-new-input:focus-visible,
+.conv-rename-input:focus-visible {
+  outline: none;
+  border-color: var(--text-accent);
+  box-shadow: var(--control-ring);
+}
+
+.settings-input:disabled,
+.settings-row-input:disabled,
+.conexion-input:disabled,
+.settings-row-select:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* Una clave se pega, no se escribe: el espaciado la hace leerse como "secreto" y no
+   como un texto cualquiera. */
+.conexion-input[type="password"] {
+  letter-spacing: 0.12em;
+}
+
+/* -------------------------------------------------------------- selectores */
+
+.settings-row-select,
+.panel-form select,
+.model-add,
+.mcp-alta-tipo {
+  box-sizing: border-box;
+  height: var(--control-h);
+  padding: 0 32px 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--control-radius);
+  background-color: var(--bg-input);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 16px 16px;
+  transition: border-color 140ms, box-shadow 140ms;
+}
+
+/* El chevron es un SVG inline: `url()` no admite `var()`, así que va un hex por tema
+   (= `--text-secondary` de cada uno). */
+:root[data-theme="dark"] .settings-row-select,
+:root[data-theme="dark"] .panel-form select,
+:root[data-theme="dark"] .model-add,
+:root[data-theme="dark"] .mcp-alta-tipo {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239aa0a6' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>");
+}
+
+:root[data-theme="light"] .settings-row-select,
+:root[data-theme="light"] .panel-form select,
+:root[data-theme="light"] .model-add,
+:root[data-theme="light"] .mcp-alta-tipo,
+:root:not([data-theme]) .settings-row-select,
+:root:not([data-theme]) .panel-form select,
+:root:not([data-theme]) .model-add,
+:root:not([data-theme]) .mcp-alta-tipo {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235f6368' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>");
+}
+
+.settings-row-select option,
+.panel-form select option,
+.model-add option {
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+/* -------------------------------------------------------------- interruptor (sí/no) */
+
+/* Las filas de "esta función existe o no" (capacidades de correo, habilitar un servidor
+   MCP) van con un interruptor, no con la casilla del sistema: se lee de un vistazo en
+   qué estado está y el área de click es la misma que la de un botón. */
+.settings-row-check {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex: none;
+  width: 38px;
+  height: 22px;
+  margin: 0;
+  border: none;
+  border-radius: var(--radius-pill);
+  background-color: color-mix(in srgb, var(--text-secondary) 38%, var(--bg-input));
+  cursor: pointer;
+  transition: background-color 160ms;
+}
+
+.settings-row-check::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background-color: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  transition: transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.settings-row-check:checked {
+  background-color: var(--text-accent);
+}
+
+.settings-row-check:checked::before {
+  transform: translateX(16px);
+}
+
+.settings-row-check:focus-visible {
+  outline: none;
+  box-shadow: var(--control-ring);
+}
+
+.settings-row-check:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* -------------------------------------------------------------- casillas en chip */
+
+/* Los canales de una herramienta MCP: cada opción es un chip que se marca entero. La
+   casilla sigue siendo un `<input type=checkbox>` real (teclado, lector de pantalla,
+   `.checked` para el JS), solo que dibujada a mano. */
+.mcp-canal {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 11px 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background-color: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 140ms, background-color 140ms, color 140ms;
+}
+
+.mcp-canal:hover {
+  border-color: color-mix(in srgb, var(--text-secondary) 45%, var(--border));
+  color: var(--text-primary);
+}
+
+.mcp-canal:has(input:checked) {
+  border-color: color-mix(in srgb, var(--text-accent) 55%, var(--border));
+  background-color: color-mix(in srgb, var(--text-accent) 10%, var(--bg-primary));
+  color: var(--text-primary);
+}
+
+.mcp-canal:has(input:disabled) {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.mcp-canal:has(input:focus-visible) {
+  box-shadow: var(--control-ring);
+}
+
+.mcp-canal input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  border: 1.5px solid color-mix(in srgb, var(--text-secondary) 70%, transparent);
+  border-radius: 4px;
+  background-color: transparent;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 10px 10px;
+  cursor: inherit;
+  transition: background-color 120ms, border-color 120ms;
+}
+
+.mcp-canal input[type="checkbox"]:checked {
+  border-color: var(--text-accent);
+  background-color: var(--text-accent);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'><path d='M5 12.5l4.5 4.5L19 7.5'/></svg>");
+}
+
+.mcp-canal input[type="checkbox"]:focus-visible {
+  outline: none;
+}
+
+/* -------------------------------------------------------------- botones */
+
+/* Botón secundario: borde, sin relleno. Es el de las acciones que no son "la" acción de
+   la tarjeta (Probar, Quitar, Activar un nivel). */
+.settings-row-action,
+.panel-submit-btn-secundario {
+  box-sizing: border-box;
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--control-radius);
+  background-color: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 140ms, border-color 140ms, color 140ms;
+}
+
+.settings-row-action:hover,
+.panel-submit-btn-secundario:hover {
+  background-color: var(--bg-hover);
+  border-color: color-mix(in srgb, var(--text-secondary) 45%, var(--border));
+}
+
+.settings-row-action:focus-visible,
+.panel-submit-btn-secundario:focus-visible,
+.panel-submit-btn:focus-visible,
+.settings-primary-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--control-ring);
+}
+
+/* "Activo": el nivel de autonomía que está puesto. Deshabilitado porque no hay nada que
+   hacerle, pero se lee como estado, no como botón roto. */
+.settings-row-action:disabled {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 45%, transparent);
+  background-color: color-mix(in srgb, var(--success) 10%, transparent);
+  cursor: default;
+}
+
+/* Botón principal (relleno de acento): mismo alto y radio que los campos con los que
+   comparte fila. */
+.panel-submit-btn,
+.settings-primary-btn {
+  box-sizing: border-box;
+  height: 32px;
+  padding: 0 16px;
+  border-radius: var(--control-radius);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: filter 140ms, opacity 140ms;
+}
+
+.panel-submit-btn:hover:not(:disabled),
+.settings-primary-btn:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.panel-submit-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}

@@ -40,23 +40,11 @@
   margin-bottom: 16px;
 }
 
-.panel-form input,
-.panel-form select {
-  border: 1px solid var(--border);
-  background-color: var(--bg-input);
-  border-radius: 8px;
-  padding: 7px 10px;
-  font-size: 13px;
-  color: var(--text-primary);
-}
-
+/* Los campos del formulario y los botones toman su aspecto de controles.css (REQ-052). */
 .panel-submit-btn {
   background-color: var(--text-accent);
   color: #ffffff;
   border: none;
-  border-radius: var(--radius-md);
-  padding: 7px 14px;
-  font-size: 13px;
 }
 
 /* Ver la nota de `.composer-send-btn` en composer.css: blanco sobre `--text-accent` no
@@ -310,11 +298,6 @@
   background-color: transparent;
   border: 1px solid var(--border);
   color: var(--text-primary);
-}
-
-.panel-submit-btn-secundario:hover {
-  background-color: var(--bg-hover);
-  border-color: var(--text-secondary);
 }
 
 /* El override de contraste del boton de acento (`:root[data-theme="dark"]

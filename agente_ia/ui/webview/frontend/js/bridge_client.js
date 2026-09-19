@@ -66,6 +66,7 @@ export function runFlow(flowId) { _bridge.run_flow(flowId); }
 export function cancelFlow(flowId) { _bridge.cancel_flow(flowId); }
 export function requestDeleteFlow(flowId) { _bridge.request_delete_flow(flowId); }
 export function removeFlowStep(flowId, indice) { _bridge.remove_flow_step(flowId, indice); }
+export function requestConnectionMap() { _bridge.request_connection_map(); }   // REQ-052
 export function requestEmailCapabilities() { _bridge.request_email_capabilities(); }
 export function saveEmailCapability(capId, enabled) { _bridge.save_email_capability(capId, enabled); }
 
@@ -106,6 +107,7 @@ export function onSecurityOverridesLoaded(cb) { _bridge.security_overrides_loade
 export function onSecurityOverrideSaved(cb) { _bridge.security_override_saved.connect(cb); }
 export function onSecurityOverrideSaveRejected(cb) { _bridge.security_override_save_rejected.connect(cb); }
 export function onFlowsLoaded(cb) { _bridge.flows_loaded.connect(cb); }
+export function onConnectionMapLoaded(cb) { _bridge.connection_map_loaded.connect(cb); }   // REQ-052
 export function onEmailCapabilitiesLoaded(cb) { _bridge.email_capabilities_loaded.connect(cb); }
 export function onEmailCapabilitySaved(cb) { _bridge.email_capability_saved.connect(cb); }
 export function onEmailCapabilitySaveRejected(cb) { _bridge.email_capability_save_rejected.connect(cb); }

@@ -191,6 +191,8 @@ class Bridge(QObject):
     email_capability_saved = pyqtSignal(str, bool)    # id, nuevo estado
     email_capability_save_rejected = pyqtSignal(str)  # id
     flows_loaded = pyqtSignal(str)                    # json: [{id, nombre, estado, pasos, ...}]
+    # REQ-052 — el Mapa de conexiones: {agente, modelos, canales, mcp, flujos}. Sin secretos.
+    connection_map_loaded = pyqtSignal(str)
 
     # ------------------------------------------------------------ terminal embebida
     # `terminal_output` lleva el flujo CRUDO de la PTY, con las secuencias ANSI intactas:
@@ -939,6 +941,27 @@ class Bridge(QObject):
     def request_flows(self) -> None:
         """Carga perezosa: solo al abrir el panel de Flujos."""
         self.flows_loaded.emit(json.dumps(_build_flows_payload()))
+
+    # ------------------------------------------------------------ mapa de conexiones (REQ-052)
+    @pyqtSlot()
+    def request_connection_map(self) -> None:
+        """Arma el Mapa de conexiones y lo emite. Nunca incluye una credencial.
+
+        Va por `run_async()` porque saber si el bot de Telegram corre aparte recorre la
+        lista de procesos (`telegram_launcher._ya_hay_uno_corriendo`), y eso no es para el
+        hilo de la GUI. El estado de la GUI que hace falta (manos libres, pestañas de la
+        terminal) se toma acá, antes de salir del hilo.
+        """
+        from ui.webview import gui_state as gs
+        from ui.webview import mapa_conexiones
+
+        wake_state = gs.WAKE_STATE
+        sesiones = terminal_manager.listado()
+        run_async(
+            lambda: mapa_conexiones.construir(wake_state, sesiones),
+            lambda mapa: self.connection_map_loaded.emit(json.dumps(mapa)),
+            lambda mensaje: logger.error(f"Mapa de conexiones: {mensaje}"),
+        )
 
     @pyqtSlot(int)
     def run_flow(self, flow_id: int) -> None:

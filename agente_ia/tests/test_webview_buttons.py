@@ -117,6 +117,11 @@ def ventana(qtbot, monkeypatch):
     monkeypatch.setattr(resolution, "resolve", _resolve_falso)
     monkeypatch.setattr(memory, "store_turn", lambda *a, **k: None)
 
+    # REQ-052 — el Mapa se arma fuera del hilo de la GUI mirando config, procesos y bases:
+    # acá se sustituye por un mapa fijo para que abrir el panel no toque nada real.
+    import ui.webview.mapa_conexiones as mapa_conexiones
+    monkeypatch.setattr(mapa_conexiones, "construir", lambda *a, **k: MAPA_DE_PRUEBA)
+
     _WakeWorkerFalso.creados = 0
 
     window = main_window_module.MainWindow()
@@ -195,6 +200,7 @@ def _click(page, selector_js):
     ("tasks-btn", "Tareas"),
     ("flows-btn", "Flujos"),
     ("projects-btn", "Proyectos"),
+    ("map-btn", "Mapa"),            # REQ-052
     ("settings-btn", "Configuración"),
 ])
 def test_cada_herramienta_de_la_barra_abre_su_panel(ventana, qtbot, boton_id, titulo_esperado):
@@ -977,6 +983,105 @@ def test_los_proyectos_se_despliegan_y_un_chat_se_puede_mover(ventana, qtbot, mo
     _sin_errores(page)
 
 
+# ---------------------------------------------------------------------------
+# REQ-052: el Mapa de conexiones
+# ---------------------------------------------------------------------------
+
+MAPA_DE_PRUEBA = {
+    "agente": {"nombre": "orion", "proveedor": "deepseek", "modelo": "deepseek-chat",
+               "autonomia": {"nivel": "normal", "activo": False}},
+    "modelos": [
+        {"id": "deepseek", "label": "DeepSeek", "estado": "activo", "detalle": "responde ahora", "activo": True},
+        {"id": "openai", "label": "OpenAI", "estado": "inactivo", "detalle": "sin clave", "activo": False},
+    ],
+    "canales": [
+        {"id": "desktop", "label": "Escritorio", "estado": "activo", "detalle": "esta ventana"},
+        {"id": "telegram", "label": "Telegram", "estado": "inactivo", "detalle": "sin token del bot"},
+    ],
+    "mcp": [
+        {"id": "notion", "label": "notion", "estado": "activo", "detalle": "2 herramientas habilitadas",
+         "transporte": "stdio", "destino": "npx -y @notionhq/notion-mcp-server",
+         "herramientas": ["search", "create_page"], "permitidas": ["search", "create_page"],
+         "canales": ["desktop"]},
+    ],
+    "flujos": [],
+    "terminales": 0,
+}
+
+
+def test_el_mapa_dibuja_los_nodos_y_el_detalle_abre_configuracion(ventana, qtbot):
+    """Abrir el Mapa pide el payload al bridge (sustituido por MAPA_DE_PRUEBA); cada
+    nodo se dibuja con su nombre y estado; un click abre el detalle con lo que Python
+    mandó (insertado como texto), y desde ahí se salta a la sección de Configuración."""
+    _, page, _ = ventana
+
+    _click(page, "document.getElementById('map-btn')")
+    qtbot.waitUntil(lambda: _run_js(page, "document.querySelector('#map-canvas .map-svg') !== null") is True,
+                    timeout=5000)
+
+    # El centro lleva la marca (los tres anillos) y el nombre del agente.
+    assert _run_js(page, "document.querySelectorAll('.map-centro .marca-anillo').length") == 3
+    assert _run_js(page, "document.querySelector('.map-centro-nombre').textContent") == "ORION"
+
+    # Un nodo por cada entrada, con su estado, y un «ninguno» fantasma para los flujos.
+    etiquetas = json.loads(_run_js(page, """
+        JSON.stringify(Array.from(document.querySelectorAll('.map-nodo'))
+            .map(n => [n.dataset.grupo, n.dataset.id, n.querySelector('.map-nodo-etiqueta').textContent,
+                       n.classList.contains('map-estado-activo')]))
+    """))
+    assert ["modelos", "deepseek", "DeepSeek", True] in etiquetas
+    assert ["canales", "telegram", "Telegram", False] in etiquetas
+    assert ["mcp", "notion", "notion", True] in etiquetas
+    assert ["flujos", "__vacio__", "ninguno todavía", False] in etiquetas
+    # Solo lo activo lleva el pulso en su enlace.
+    assert _run_js(page, "document.querySelectorAll('.map-enlace-pulso').length") == 3
+
+    # Click en el servidor: el detalle muestra el comando exacto, como texto. Un <g> de
+    # SVG no tiene `.click()` (es de HTMLElement): se despacha el evento.
+    _run_js(page, """
+        document.querySelector('.map-nodo[data-grupo="mcp"][data-id="notion"]')
+            .dispatchEvent(new MouseEvent('click', {bubbles: true}));
+        true;
+    """)
+    _esperar(qtbot, 300)
+    assert _run_js(page, "document.getElementById('map-detalle').hidden") is False
+    assert _run_js(page, "document.querySelector('.map-detalle-titulo').textContent") == "notion"
+    assert "npx -y @notionhq/notion-mcp-server" in _run_js(
+        page, "document.getElementById('map-detalle').textContent")
+
+    # «Abrir en Configuración» cierra el mapa y abre la sección MCP.
+    _click(page, "document.querySelector('.map-detalle-abrir')")
+    _esperar(qtbot, 400)
+    assert _run_js(page, "document.querySelector('#panel-modal-root .modal-title').textContent") == "Configuración"
+    assert _run_js(page, "document.querySelector('.settings-nav-item.active').textContent") == "MCP"
+    _sin_errores(page)
+
+
+def test_el_mapa_se_refresca_con_lo_que_llega_del_bridge(ventana, qtbot):
+    """Con el panel abierto, un `connection_map_loaded` nuevo repinta los nodos."""
+    window, page, _ = ventana
+
+    _click(page, "document.getElementById('map-btn')")
+    qtbot.waitUntil(lambda: _run_js(page, "document.querySelector('#map-canvas .map-svg') !== null") is True,
+                    timeout=5000)
+
+    nuevo = dict(MAPA_DE_PRUEBA)
+    nuevo["flujos"] = [{"id": "7", "label": "modo trabajo", "estado": "configurado",
+                        "detalle": "2 pasos · 08:00", "estado_flujo": "pendiente"}]
+    window.bridge.connection_map_loaded.emit(json.dumps(nuevo))
+    _esperar(qtbot, 300)
+
+    assert _run_js(page, "document.querySelector('.map-nodo[data-grupo=\"flujos\"][data-id=\"7\"] .map-nodo-etiqueta').textContent") == "modo trabajo"
+    _sin_errores(page)
+
+
+def test_la_marca_reemplaza_a_la_inicial_en_la_barra_y_en_la_pantalla_vacia(ventana):
+    _, page, _ = ventana
+    assert _run_js(page, "document.querySelectorAll('#brand-mark .marca-anillo').length") == 3
+    assert _run_js(page, "document.querySelectorAll('#empty-state-avatar .marca-anillo').length") == 3
+    assert _run_js(page, "document.getElementById('empty-state-avatar').textContent.trim()") == ""
+
+
 # --------------------------------------------------------------------------- cobertura
 
 def test_todo_boton_con_id_del_html_tiene_su_manejador(ventana):
@@ -996,6 +1101,7 @@ def test_todo_boton_con_id_del_html_tiene_su_manejador(ventana):
         "load-more-btn", "attach-btn", "wake-toggle-btn", "send-btn", "stop-btn",
         "model-btn", "attachment-chip-remove",
         "project-add-btn",   # REQ-051 — test_el_mas_de_proyectos_pide_el_nombre_y_lo_crea
+        "map-btn",           # REQ-052 — test_el_mapa_dibuja_los_nodos_y_el_detalle_abre_configuracion
     }
     assert set(ids) == esperados, (
         "cambió el inventario de botones del HTML: agregá el nuevo a un test de este "
