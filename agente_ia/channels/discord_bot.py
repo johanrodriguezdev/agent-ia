@@ -105,6 +105,49 @@ async def _slash_autorizado(interaction, comando: str) -> bool:
     return False
 
 
+def _responder_confirmacion(author_id: str, texto: str) -> bool:
+    """Return True si `texto` era la respuesta a una confirmación pendiente de `author_id`.
+
+    Va ANTES de mirar si el mensaje menciona al bot: quien contesta «sí» a una pregunta no
+    vuelve a mencionarlo. Si se consumió, el mensaje no va al agente (REQ-045/CA-04).
+    """
+    from channels.discord_confirmation_adapter import discord_confirmation_adapter
+
+    if not texto:
+        return False
+    return discord_confirmation_adapter.resolve(author_id, texto)
+
+
+async def _procesar_con_confirmacion(
+    author_id: str, channel_id: int, user_id: str, user_name: str, text: str,
+    image_path: str = None,
+) -> str:
+    """Corre el turno del agente en un hilo, con el adaptador de confirmación preparado.
+
+    Mismo patrón que `channels/telegram_bot.py::_procesar_con_confirmacion` (REQ-018):
+
+    - `asyncio.to_thread`: el turno puede tardar decenas de segundos con herramientas, y
+      hasta REQ-045 corría dentro de la corutina, con el event loop de discord.py parado
+      —sin heartbeats ni otros mensajes— todo ese tiempo. Peor: la respuesta «sí» del
+      usuario no podía llegar nunca, porque el bot estaba sordo esperándola.
+    - La reserva es especulativa: la mayoría de los mensajes no confirman nada. Se toma
+      antes del hilo (es lo que copia el contexto al worker) y se suelta al terminar; si
+      ya había una confirmación en curso para este usuario se procesa igual, pero sin
+      contexto, así que una acción amarilla que aparezca se deniega en vez de colarse en la
+      espera ajena.
+    """
+    from channels.discord_confirmation_adapter import discord_confirmation_adapter
+
+    reservado = discord_confirmation_adapter.reserve_pending(author_id, especulativa=True)
+    if reservado:
+        discord_confirmation_adapter.set_request_context(author_id, channel_id)
+    try:
+        return await asyncio.to_thread(_process_message, user_id, user_name, text, image_path)
+    finally:
+        if reservado:
+            discord_confirmation_adapter.release_pending(author_id)
+
+
 def run_discord_bot():
     """Inicia el bot de Discord."""
     try:
@@ -136,6 +179,15 @@ def run_discord_bot():
         print(f"  {agent} - Bot de Discord activo")
         print(f"  Conectado como: {bot.user}")
         print(f"{'='*45}\n")
+        # REQ-045 — el adaptador de confirmación existe recién cuando hay loop y bot: acá.
+        # Sin esto, toda acción amarilla por Discord se denegaba fail-closed sin preguntar.
+        from channels.discord_confirmation_adapter import discord_confirmation_adapter
+        from core.confirmation import register_confirmation_adapter
+        from core.security_manager import ChannelType
+
+        discord_confirmation_adapter.bind(bot, asyncio.get_running_loop())
+        register_confirmation_adapter(ChannelType.DISCORD, discord_confirmation_adapter.confirm)
+
         # Sincronizar comandos slash
         try:
             synced = await bot.tree.sync()
@@ -147,6 +199,12 @@ def run_discord_bot():
     async def on_message(message):
         """Responde cuando alguien menciona al bot."""
         if message.author == bot.user:
+            return
+
+        # REQ-045 — «sí» a una confirmación pendiente llega sin mencionar al bot. Va antes
+        # del filtro de mención: si se consume como respuesta, no es un mensaje para el
+        # agente. Solo puede tener una pendiente quien ya fue atendido (y autorizado).
+        if _responder_confirmacion(str(message.author.id), message.content or ""):
             return
 
         # Solo responder si se menciona al bot
@@ -190,11 +248,12 @@ def run_discord_bot():
         async with message.channel.typing():
             from core.user_identity import canonical_user_id
 
-            result = _process_message(
+            result = await _procesar_con_confirmacion(
+                author_id, message.channel.id,
                 canonical_user_id("discord", message.author.id),
                 message.author.display_name,
                 text,
-                image_path=image_path
+                image_path=image_path,
             )
             
         if image_path:
@@ -224,10 +283,11 @@ def run_discord_bot():
             return
 
         await interaction.response.defer()
-        result = _process_message(
+        result = await _procesar_con_confirmacion(
+            str(interaction.user.id), interaction.channel_id,
             canonical_user_id("discord", interaction.user.id),
             interaction.user.display_name,
-            mensaje
+            mensaje,
         )
         embed = discord.Embed(
             description=result[:4096],

@@ -2986,7 +2986,7 @@ register_tool(ToolSpec(
         "Habilita qué herramientas de un servidor MCP puede usar el agente (las que no se "
         "nombran quedan bloqueadas) y desde qué canales. 'herramientas' son nombres tal como "
         "los publica el servidor o patrones ('search', 'read_*'); reemplaza la lista anterior. "
-        "'canales' por defecto es solo escritorio; se puede sumar telegram. "
+        "'canales' por defecto es solo escritorio; se puede sumar telegram o discord. "
         "Usala después de mcp_add_server, cuando el usuario haya dicho cuáles quiere."
     ),
     parameters_schema={
@@ -2996,7 +2996,8 @@ register_tool(ToolSpec(
             "herramientas": {"type": "array", "items": {"type": "string"},
                              "description": "Nombres o patrones de herramientas a permitir."},
             "canales": {"type": "array", "items": {"type": "string"},
-                        "description": "Canales: desktop, telegram. Vacío = solo escritorio."},
+                        "description": ("Canales: desktop, telegram, discord. "
+                                        "Vacío = solo escritorio.")},
         },
         "required": ["name", "herramientas"],
     },

@@ -152,12 +152,13 @@ Configuración → Conexiones, con estas reglas:
 - **Toda herramienta remota es 🟡 como mínimo** (`_nivel_declarado()`): las anotaciones del
   servidor solo endurecen. Se registra como `mcp__servidor__tool` para que nunca pise una
   acción local, y la confirmación dice «use la herramienta 'X' del servidor MCP 'Y'».
-- **Canales**: por defecto solo escritorio. Se puede sumar `telegram` vía
+- **Canales**: por defecto solo escritorio. Se puede sumar `telegram` o `discord` vía
   `CHANNEL_ACTION_EXCEPTIONS` (REQ-018). Solo los canales con adaptador de confirmación
   (`core/confirmation.py`) son habilitables (`core/mcp_config.py::CANALES_HABILITABLES`):
-  una herramienta remota es amarilla y sin adaptador el gate la deniega; `discord` y `voice`
-  entrarán cuando lo tengan. `email`, `api` y `unknown` **nunca**: la entrada que un tercero
-  puede originar no alcanza acciones amarillas. Las seis herramientas `mcp_*` de
+  una herramienta remota es amarilla y sin adaptador el gate la deniega; Discord lo tiene
+  desde REQ-045 (`channels/discord_confirmation_adapter.py`), voz no (su política es solo
+  verde). `email`, `api` y `unknown` **nunca**: la entrada que un tercero puede originar no
+  alcanza acciones amarillas. Las seis herramientas `mcp_*` de
   administración están en `DESKTOP_ONLY_ACTIONS`.
 - **Los secretos no viajan por el chat.** `env` y `headers` solo aceptan referencias
   `${VARIABLE}`; un valor literal se rechaza (`core/mcp_config.py::_validar_solo_referencias`).

@@ -61,10 +61,16 @@ class _PendingConfirmation:
     consume_respuestas: bool = True
 
 
-class TelegramConfirmationAdapter:
-    """Adaptador (action_name, mensaje) -> bool para ChannelType.TELEGRAM. Se registra vía
-    core.confirmation.register_confirmation_adapter(ChannelType.TELEGRAM, adapter.confirm)
-    dentro del callback post_init de la Application (channels/telegram_bot.py)."""
+class ChatConfirmationAdapter:
+    """Adaptador (action_name, mensaje) -> bool para un canal de chat con event loop propio.
+
+    Nació como el de Telegram (REQ-018) y desde REQ-045 es la base también del de Discord
+    (`channels/discord_confirmation_adapter.py`): la reserva por usuario, la espera con
+    timeout, la lectura del "sí" y la limpieza son idénticas en los dos; lo único que cambia
+    es cómo se manda el mensaje, y eso es `_send_message()`. Se registra vía
+    `core.confirmation.register_confirmation_adapter(canal, adapter.confirm)` cuando el bot
+    ya tiene loop.
+    """
 
     def __init__(self) -> None:
         self._bot = None
@@ -220,5 +226,8 @@ class TelegramConfirmationAdapter:
             if pending is not None and not pending.consume_respuestas:
                 del self._pending[user_id]
 
+
+#: El nombre con el que nació (REQ-018); `channels/telegram_bot.py` y sus tests lo usan.
+TelegramConfirmationAdapter = ChatConfirmationAdapter
 
 telegram_confirmation_adapter = TelegramConfirmationAdapter()

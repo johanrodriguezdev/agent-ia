@@ -95,7 +95,7 @@ def test_el_payload_lista_servidores_y_variables_sin_valores(entorno):
     assert "ntn_super_secreto" not in crudo
     assert payload["servidores"][0]["nombre"] == "notion"
     assert payload["variables"] == [{"nombre": "NOTION_TOKEN", "origen": "archivo", "servidores": ["notion"]}]
-    assert payload["canales"] == ["desktop", "telegram"]
+    assert payload["canales"] == ["desktop", "telegram", "discord"]
 
 
 def test_request_emite_el_payload(bridge, qtbot):
