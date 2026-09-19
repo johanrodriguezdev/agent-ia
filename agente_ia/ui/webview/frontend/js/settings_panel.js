@@ -73,9 +73,15 @@ const PROFILE_FIELDS = [
 const SECTIONS = [
   { id: "perfil", label: "Perfil" },
   { id: "modelos", label: "Modelos" },
-  { id: "conexiones", label: "Conexiones" },
+  { id: "claves", label: "Claves de IA" },
+  { id: "canales", label: "Canales" },
+  { id: "mcp", label: "MCP" },
   { id: "seguridad", label: "Seguridad" },
 ];
+
+//: El id con el que se conocía la sección de credenciales antes de REQ-050. Quien lo pida
+//: (un frontend cacheado, un aviso viejo) cae en «Claves de IA».
+const SECCIONES_VIEJAS = { conexiones: "claves" };
 
 let _panelOpen = false;
 let _pendingRowId = null;   // guard contra doble click/doble evento en la MISMA fila
@@ -86,6 +92,7 @@ export function openSettingsPanel(seccion) {
   _panelOpen = true;
   // Se valida contra SECTIONS porque esta funcion tambien se usa como listener de click:
   // ahi el argumento es un Event, que no es ninguna seccion y cae en "perfil".
+  seccion = SECCIONES_VIEJAS[seccion] || seccion;
   _activeSection = SECTIONS.some((s) => s.id === seccion) ? seccion : "perfil";
   renderShell();
 }
@@ -183,17 +190,21 @@ function renderActiveSection() {
   } else if (_activeSection === "modelos") {
     content.appendChild(buildModelsCard(null));
     requestTaskModels();       // mismo criterio: solo al entrar en la sección
-  } else if (_activeSection === "conexiones") {
-    content.appendChild(buildConnectionsCard(null));
-    content.appendChild(buildMcpCard(null));
+  } else if (_activeSection === "claves") {
+    content.appendChild(buildConnectionsCard(null, "claves"));
     requestConnections();
+  } else if (_activeSection === "canales") {
+    content.appendChild(buildConnectionsCard(null, "canales"));
+    content.appendChild(buildEmailCapabilitiesCard());
+    requestConnections();
+    requestEmailCapabilities();   // carga perezosa: solo al entrar en la sección
+  } else if (_activeSection === "mcp") {
+    content.appendChild(buildMcpCard(null));
     requestMcpServers();
   } else {
     content.appendChild(buildAutonomyCard());
     content.appendChild(buildSecurityCard());
-    content.appendChild(buildEmailCapabilitiesCard());
     requestSecurityOverrides();   // CA-19: carga perezosa, solo acá
-    requestEmailCapabilities();   // mismo criterio: solo al entrar en la sección
   }
 }
 
@@ -392,13 +403,13 @@ function buildEmailCapabilitiesCard() {
 
   const cardTitle = document.createElement("div");
   cardTitle.className = "settings-card-title";
-  cardTitle.textContent = "Capacidades del correo";
+  cardTitle.textContent = "Correo";
 
   const nota = document.createElement("div");
   nota.className = "settings-row-desc";
   nota.textContent =
-    "Vienen apagadas porque escriben sobre tu cuenta. Activarlas no quita las " +
-    "confirmaciones: solo permite que la función exista.";
+    "Vienen apagadas porque escriben sobre tu cuenta o ejecutan lo que llega por ella. " +
+    "Activarlas no quita las confirmaciones: solo permite que la función exista.";
 
   const list = document.createElement("div");
   list.id = "email-capabilities-list";
@@ -633,27 +644,48 @@ export function renderTaskModels(payload) {
 // pantalla o en un volcado del webview, y para decidir si hay que cambiarla no hace falta
 // verla.
 
-function buildConnectionsCard(payload) {
+// ---------------------------------------------------------------- "Claves de IA" y "Canales"
+//
+// REQ-050 — antes era una sola sección ("Conexiones") con las siete credenciales, cada una
+// con cuatro líneas y un campo abierto, y los servidores MCP debajo de todo: no se llegaba
+// a verlos. Ahora cada credencial es UNA línea (nombre · estado · botón) y el campo para
+// pegar la clave aparece solo cuando se pulsa «Pegar» o «Cambiar». Las claves de los
+// proveedores de IA van en «Claves de IA»; Telegram y Discord, con los interruptores del
+// correo, en «Canales».
+
+const GRUPOS_DE_CONEXIONES = {
+  claves: {
+    titulo: "Claves de IA",
+    ayuda: "Se guardan en config.json, en este equipo. Una variable de entorno con el mismo "
+      + "nombre manda sobre lo que pongas aquí.",
+    incluye: (fila) => fila.id.endsWith("_api_key"),
+  },
+  canales: {
+    titulo: "Telegram y Discord",
+    ayuda: "Los tokens de los bots. Sin token, ese canal no arranca.",
+    incluye: (fila) => !fila.id.endsWith("_api_key"),
+  },
+};
+
+function buildConnectionsCard(payload, grupo) {
+  const def = GRUPOS_DE_CONEXIONES[grupo] || GRUPOS_DE_CONEXIONES.claves;
   const card = document.createElement("div");
   card.className = "settings-card";
   card.id = "connections-card";
 
   const title = document.createElement("div");
   title.className = "settings-card-title";
-  title.textContent = "Claves y credenciales";
+  title.textContent = def.titulo;
   card.appendChild(title);
 
   const ayuda = document.createElement("p");
   ayuda.className = "settings-help";
-  ayuda.textContent = payload
-    ? "Se guardan en config.json, en este equipo. Una variable de entorno con el mismo "
-      + "nombre manda sobre lo que pongas aquí."
-    : "Cargando…";
+  ayuda.textContent = payload ? def.ayuda : "Cargando…";
   card.appendChild(ayuda);
 
   if (!payload) return card;
 
-  for (const fila of payload.conexiones) {
+  for (const fila of payload.conexiones.filter(def.incluye)) {
     card.appendChild(buildConnectionRow(fila));
   }
   return card;
@@ -661,34 +693,54 @@ function buildConnectionsCard(payload) {
 
 function buildConnectionRow(fila) {
   const row = document.createElement("div");
-  row.className = "settings-row settings-row-block";
+  row.className = "settings-row conexion-fila";
 
   const info = document.createElement("div");
-  info.className = "settings-row-info";
+  info.className = "settings-row-info conexion-info";
   const nombre = document.createElement("span");
   nombre.className = "settings-row-label";
   nombre.textContent = fila.label;              // §10.1 — nunca innerHTML
-  const desc = document.createElement("span");
-  desc.className = "settings-row-desc";
-  desc.textContent = fila.descripcion;
-  info.append(nombre, desc);
-
+  nombre.title = fila.descripcion;              // la explicación larga, al pasar el ratón
   const estado = document.createElement("span");
   estado.className = "conexion-estado conexion-estado-" + (fila.origen || "vacia");
   estado.textContent = {
-    entorno: "Configurada (variable de entorno)",
+    entorno: "Configurada (entorno)",
     archivo: "Configurada",
   }[fila.origen] || "Sin configurar";
-  info.appendChild(estado);
+  info.append(nombre, estado);
   row.appendChild(info);
 
   const acciones = document.createElement("div");
   acciones.className = "conexion-acciones";
 
+  const editar = document.createElement("button");
+  editar.type = "button";
+  editar.className = "panel-submit-btn panel-submit-btn-secundario";
+  editar.textContent = fila.origen ? "Cambiar" : "Pegar";
+  acciones.appendChild(editar);
+
+  // Quitar solo tiene sentido sobre lo que está EN EL ARCHIVO: lo del entorno no se toca
+  // desde aquí, y ofrecer un botón que no puede cumplir sería mentir.
+  if (fila.origen === "archivo") {
+    const quitar = document.createElement("button");
+    quitar.type = "button";
+    quitar.className = "panel-submit-btn panel-submit-btn-secundario conexion-quitar";
+    quitar.textContent = "Quitar";
+    quitar.addEventListener("click", () => clearConnection(fila.id));
+    acciones.appendChild(quitar);
+  }
+  row.appendChild(acciones);
+
+  // El editor vive dentro de la fila y solo se muestra al pedirlo: así la lista se lee de
+  // un vistazo y el campo de contraseña no queda abierto en siete sitios a la vez.
+  const editor = document.createElement("div");
+  editor.className = "conexion-editor";
+  editor.hidden = true;
+
   const campo = document.createElement("input");
   campo.type = "password";                      // no se ve al escribir ni al pegar
   campo.className = "settings-input conexion-input";
-  campo.placeholder = fila.origen ? "Reemplazar…" : "Pegar la clave…";
+  campo.placeholder = fila.origen ? "Nueva clave…" : "Pegar la clave…";
   campo.setAttribute("aria-label", "Clave de " + fila.label);
   campo.autocomplete = "off";
 
@@ -701,38 +753,39 @@ function buildConnectionRow(fila) {
     if (!valor) return;
     saveConnection(fila.id, valor);
     campo.value = "";                           // no se queda en el DOM tras guardarla
+    editor.hidden = true;
   });
   campo.addEventListener("keydown", (evt) => {
     if (evt.key === "Enter") guardar.click();
+    if (evt.key === "Escape") { campo.value = ""; editor.hidden = true; }
   });
 
-  acciones.append(campo, guardar);
+  const cancelar = document.createElement("button");
+  cancelar.type = "button";
+  cancelar.className = "panel-submit-btn panel-submit-btn-secundario";
+  cancelar.textContent = "Cancelar";
+  cancelar.addEventListener("click", () => { campo.value = ""; editor.hidden = true; });
 
-  // Quitar solo tiene sentido sobre lo que está EN EL ARCHIVO: lo del entorno no se toca
-  // desde aquí, y ofrecer un botón que no puede cumplir sería mentir.
-  if (fila.origen === "archivo") {
-    const quitar = document.createElement("button");
-    quitar.type = "button";
-    quitar.className = "panel-submit-btn panel-submit-btn-secundario conexion-quitar";
-    quitar.textContent = "Quitar";
-    quitar.addEventListener("click", () => clearConnection(fila.id));
-    acciones.appendChild(quitar);
-  }
+  editor.append(campo, guardar, cancelar);
+  row.appendChild(editor);
 
-  row.appendChild(acciones);
+  editar.addEventListener("click", () => {
+    editor.hidden = !editor.hidden;
+    if (!editor.hidden) campo.focus();
+  });
   return row;
 }
 
-/** Llega de `connections_loaded`: repinta la sección con lo que hay guardado. */
+/** Llega de `connections_loaded`: repinta la tarjeta de la sección activa. */
 export function renderConnections(payload) {
-  if (_activeSection !== "conexiones") return;
+  if (!(_activeSection in GRUPOS_DE_CONEXIONES)) return;
   const content = document.getElementById("settings-content");
   if (!content) return;
 
   const anterior = content.querySelector("#connections-card");
-  const nueva = buildConnectionsCard(payload);
+  const nueva = buildConnectionsCard(payload, _activeSection);
   if (anterior) anterior.replaceWith(nueva);
-  else content.appendChild(nueva);
+  else content.prepend(nueva);
 }
 
 // ---------------------------------------------------------------- servidores MCP (REQ-043)
@@ -1118,7 +1171,7 @@ function mostrarSondeoMcp(row, texto) {
 
 /** Llega de `mcp_servers_loaded`: repinta la tarjeta con el estado actual. */
 export function renderMcpServers(payload) {
-  if (_activeSection !== "conexiones") return;
+  if (_activeSection !== "mcp") return;
   const content = document.getElementById("settings-content");
   if (!content) return;
 

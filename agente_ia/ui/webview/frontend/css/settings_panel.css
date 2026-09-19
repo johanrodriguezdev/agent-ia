@@ -414,3 +414,21 @@
 .mcp-alta-fila { display: flex; gap: 8px; }
 .mcp-alta-fila .settings-input { flex: 1; min-width: 0; }
 .mcp-alta-tipo { flex: 0 0 auto; }
+
+/* REQ-050 — credenciales en una línea; el campo aparece solo al pedirlo */
+.conexion-fila { flex-wrap: wrap; }
+.conexion-info {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 10px;
+  flex: 1;
+}
+.conexion-editor {
+  flex-basis: 100%;
+  display: flex;
+  gap: 8px;
+  padding-top: 8px;
+}
+/* `display: flex` le gana al `[hidden]` del navegador: sin esto el editor se veía siempre. */
+.conexion-editor[hidden] { display: none; }
+.conexion-editor .conexion-input { flex: 1; min-width: 0; }

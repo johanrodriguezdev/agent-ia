@@ -226,7 +226,7 @@ def test_el_arranque_avisa_cuando_no_hay_con_que_responder(bridge, qtbot, monkey
     with qtbot.waitSignal(bridge.setup_required, timeout=1000) as pedido:
         bridge.request_initial_state()
 
-    assert pedido.args[0] == "conexiones"
+    assert pedido.args[0] == "claves"
 
 
 def test_el_arranque_no_molesta_cuando_ya_hay_una_clave(bridge, qtbot, monkeypatch,

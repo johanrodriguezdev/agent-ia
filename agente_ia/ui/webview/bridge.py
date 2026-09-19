@@ -321,8 +321,8 @@ class Bridge(QObject):
         # dejar al usuario delante de un chat que solo devuelve errores. Solo ocurre cuando la
         # app está inservible: en una instalación que funciona no aparece nunca.
         if falta_configurar_proveedor():
-            logger.info("No hay ninguna clave de proveedor: abriendo Configuración → Conexiones")
-            self.setup_required.emit("conexiones")
+            logger.info("No hay ninguna clave de proveedor: abriendo Configuración → Claves de IA")
+            self.setup_required.emit("claves")
 
     # ------------------------------------------------------------ mensajes (§4.1)
     @pyqtSlot(str, str)
