@@ -1,5 +1,11 @@
 # OpenClaw — Sistema de Skills (incl. auto-autoría) y Abstracción de Proveedores LLM
 
+> **Aviso de terceros.** Los fragmentos de código transcritos en este documento pertenecen a
+> [OpenClaw](https://github.com/openclaw/openclaw), Copyright (c) 2026 OpenClaw Foundation,
+> licencia MIT. Se reproducen con fines de estudio; el aviso de permiso completo está en
+> `THIRD_PARTY_NOTICES.md`. Ningún archivo de código de este proyecto copia ni traduce ese
+> código.
+
 **Documento de referencia autosuficiente**
 Fecha de análisis: 2026-08-01
 Repo analizado: `openclaw-main` (TypeScript/Node, monorepo pnpm, ~24k archivos `.ts`) — *material de referencia que se conserva por ahora, pero que eventualmente se retirará del proyecto.*

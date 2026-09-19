@@ -26,6 +26,7 @@ Decisiones:
 
 import logging
 import os
+import shutil
 import threading
 from typing import Dict, List, Optional, Tuple
 
@@ -46,6 +47,11 @@ IDENTITY_FILES: Tuple[Tuple[str, str], ...] = (
     # ponerlo antes movería todo lo demás y tiraría el prefijo cacheado del proveedor.
     ("MEMORY.md", "LO QUE RECUERDAS"),
 )
+
+# Documentos personales: describen a quien instaló el agente y lo que este recuerda de él.
+# No se versionan (ver `.gitignore`); el repositorio trae solo su plantilla `.example` y
+# `asegurar_archivos_personales()` la copia al primer arranque. Desde ahí son del usuario.
+PERSONAL_FILES: Tuple[str, ...] = ("USER.md", "MEMORY.md")
 
 # Techos de presupuesto. Los tres archivos juntos rondan hoy las 145 líneas (~6 KB); el
 # margen deja crecer los documentos sin que un descuido dispare el coste de cada turno.
@@ -162,3 +168,31 @@ def clear_cache() -> None:
     """Vacía la caché de documentos. Existe para los tests."""
     with _cache_lock:
         _cache.clear()
+
+
+def asegurar_archivos_personales() -> List[str]:
+    """Copia `X.example.md` → `X.md` para cada documento personal que falte al arrancar.
+
+    Return los nombres de los que se crearon. Un archivo que ya existe no se toca nunca:
+    es el perfil y la memoria del usuario, y reescribirlos sería borrárselos. Una plantilla
+    ausente o una copia fallida se registran y no interrumpen el arranque — la identidad
+    es una mejora del prompt, no un requisito para responder.
+    """
+    creados: List[str] = []
+    for filename in PERSONAL_FILES:
+        destino = os.path.join(_PROJECT_ROOT, filename)
+        if os.path.exists(destino):
+            continue
+        base, ext = os.path.splitext(filename)
+        plantilla = os.path.join(_PROJECT_ROOT, f"{base}.example{ext}")
+        if not os.path.exists(plantilla):
+            logger.warning(f"Falta '{filename}' y no hay plantilla '{os.path.basename(plantilla)}'")
+            continue
+        try:
+            shutil.copyfile(plantilla, destino)
+        except OSError as e:
+            logger.warning(f"No se pudo crear '{filename}' desde su plantilla: {e}")
+            continue
+        logger.info(f"'{filename}' creado desde su plantilla: es personal y no se versiona")
+        creados.append(filename)
+    return creados

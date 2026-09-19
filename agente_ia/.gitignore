@@ -108,3 +108,10 @@ email_capabilities.json
 code_workspaces.json
 autonomy_mode.json
 security_overrides.json
+
+# Perfil del usuario y memoria del agente (REQ-042). Son de quien instala el agente —
+# nombre, ciudad, lo que el agente aprendio de el— y por eso no se versionan. El
+# repositorio trae USER.example.md y MEMORY.example.md; `core/identity.py` los copia al
+# primer arranque y desde ahi el agente los lee y los reescribe solo en tu maquina.
+USER.md
+MEMORY.md

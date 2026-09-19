@@ -24,7 +24,7 @@ Acciones de bajo riesgo que Noddoo ejecuta de forma autónoma:
 
 ### 🟡 Amarillo — debe confirmar antes de ejecutar
 
-Acciones de riesgo medio que requieren confirmación explícita de Johan:
+Acciones de riesgo medio que requieren confirmación explícita del usuario:
 
 - Apagar, reiniciar o suspender el PC
 - Cerrar aplicaciones forzosamente
@@ -45,7 +45,7 @@ Acciones de alto riesgo total o parcialmente bloqueadas:
 - Borrar bases de datos del sistema (memory.db, tasks.db, audit.db)
 - Modificar o borrar el código fuente de Noddoo
 - Exponer API keys, tokens o credenciales
-- Enviar correos electrónicos como si fuera Johan
+- Enviar correos electrónicos como si fuera el usuario
 - Publicar en redes sociales
 - Ejecutar comandos con privilegios elevados (admin)
 - Instalar o desinstalar software del sistema

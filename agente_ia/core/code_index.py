@@ -364,7 +364,11 @@ def indexar(
         procesados = 0
 
         for indice, (clave, ruta, huella) in enumerate(pendientes):
-            if time.monotonic() - comenzo > tope_segundos:
+            # `>=` y no `>`: con `tope_segundos=0` la intención es "no indexes nada en esta
+            # llamada", y con `>` dependía de que el reloj hubiera avanzado antes del primer
+            # archivo — en Windows el monotónico salta de a ~15 ms, así que a veces sí y a
+            # veces no (era el flaky de `test_el_indexado_se_puede_cortar_y_continuar`).
+            if time.monotonic() - comenzo >= tope_segundos:
                 resultado.pendientes = len(pendientes) - procesados
                 break
 

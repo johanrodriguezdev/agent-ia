@@ -62,6 +62,20 @@ aplicación; no hace falta tocarlo a mano.
 uno nuevo con los valores por defecto — perderlo no rompe nada, solo hay que volver a poner las
 claves.
 
+### Quién eres tú y quién es el agente
+
+Cuatro documentos en la raíz le dan al agente su voz y su contexto, y entran en cada llamada al
+modelo:
+
+- `SOUL.md` e `IDENTITY.md` — carácter, rol y límites del agente. Son del proyecto y se versionan;
+  edítalos si quieres otro tono. El **nombre** del agente no está ahí: se elige en Configuración.
+- `USER.md` — quién eres, dónde estás, cómo quieres que te hable. Es tuyo.
+- `MEMORY.md` — lo que el agente recuerda entre sesiones. Lo escribe él cuando le pides
+  "actualiza tu memoria"; lo que pongas encima de los marcadores se conserva.
+
+`USER.md` y `MEMORY.md` **no se versionan**: al primer arranque se copian de `USER.example.md` y
+`MEMORY.example.md`, y desde ahí viven solo en tu equipo.
+
 ### El canal de Telegram
 
 Arranca **junto con la aplicación de escritorio**, en su propia ventana de terminal, donde se
@@ -211,10 +225,8 @@ python -m pytest tests/ --tb=short -v
 ```
 
 Los tests no dependen de red, ni de micrófono, ni de altavoces. Si alguno los necesita, está mal
-escrito.
-
-> Dos tests de `tests/test_llm_provider.py` fallan si el paquete `anthropic` no está instalado
-> (está comentado en `requirements.txt`). Es un fallo de entorno conocido, no de código.
+escrito. Si falta una dependencia opcional (`python-docx`, `uiautomation`, `pymupdf`…), los tests
+que la necesitan se saltan y dicen cuál falta; un rojo es siempre un bug de verdad.
 
 ### Crear una habilidad
 
@@ -240,3 +252,17 @@ requerimiento vive en `requerimientos.csv`, que se escribe **únicamente** media
 Type hints en todo lo nuevo, líneas de hasta 100 caracteres, `logging` en lugar de `print`, y
 ningún `except` que se trague un error sin registrarlo. Está todo en
 [.claude/rules/python-style.md](.claude/rules/python-style.md).
+
+---
+
+## Contribuir
+
+Lee [CONTRIBUTING.md](CONTRIBUTING.md): cómo preparar el entorno, qué reglas se aplican a todo
+cambio y cuándo abrir un issue antes que un PR. Para reportar una vulnerabilidad, sigue
+[SECURITY.md](SECURITY.md) — nunca un issue público.
+
+## Licencia
+
+O.R.I.O.N. se distribuye bajo la **GNU General Public License v3.0** ([LICENSE](LICENSE)). La
+licencia la fija PyQt6, que es GPL. El código y los recursos de terceros incluidos en el
+repositorio están listados, con su licencia, en [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

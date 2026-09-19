@@ -189,3 +189,37 @@ def test_los_umbrales_estan_fijados():
     """Moverlos cambia qué recuerda el agente y cuánto ocupa cada respuesta."""
     assert ms.MAX_PROMOVIDOS == 40
     assert ms.UMBRAL_DUPLICADO == 0.5
+
+
+# ── El nombre del usuario sale de la configuración, no del código ───
+
+def test_el_nombre_configurado_no_cuenta_como_palabra_significativa(monkeypatch):
+    """Estaba escrito "johan" en la lista de palabras vacías: el repositorio es de quien
+    lo instale, así que el nombre que se descarta es el que cada uno configuró."""
+    import config_manager
+
+    monkeypatch.setattr(config_manager, "get_display_name", lambda: "María José")
+
+    palabras = ms._palabras_significativas("María José prefiere el modo oscuro")
+
+    assert "maria" not in palabras and "jose" not in palabras
+    assert "prefiere" in palabras and "oscuro" in palabras
+
+
+def test_sin_nombre_configurado_no_se_descarta_nada(monkeypatch):
+    import config_manager
+
+    monkeypatch.setattr(config_manager, "get_display_name", lambda: "")
+
+    assert "johan" in ms._palabras_significativas("Johan prefiere el modo oscuro")
+
+
+def test_si_la_configuracion_falla_el_puntaje_sigue_funcionando(monkeypatch):
+    import config_manager
+
+    def _explota():
+        raise OSError("config ilegible")
+
+    monkeypatch.setattr(config_manager, "get_display_name", _explota)
+
+    assert "prefiere" in ms._palabras_significativas("Johan prefiere el modo oscuro")

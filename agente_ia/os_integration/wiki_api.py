@@ -2,7 +2,7 @@ import wikipedia
 
 # La API de Wikipedia actualmente bloquea a los bots genéricos causando un fallo JSONDecodeError. 
 # Requerimos un User-Agent único.
-wikipedia.set_user_agent("JarvisAssistant/1.0 (johan@correo.com)")
+wikipedia.set_user_agent("ORION-Assistant/1.0 (https://github.com/johanrodriguezdev/agent-ia)")
 
 # Fijamos el idioma de Wikipedia a Español
 wikipedia.set_lang('es')

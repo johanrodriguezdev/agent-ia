@@ -190,3 +190,51 @@ def test_el_disco_no_se_toca_si_el_documento_no_cambio(_isolated_root, monkeypat
     monkeypatch.setattr("builtins.open", _no_deberia_abrirse)
 
     assert "ALMA" in identity.build_identity_block("O.R.I.O.N")
+
+
+# ── Archivos personales: se crean desde la plantilla, nunca se pisan ─
+
+def test_los_personales_se_crean_desde_su_plantilla_al_primer_arranque(_isolated_root):
+    _write(_isolated_root, "USER.example.md", "# Perfil\n\n- Nombre: (tu nombre)")
+    _write(_isolated_root, "MEMORY.example.md", "# Memoria\n")
+
+    creados = identity.asegurar_archivos_personales()
+
+    assert sorted(creados) == ["MEMORY.md", "USER.md"]
+    assert (_isolated_root / "USER.md").read_text(encoding="utf-8").startswith("# Perfil")
+    assert (_isolated_root / "MEMORY.md").exists()
+
+
+def test_un_personal_que_ya_existe_no_se_toca(_isolated_root):
+    _write(_isolated_root, "USER.example.md", "PLANTILLA")
+    _write(_isolated_root, "USER.md", "MI PERFIL DE VERDAD")
+    _write(_isolated_root, "MEMORY.example.md", "PLANTILLA")
+
+    creados = identity.asegurar_archivos_personales()
+
+    assert creados == ["MEMORY.md"]
+    assert (_isolated_root / "USER.md").read_text(encoding="utf-8") == "MI PERFIL DE VERDAD"
+
+
+def test_sin_plantilla_no_se_crea_nada_ni_se_lanza(_isolated_root):
+    assert identity.asegurar_archivos_personales() == []
+    assert not (_isolated_root / "USER.md").exists()
+
+
+def test_un_error_al_copiar_no_interrumpe_el_arranque(_isolated_root, monkeypatch):
+    _write(_isolated_root, "USER.example.md", "PLANTILLA")
+
+    def _boom(*args, **kwargs):
+        raise OSError("disco lleno")
+
+    monkeypatch.setattr(identity.shutil, "copyfile", _boom)
+
+    assert identity.asegurar_archivos_personales() == []
+
+
+def test_las_plantillas_de_los_personales_viajan_en_el_repositorio():
+    """Si falta una plantilla, un equipo recién clonado arranca sin perfil de usuario."""
+    raiz = os.path.dirname(os.path.dirname(os.path.abspath(identity.__file__)))
+    for nombre in identity.PERSONAL_FILES:
+        base, ext = os.path.splitext(nombre)
+        assert os.path.exists(os.path.join(raiz, f"{base}.example{ext}")), nombre

@@ -45,13 +45,15 @@ UMBRAL_DUPLICADO = 0.5
 LARGO_IDEAL = (30, 160)
 
 #: Solo se descartan las palabras que aparecerían en CUALQUIER hecho: artículos,
-#: preposiciones y el propio nombre del usuario. Los verbos de contenido —"trabaja",
-#: "prefiere", "usa"— se conservan a propósito: quitarlos dejaba dos o tres términos por
-#: frase, y con tan poca señal dos formulaciones del mismo hecho ya no se parecían.
+#: preposiciones y el propio nombre del usuario (ese sale de la configuración, ver
+#: `_nombre_del_usuario()`: estaba escrito acá y el repositorio es de quien lo instale).
+#: Los verbos de contenido —"trabaja", "prefiere", "usa"— se conservan a propósito:
+#: quitarlos dejaba dos o tres términos por frase, y con tan poca señal dos formulaciones
+#: del mismo hecho ya no se parecían.
 _PALABRAS_VACIAS = frozenset({
     "el", "la", "los", "las", "un", "una", "de", "del", "al", "a", "en", "y", "o", "que",
     "por", "para", "con", "sin", "su", "sus", "se", "es", "son", "sobre", "como",
-    "más", "mas", "usuario", "johan",
+    "más", "mas", "usuario",
 })
 
 #: Señales de que un hecho es concreto: cifras, rutas, direcciones, nombres propios.
@@ -65,9 +67,27 @@ def _normalizar(texto: str) -> str:
     return "".join(c for c in plano if not unicodedata.combining(c))
 
 
+def _nombre_del_usuario() -> Set[str]:
+    """Return las palabras del nombre configurado del usuario, ya normalizadas.
+
+    Casi todos los hechos empiezan por su nombre ("Johan usa VS Code"), así que contarlo
+    como palabra significativa haría que dos hechos distintos se parecieran. Sin nombre
+    configurado, o si la configuración no se puede leer, no se descarta nada.
+    """
+    try:
+        from config_manager import get_display_name
+
+        nombre = get_display_name()
+    except Exception as e:
+        logger.debug(f"no se pudo leer el nombre del usuario para el puntaje: {e}")
+        return set()
+    return set(re.findall(r"[a-z0-9]+", _normalizar(nombre or "")))
+
+
 def _palabras_significativas(texto: str) -> Set[str]:
     palabras = re.findall(r"[a-z0-9]+", _normalizar(texto))
-    return {p for p in palabras if len(p) > 3 and p not in _PALABRAS_VACIAS}
+    vacias = _PALABRAS_VACIAS | _nombre_del_usuario()
+    return {p for p in palabras if len(p) > 3 and p not in vacias}
 
 
 def _similitud(a: Set[str], b: Set[str]) -> float:

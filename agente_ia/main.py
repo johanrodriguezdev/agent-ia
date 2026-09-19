@@ -335,6 +335,13 @@ if __name__ == "__main__":
     headless = "--headless" in sys.argv
     tray_mode = "--tray" in sys.argv          # REQ-011 — arranque minimizado a bandeja
 
+    # USER.md y MEMORY.md son del usuario y no viajan en el repositorio: en un equipo
+    # recién clonado no existen, y sin ellos el agente no sabe a quién le habla. Se crean
+    # desde sus plantillas una sola vez; los que ya existen no se tocan.
+    from core.identity import asegurar_archivos_personales
+
+    asegurar_archivos_personales()
+
     # Lo caro se carga ahora, en segundo plano, mientras el usuario abre la ventana y
     # escribe su primer mensaje. Antes se cargaba en esa primera pregunta: más de un minuto
     # entre el clasificador, torch y el modelo de embeddings, con el usuario mirando tres

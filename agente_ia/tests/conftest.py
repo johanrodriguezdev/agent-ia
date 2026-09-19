@@ -127,3 +127,43 @@ def pytest_configure(config):
         "webview_smoke: instancia QWebEngineView real offscreen (REQ-015) — puede ser "
         "lento/inestable según el entorno; correr aparte si hace falta.",
     )
+
+
+# ── Dependencias opcionales: ausentes es "se salta", no "falla" (REQ-042) ──────────────
+
+#: Paquetes que el agente usa solo para una capacidad concreta (documentos de Office,
+#: árbol de accesibilidad de Windows, PDF sin Office) y que un equipo recién clonado puede
+#: no tener. Antes, sin `python-docx` o `uiautomation`, la suite mostraba 42 rojos y 4
+#: errores que no eran ningún bug: eso confunde a quien contribuye y esconde los fallos
+#: reales. Un `ModuleNotFoundError` de uno de estos nombres —venga del test, de una fixture
+#: o del módulo bajo prueba— se reporta como skip con el nombre del paquete que falta.
+_DEPENDENCIAS_OPCIONALES = frozenset({
+    "docx", "openpyxl", "pptx", "fitz", "pymupdf", "uiautomation", "win32com", "pythoncom",
+    "comtypes",
+})
+
+
+def _dependencia_opcional_ausente(excinfo) -> str:
+    """Return el nombre del paquete opcional que falta, o "" si el fallo es otra cosa."""
+    exc = excinfo.value if excinfo is not None else None
+    if not isinstance(exc, ModuleNotFoundError):
+        return ""
+    raiz = (exc.name or "").split(".")[0]
+    return raiz if raiz in _DEPENDENCIAS_OPCIONALES else ""
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    outcome = yield
+    reporte = outcome.get_result()
+    if not reporte.failed:
+        return
+    paquete = _dependencia_opcional_ausente(call.excinfo)
+    if not paquete:
+        return
+    reporte.outcome = "skipped"
+    reporte.longrepr = (
+        str(item.fspath),
+        item.location[1],
+        f"Skipped: dependencia opcional no instalada: {paquete} (ver requirements.txt)",
+    )
