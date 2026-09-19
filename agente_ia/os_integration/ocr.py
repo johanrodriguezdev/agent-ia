@@ -94,8 +94,11 @@ def _encoger_si_hace_falta(ruta: str) -> str:
         from winsdk.windows.media.ocr import OcrEngine
 
         lado = int(OcrEngine.max_image_dimension) or lado
-    except Exception:
-        pass
+    except Exception as e:
+        # Sin winsdk (o con una versión que no expone el límite) se usa el tope por
+        # defecto. No es un error, pero se deja dicho: si el OCR recorta imágenes de más,
+        # acá está el porqué.
+        logger.debug(f"no se pudo leer el tamaño máximo del motor OCR, se usa {lado}: {e}")
 
     try:
         with Image.open(ruta) as imagen:

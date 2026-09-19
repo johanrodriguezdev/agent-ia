@@ -175,3 +175,5 @@ parámetros de `run()`. La firma NO cambia, así que `tests/modelo_falso.py` no 
 - Definir rama git con Johan antes de tocar código (P-5)
 
 2026-09-18 | → LISTO_PARA_COMMIT | conversación principal (sesión nocturna autorizada por Johan) | Sincronización del tracker con `main`: el código de este REQ ya está commiteado y mergeado y la evidencia (QA aprobado y/o suite en verde registrada en este contexto) estaba completa. Solo cambia el estado; no se toca código.
+
+2026-09-18 | conversación principal (sesión nocturna) | Deudas P-3 y P-4 cerradas por REQ-044 | `ai/claude_brain.py` pasa al protocolo nativo reusando `reasoning_loop.ejecutar_vuelta()` (todas las tool calls por vuelta, cierre sin herramientas, presupuesto `TECHO_CANAL_NO_ESCRITORIO`), y la voz tiene techo de 500 tokens de salida (`ai/llm_provider.tope_de_salida`, `reasoning_loop.MAX_TOKENS_VOZ`). Ver `REQ-044-context.md`.

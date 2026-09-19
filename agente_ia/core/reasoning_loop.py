@@ -32,7 +32,8 @@ from agents.tool_registry import execute_tool
 from core import streaming, tool_history
 from core.cancelacion import abortar_si_cancelado
 from ai.llm_provider import (
-    LLMToolResponse, con_aviso_de_cambio, es_respuesta_de_fallo, generate_response,
+    MAX_TOKENS_SALIDA, LLMToolResponse, con_aviso_de_cambio, es_respuesta_de_fallo,
+    generate_response, tope_de_salida,
 )
 from config_manager import get_agent_name, get_display_name, get_user_title
 from core.agent_context import agent_context_manager
@@ -57,6 +58,13 @@ MAX_LLM_CALLS = 8
 #: `EMAIL`, `UNKNOWN`) hereda el comportamiento de hoy y nunca el 40. En voz, además, un
 #: turno largo es silencio que nadie puede cortar — el botón de detener es de escritorio.
 TECHO_CANAL_NO_ESCRITORIO = 5
+
+#: REQ-044 (P-4 de REQ-027) — techo de tokens de salida cuando la respuesta va a leerse en
+#: voz alta. Con 4096 una respuesta larga por TTS son minutos que no se pueden cortar; 500
+#: son unos 40 segundos de lectura, que ya es mucho para una conversación hablada. Aplica
+#: solo a las llamadas que producen LA respuesta (bucle y cierre), no a las herramientas
+#: que consulten al modelo por su cuenta dentro del turno.
+MAX_TOKENS_VOZ = 500
 
 #: Turnos previos que ve el modelo. Eran 5 registros —dos o tres intercambios— y la
 #: respuesta del asistente se guardaba cortada a 200 caracteres: Johan le pidió "mejorá
@@ -279,6 +287,13 @@ def _load_prior_turns(agent_name: str, user_id: str) -> list[dict]:
         return []
 
 
+def _tope_de_salida_del_canal(canal):
+    """Return el context manager que acota la salida en voz; en el resto, no acota nada."""
+    if canal == ChannelType.VOICE:
+        return tope_de_salida(MAX_TOKENS_VOZ)
+    return tope_de_salida(MAX_TOKENS_SALIDA)
+
+
 def _presupuesto_de_llamadas(modo_def: Optional[ModoComposer], canal) -> int:
     """Return cuántas llamadas al modelo puede gastar este turno (REQ-027/CA-13/14/15).
 
@@ -367,12 +382,19 @@ def _mensajes_del_turno(
     return [{"role": "user", "content": encabezado}] + historial
 
 
-def _ejecutar_vuelta(
+def ejecutar_vuelta(
     tool_calls: list, numero_de_vuelta: int, canal, user_id: str, task: str,
+    cancelable: bool = True,
 ) -> tuple[list[dict], list[dict], Optional[str]]:
     """Ejecuta EN SECUENCIA todas las tool calls de una vuelta (REQ-027/CA-20 a CA-27).
 
     Return `(llamadas, resultados, motivo_de_denegacion)`.
+
+    Pública desde REQ-044: es la misma vuelta para el escritorio y para Telegram/Discord
+    (`ai/claude_brain.py`), que antes ejecutaba solo `tool_calls[0]` y descartaba el resto.
+    `cancelable=False` es para el camino remoto: el botón de detener es del escritorio, y
+    `abortar_si_cancelado()` mira un estado de proceso — un turno de escritorio cancelado
+    no puede abortar un mensaje de Telegram que corre en otro hilo.
 
     `llamadas` y `resultados` tienen SIEMPRE la misma longitud y los mismos ids, incluso
     cuando la secuencia se cortó: a las que no llegaron a ejecutarse se les registra un
@@ -419,9 +441,10 @@ def _ejecutar_vuelta(
         # CA-27: el botón de detener se evalúa ENTRE herramientas, no solo entre vueltas.
         # Con varias herramientas por vuelta, esperar a la vuelta siguiente sería esperar a
         # que terminen todas.
-        abortar_si_cancelado(
-            f"reasoning_loop, vuelta {numero_de_vuelta}, antes de '{call.name}'"
-        )
+        if cancelable:
+            abortar_si_cancelado(
+                f"reasoning_loop, vuelta {numero_de_vuelta}, antes de '{call.name}'"
+            )
 
         try:
             resultado = execute_tool(call.name, params, canal, user_id)
@@ -444,9 +467,13 @@ def _ejecutar_vuelta(
     return llamadas, resultados, denegacion
 
 
+#: Nombre anterior, conservado para los tests de REQ-027 que lo referencian.
+_ejecutar_vuelta = ejecutar_vuelta
+
+
 def _llamada_de_cierre(
     task: str, prior_turns: list[dict], historial: list[dict], instruccion: str,
-    system_prompt: str, tarea: str, aviso: dict,
+    system_prompt: str, tarea: str, aviso: dict, canal=None,
 ) -> Optional[str]:
     """Una última llamada al modelo SIN herramientas para que redacte con lo que reunió.
 
@@ -474,7 +501,7 @@ def _llamada_de_cierre(
 
     # `permitido()`: esto ES la respuesta al usuario, así que se muestra mientras se
     # escribe, igual que la de una vuelta normal.
-    with streaming.permitido():
+    with streaming.permitido(), _tope_de_salida_del_canal(canal):
         respuesta = generate_response(
             mensajes, system_prompt, tools=None, tarea=tarea, aviso=aviso,
         )
@@ -561,7 +588,7 @@ def run(task: str, channel, user_id: str = "default", agent_name: str = "reasoni
         # muestra mientras se escribe. Las herramientas que se ejecuten despues pueden
         # consultar al modelo por su cuenta (resumir un correo, leer una captura) y eso NO
         # tiene que aparecer en la burbuja del chat: quedan fuera del bloque.
-        with streaming.permitido():
+        with streaming.permitido(), _tope_de_salida_del_canal(resolved_channel):
             response = generate_response(
                 _mensajes_del_turno(task, prior_turns, historial), system_prompt,
                 tools=tools,
@@ -588,7 +615,7 @@ def run(task: str, channel, user_id: str = "default", agent_name: str = "reasoni
         # REQ-027/CA-20: se ejecutan TODAS las que pidio, en orden y en secuencia. Antes
         # se ejecutaba solo `tool_calls[0]` y el resto se descartaba, asi que el modelo
         # tenia que volver a pedirlas gastando otra vuelta entera del presupuesto.
-        llamadas, resultados, denegacion = _ejecutar_vuelta(
+        llamadas, resultados, denegacion = ejecutar_vuelta(
             response.tool_calls, call_number, resolved_channel, user_id, task,
         )
         historial.append(tool_history.mensaje_de_llamadas(response.text, llamadas))
@@ -611,7 +638,7 @@ def run(task: str, channel, user_id: str = "default", agent_name: str = "reasoni
             task, prior_turns, historial,
             _INSTRUCCION_CIERRE_DENEGACION if denegacion is not None
             else _INSTRUCCION_CIERRE_PRESUPUESTO,
-            system_prompt, tarea, aviso_cierre,
+            system_prompt, tarea, aviso_cierre, resolved_channel,
         )
         if cierre:
             final_text = cierre

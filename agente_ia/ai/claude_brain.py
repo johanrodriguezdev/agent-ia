@@ -113,14 +113,48 @@ RECUERDOS RELEVANTES DE CONVERSACIONES PASADAS (Memoria Semántica):
 
 
 
-#: Tope de rondas de herramientas por mensaje. Mismo criterio que `core/reasoning_loop.py`:
-#: acota el coste y evita que un modelo confundido encadene llamadas sin fin.
-#: REQ-027/CA-16 — rondas de herramientas del bucle propio de Telegram/Discord.
-#: Sube de 3 a 5 por el mismo criterio que el techo de los canales remotos: no es el
-#: mismo numero que `reasoning_loop.MAX_LLM_CALLS` ni cuenta lo mismo (aca son rondas
-#: de herramientas, y la llamada de cierre ya existia y va aparte). Este modulo NO
-#: conoce el concepto de modo del composer: es de escritorio.
-MAX_TOOL_ROUNDS = 5
+def _ultimo_mensaje_del_usuario(history) -> str:
+    """Return lo que dijo el humano en este turno: el último `user` del historial."""
+    for mensaje in reversed(history):
+        if mensaje.get("role") == "user":
+            contenido = mensaje.get("content")
+            return contenido if isinstance(contenido, str) else str(contenido or "")
+    return ""
+
+
+def _cerrar_sin_herramientas(mensajes, instruccion, system_prompt, image_path):
+    """Una última llamada con `tools=None` para redactar con lo reunido (REQ-044/CA-05).
+
+    Misma pieza que `core/reasoning_loop._llamada_de_cierre()`: la instrucción se cuelga
+    del último mensaje —con historial de herramientas es el de resultados, también de rol
+    `user`, y Anthropic exige alternancia estricta— y sin herramientas la garantía de "no
+    reintenta la acción denegada" es estructural, no una frase del prompt. Return
+    `(texto_o_None, aviso_de_cambio)`.
+    """
+    from ai.llm_provider import LLMToolResponse, es_respuesta_de_fallo, generate_response
+    from core import tool_history
+
+    ultimo = mensajes[-1]
+    if tool_history.es_estructurado(ultimo):
+        mensajes = mensajes[:-1] + [tool_history.con_texto_agregado(ultimo, instruccion)]
+    else:
+        mensajes = mensajes[:-1] + [
+            {**ultimo, "content": f"{ultimo.get('content', '')}\n\n{instruccion}"}
+        ]
+
+    aviso: dict = {}
+    with streaming.permitido():
+        respuesta = generate_response(
+            messages=mensajes, system_prompt=system_prompt, image_path=image_path or None,
+            tools=None, tarea="razonamiento", aviso=aviso,
+        )
+    if isinstance(respuesta, LLMToolResponse):
+        texto = respuesta.text if not respuesta.tool_calls else None
+    else:
+        texto = respuesta
+    if not texto or es_respuesta_de_fallo(texto):
+        return None, aviso
+    return texto, aviso
 
 
 def _resolver_con_tools(history, system_prompt, image_path, channel, user_id):
@@ -131,15 +165,30 @@ def _resolver_con_tools(history, system_prompt, image_path, channel, user_id):
     si podia, via `core/reasoning_loop.py`: el mismo agente se comportaba distinto segun
     donde se le hablara.
 
-    No se reusa `reasoning_loop.run()` porque el contrato es otro: aqui hay historial de
-    conversacion por usuario, soporte de imagenes y los bloques JSON de aprendizaje, que
-    ese modulo no maneja. Lo que si se comparte es lo que importa: la ejecucion pasa
-    SIEMPRE por `execute_tool()`, el mismo punto de gate de seguridad, con el canal real
-    del caller y nunca uno deducido del texto.
+    Desde REQ-044 razona igual que el escritorio (REQ-027): los resultados de las
+    herramientas viajan como historial NEUTRAL de `core/tool_history.py` —que cada
+    adaptador traduce a `tool_use`/`tool_result` de su proveedor— y no como texto pegado
+    en un mensaje `user`; se ejecutan TODAS las tool calls de la vuelta, en secuencia y
+    por `execute_tool()`, con el canal y el usuario del caller; y al agotar el presupuesto
+    o ante una denegacion hay una llamada de cierre sin herramientas que redacta con lo
+    reunido, en vez del texto enlatado.
+
+    No se reusa `reasoning_loop.run()` entero porque el contrato es otro: aqui hay
+    historial de conversacion por usuario, soporte de imagenes y los bloques JSON de
+    aprendizaje. Lo que si se comparte es lo que importa: la vuelta
+    (`reasoning_loop.ejecutar_vuelta`), el formato del historial, el presupuesto del canal
+    (`TECHO_CANAL_NO_ESCRITORIO`) y las instrucciones de cierre. `cancelable=False`: el
+    boton de detener es del escritorio y mira un estado de proceso; un turno de escritorio
+    cancelado no puede abortar un mensaje de Telegram en otro hilo.
     """
-    from agents.tool_registry import catalogo_para_modelo, execute_tool
+    from agents.tool_registry import catalogo_para_modelo
     from ai.llm_provider import LLMToolResponse, con_aviso_de_cambio, generate_response
-    from core.security_manager import ActionDenied, security_manager
+    from core import tool_history
+    from core.reasoning_loop import (
+        _INSTRUCCION_CIERRE_DENEGACION, _INSTRUCCION_CIERRE_PRESUPUESTO,
+        TECHO_CANAL_NO_ESCRITORIO, ejecutar_vuelta,
+    )
+    from core.security_manager import security_manager
 
     canal = security_manager.resolve_channel(channel)
 
@@ -148,9 +197,15 @@ def _resolver_con_tools(history, system_prompt, image_path, channel, user_id):
     # las amarillas que este canal nunca puede ejecutar: el modelo las pedia y el gate se
     # las denegaba, gastando una vuelta cada vez.
     herramientas = catalogo_para_modelo(canal)
+    tarea_del_usuario = _ultimo_mensaje_del_usuario(history)
 
-    mensajes = list(history)
-    for ronda in range(1, MAX_TOOL_ROUNDS + 1):
+    #: El historial de herramientas del turno, en formato neutral. Es del turno: el
+    #: historial por usuario (`history`) sigue guardando solo texto (CA-07).
+    historial: list = []
+    denegacion = None
+    ultimo_aviso: dict = {}
+
+    for ronda in range(1, TECHO_CANAL_NO_ESCRITORIO + 1):
         progress_report("Pensando" if ronda == 1 else f"Pensando ({ronda})")
         aviso_cambio: dict = {}   # REQ-022/CA-12 — vacío otra vez en cada ronda
         # Igual que en `core/reasoning_loop.py`: lo que salga de ESTA llamada es la
@@ -158,7 +213,7 @@ def _resolver_con_tools(history, system_prompt, image_path, channel, user_id):
         # las herramientas queda afuera del bloque y no llega a la burbuja del chat.
         with streaming.permitido():
             respuesta = generate_response(
-                messages=mensajes,
+                messages=list(history) + historial,
                 system_prompt=system_prompt,
                 image_path=image_path or None,
                 tools=herramientas or None,
@@ -167,6 +222,8 @@ def _resolver_con_tools(history, system_prompt, image_path, channel, user_id):
                 tarea="razonamiento",
                 aviso=aviso_cambio,   # REQ-022/CA-12
             )
+        if aviso_cambio:
+            ultimo_aviso = aviso_cambio
 
         if not isinstance(respuesta, LLMToolResponse):
             # proveedor sin tool-calling: texto plano. `corto` queda en su default `False`
@@ -175,36 +232,35 @@ def _resolver_con_tools(history, system_prompt, image_path, channel, user_id):
         if not respuesta.tool_calls:
             return con_aviso_de_cambio(respuesta.text or "", aviso_cambio)
 
-        llamada = respuesta.tool_calls[0]
-        params = dict(llamada.arguments or {})
-        # El canal y el usuario los pone el caller, nunca el modelo (mismo invariante que
-        # `reasoning_loop.run()` y `core/resolution.py`).
-        params["channel"] = canal.value
-        params["user_id"] = user_id
+        # REQ-044/CA-03: todas las que pidio, en orden. Antes se ejecutaba solo
+        # `tool_calls[0]` y el resto se descartaba: el modelo tenia que volver a pedirlas
+        # gastando otra vuelta entera del presupuesto.
+        llamadas, resultados, denegacion = ejecutar_vuelta(
+            respuesta.tool_calls, ronda, canal, user_id, tarea_del_usuario, cancelable=False,
+        )
+        historial.append(tool_history.mensaje_de_llamadas(respuesta.text, llamadas))
+        historial.append(tool_history.mensaje_de_resultados(resultados))
+        if denegacion is not None:
+            break
 
-        try:
-            resultado = execute_tool(llamada.name, params, canal, user_id)
-        except ActionDenied as e:
-            return f"No puedo ejecutar esa accion: {e.reason or 'denegada'}."
-        except Exception as e:
-            logger.warning(f"La herramienta '{llamada.name}' fallo: {e}")
-            resultado = f"Error ejecutando '{llamada.name}': {e}"
-
-        mensajes = mensajes + [{
-            "role": "user",
-            "content": (
-                f"[Resultado de {llamada.name}]\n{resultado}\n\n"
-                f"Responde al usuario con esta informacion."
-            ),
-        }]
-
-    # Agotadas las rondas: se pide un cierre en texto, sin herramientas.
-    aviso_cambio_final: dict = {}   # REQ-022/CA-12
-    ultimo = generate_response(
-        messages=mensajes, system_prompt=system_prompt, aviso=aviso_cambio_final,
+    # Presupuesto agotado o denegacion: una llamada de cierre sin herramientas, fuera del
+    # presupuesto, con la misma instruccion que el escritorio (CA-05).
+    instruccion = (
+        _INSTRUCCION_CIERRE_DENEGACION if denegacion is not None
+        else _INSTRUCCION_CIERRE_PRESUPUESTO
     )
-    texto = ultimo if isinstance(ultimo, str) else getattr(ultimo, "text", "") or ""
-    return con_aviso_de_cambio(texto, aviso_cambio_final)
+    texto, aviso_cierre = _cerrar_sin_herramientas(
+        list(history) + historial, instruccion, system_prompt, image_path,
+    )
+    if texto:
+        return con_aviso_de_cambio(texto, aviso_cierre or ultimo_aviso)
+    if denegacion is not None:
+        return f"No puedo ejecutar esa accion: {denegacion}."
+    return con_aviso_de_cambio(
+        f"No pude completar la tarea en el número de intentos disponibles{vocative()}. "
+        "¿Quiere que lo intente de otra forma?",
+        ultimo_aviso,
+    )
 
 
 def ask_claude(

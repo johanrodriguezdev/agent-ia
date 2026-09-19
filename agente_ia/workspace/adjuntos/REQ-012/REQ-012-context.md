@@ -111,3 +111,5 @@ cada minuto pisa la selección de quien está copiando).
 2026-09-09 | EN_DESARROLLO → EN_PRUEBAS | conversación principal | Re-baseline + los dos arreglos, con 6 tests nuevos (4 de la skill de clima, 2 del saludo en el webview)
 
 2026-09-18 | → LISTO_PARA_COMMIT | conversación principal (sesión nocturna autorizada por Johan) | Sincronización del tracker con `main`: el código de este REQ ya está commiteado y mergeado y la evidencia (QA aprobado y/o suite en verde registrada en este contexto) estaba completa. Solo cambia el estado; no se toca código.
+
+2026-09-18 | conversación principal (sesión nocturna) | Borrados `tests/_tmp_manual_verify_012.py` y `_tmp_manual_verify_012b.py` | Su propia cabecera decía «se borra al terminar» y el baseline v2 los marcó «a borrar»; uno tenía un error de sintaxis. No los recogía pytest. Sigue pendiente de Johan qué hacer con `os_integration/weather_data.py` (código muerto desde REQ-015).

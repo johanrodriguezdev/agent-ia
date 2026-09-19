@@ -283,8 +283,10 @@ def _pide_sesion(sopa, url_final: str) -> bool:
     try:
         if sopa.find("input", attrs={"type": "password"}) is not None:
             return True
-    except Exception:
-        pass
+    except Exception as e:
+        # Una sopa rota o que no es una sopa: se decide solo por la dirección. Se registra
+        # porque un muro de acceso que no se detecta acaba como "página sin contenido".
+        logger.debug(f"no se pudo buscar el campo de contraseña en la página: {e}")
     camino = (url_final or "").lower()
     return any(marca in camino for marca in _RUTAS_DE_ACCESO)
 

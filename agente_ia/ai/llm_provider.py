@@ -3,9 +3,11 @@ import os
 import json
 import logging
 import re
+import threading
 from collections import OrderedDict
+from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import Iterator, List, Optional, Tuple
 
 from ai import provider_health
 from core import streaming, tool_history
@@ -21,6 +23,33 @@ CACHE_MAX_SIZE = 100
 #: rechazan la petición con error duro — sería una regresión justo en los modelos que se
 #: usan por ser gratis.
 MAX_TOKENS_SALIDA = 4096
+
+# REQ-044 (P-4 de REQ-027) — techo de salida más bajo para un tramo concreto, sin tocar la
+# firma de `generate_response()` ni la de los adaptadores. Thread-local, mismo patrón que
+# `core/streaming.permitido()`: lo fija el bucle de razonamiento alrededor de las llamadas
+# que producen LA respuesta al usuario en voz, y no alcanza a las herramientas que consulten
+# al modelo por su cuenta en el mismo turno.
+_tope_local = threading.local()
+
+
+@contextmanager
+def tope_de_salida(max_tokens: int) -> Iterator[None]:
+    """Acota los tokens de salida de las llamadas al modelo hechas dentro del bloque.
+
+    Un techo menor que el general, nunca mayor: `min()` con `MAX_TOKENS_SALIDA`, para que
+    ningún caller pueda saltarse el límite que protege a los modelos gratuitos.
+    """
+    anterior = getattr(_tope_local, "valor", None)
+    _tope_local.valor = max(1, min(int(max_tokens), MAX_TOKENS_SALIDA))
+    try:
+        yield
+    finally:
+        _tope_local.valor = anterior
+
+
+def _max_tokens_salida() -> int:
+    """Return el techo vigente en este hilo: el del bloque `tope_de_salida()` o el general."""
+    return getattr(_tope_local, "valor", None) or MAX_TOKENS_SALIDA
 
 
 @dataclass(frozen=True)
@@ -769,7 +798,7 @@ def _ask_anthropic(messages, system_prompt, image_path, model_name, tools=None):
     kwargs = {"tools": api_tools} if api_tools else {}
     response = client.messages.create(
         model=model,
-        max_tokens=MAX_TOKENS_SALIDA,
+        max_tokens=_max_tokens_salida(),
         system=system_prompt,
         messages=anthropic_msgs,
         **kwargs,
@@ -916,7 +945,7 @@ def _ask_openai(messages, system_prompt, image_path, model_name, tools=None):
     response = client.chat.completions.create(
         model=model,
         messages=openai_msgs,
-        max_tokens=MAX_TOKENS_SALIDA,
+        max_tokens=_max_tokens_salida(),
         **kwargs,
     )
     msg = response.choices[0].message
@@ -981,7 +1010,7 @@ def _ask_openrouter(messages, system_prompt, image_path, model_name, tools=None)
     response = client.chat.completions.create(
         model=model,
         messages=openrouter_msgs,
-        max_tokens=MAX_TOKENS_SALIDA,
+        max_tokens=_max_tokens_salida(),
         **kwargs,
     )
     msg = response.choices[0].message
@@ -1014,7 +1043,7 @@ def _llamada_en_streaming(client, model, mensajes, api_tools):
     """
     kwargs = {"tools": api_tools, "tool_choice": "auto"} if api_tools else {}
     stream = client.chat.completions.create(
-        model=model, messages=mensajes, max_tokens=MAX_TOKENS_SALIDA, stream=True, **kwargs,
+        model=model, messages=mensajes, max_tokens=_max_tokens_salida(), stream=True, **kwargs,
     )
 
     partes_texto = []
@@ -1116,7 +1145,7 @@ def _ask_deepseek(messages, system_prompt, image_path, model_name, tools=None):
     response = client.chat.completions.create(
         model=model,
         messages=deepseek_msgs,
-        max_tokens=MAX_TOKENS_SALIDA,
+        max_tokens=_max_tokens_salida(),
         **kwargs,
     )
     msg = response.choices[0].message
