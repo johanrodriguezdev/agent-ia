@@ -298,3 +298,104 @@
   overflow: hidden;
 }
 
+/* ---------------------------------------------------------------- proyectos (REQ-051) */
+.sidebar-section-proyectos {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-right: 10px;
+}
+.icon-btn-xs { width: 22px; height: 22px; }
+#sidebar.collapsed .sidebar-section-proyectos,
+#sidebar.collapsed #project-list { display: none; }
+
+#project-list {
+  padding: 0 8px 4px;
+  max-height: 45%;
+  overflow-y: auto;
+}
+.project-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.project-row:hover { background-color: var(--bg-hover); }
+.project-row:hover .conv-icon-btn { display: flex; }
+/* El símbolo apunta hacia abajo: cerrado se gira hacia la derecha, abierto queda como es. */
+.project-chevron { transition: transform 140ms; color: var(--text-secondary); flex: none; transform: rotate(-90deg); }
+.project-chevron.open { transform: none; }
+.project-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-count { font-size: 11px; color: var(--text-secondary); }
+.project-row:hover .project-count { display: none; }
+.project-chats { padding-left: 14px; }
+.project-chats .conv-item { padding-left: 10px; }
+.project-empty { padding: 4px 10px; font-size: 12px; color: var(--text-secondary); }
+.project-new-chat {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+.project-new-chat:hover { background-color: var(--bg-hover); color: var(--text-primary); }
+.project-new-input {
+  width: 100%;
+  margin: 2px 0 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--text-accent);
+  border-radius: var(--radius-md);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+/* menú «Mover a proyecto» */
+.conv-menu {
+  position: absolute;
+  right: 8px;
+  top: calc(100% - 4px);
+  z-index: 20;
+  min-width: 180px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  box-shadow: var(--shadow-pop);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.conv-item:has(.conv-menu) { z-index: 21; overflow: visible; }
+.conv-menu-title {
+  padding: 4px 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.conv-menu-item {
+  text-align: left;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+}
+.conv-menu-item:hover { background-color: var(--bg-hover); }
+.conv-menu-item-peligroso { color: var(--danger); }
+.conv-menu-empty { padding: 4px 8px; font-size: 12px; color: var(--text-secondary); }

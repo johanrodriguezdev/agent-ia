@@ -182,6 +182,11 @@ DESKTOP_ONLY_ACTIONS: set[str] = {
     "mcp_allow_tools",
     "mcp_set_server_enabled",
     "mcp_remove_server",
+    # REQ-051 — los proyectos de chats son de la barra lateral del escritorio, y «este
+    # chat» (`core/conversacion_activa.py`) solo existe ahí.
+    "chat_project_list",
+    "chat_project_create",
+    "chat_project_assign_current",
 }
 
 _CHANNEL_STR_MAP: Dict[str, ChannelType] = {

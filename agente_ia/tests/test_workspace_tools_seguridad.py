@@ -94,10 +94,19 @@ NIVELES_REQ043 = {
     "mcp_remove_server": RiskLevel.YELLOW,
 }
 
+#: REQ-051 — proyectos de chats de la barra lateral. Verdes (solo tocan el historial) y
+#: solo de escritorio: «este chat» solo existe ahí.
+NIVELES_REQ051 = {
+    "chat_project_list": RiskLevel.GREEN,
+    "chat_project_create": RiskLevel.GREEN,
+    "chat_project_assign_current": RiskLevel.GREEN,
+}
+
 #: Todas juntas. Las pruebas de canal recorren todas; las que fijan el alcance de REQ-029
 #: (el modo "codigo") siguen usando solo las 8 de v1.
 TODAS = {**NIVELES_ESPERADOS, **NIVELES_REQ030, **NIVELES_REQ032, **NIVELES_REQ034,
-         **NIVELES_REQ035, **NIVELES_REQ036, **NIVELES_REQ040, **NIVELES_REQ043}
+         **NIVELES_REQ035, **NIVELES_REQ036, **NIVELES_REQ040, **NIVELES_REQ043,
+         **NIVELES_REQ051}
 
 TODOS_LOS_CANALES = [
     ChannelType.DESKTOP, ChannelType.TELEGRAM, ChannelType.DISCORD, ChannelType.VOICE,

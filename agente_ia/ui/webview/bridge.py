@@ -235,6 +235,9 @@ class Bridge(QObject):
         self._pending_user_text: str = ""
         self._resolution_in_flight: bool = False
         self._pending_conversation_offset: int = 0
+        # REQ-051 — «Nuevo chat aquí» dentro de un proyecto: el chat todavía no existe (se
+        # crea con el primer mensaje), así que se recuerda a qué proyecto va.
+        self._pending_project_id: Optional[int] = None
 
         self._wake_worker: Optional[WakeWordWorker] = None
         self._current_gui_state: str = GLOBAL_STATE
@@ -360,6 +363,13 @@ class Bridge(QObject):
         from core.streaming import register_sink
 
         register_sink(self._on_stream_chunk)
+
+        # REQ-051 — la conversación existe desde el primer mensaje (antes recién al
+        # terminar el turno): así una herramienta del turno puede referirse a «este chat».
+        from core import conversacion_activa
+
+        conversacion_activa.fijar(self._ensure_conversation_id())
+
         self.message_appended.emit(json.dumps({
             "role": "user", "html": render_markdown(text), "timestamp": _now_iso(),
         }))
@@ -435,6 +445,23 @@ class Bridge(QObject):
         except Exception as e:
             logger.warning(f"No se pudo limpiar la línea de progreso: {e}")
 
+    def _tras_guardar_turno(self, _resultado=None) -> None:
+        """Con el turno ya en la base: la barra lateral se refresca y, si una herramienta
+        pidió guardar «este chat» en un proyecto cuando todavía no tenía turnos
+        (REQ-051), ahora sí se puede."""
+        from ai.memory_manager import memory
+        from core import conversacion_activa
+
+        pendiente = conversacion_activa.tomar_asignacion_pendiente()
+        if pendiente is not None:
+            conversation_id, project_id = pendiente
+            try:
+                memory.assign_conversation_to_project(conversation_id, project_id, user_id=OWNER_USER_ID)
+            except Exception as e:
+                logger.error(f"No se pudo guardar el chat en el proyecto {project_id}: {e}")
+        self._load_conversations(offset=0)
+        self._emit_projects_loaded()   # REQ-051: un tool del turno pudo mover este chat
+
     def _on_resolve_done(self, resolution) -> None:
         from ai.memory_manager import memory
 
@@ -461,13 +488,12 @@ class Bridge(QObject):
 
         conversation_id = self._ensure_conversation_id()
         run_async(
-            memory.store_turn, None, None,
+            memory.store_turn, self._tras_guardar_turno, None,
             self._pending_user_text, result_text, conversation_id,
             user_id=OWNER_USER_ID, matched_by=getattr(resolution, "matched_by", ""),
         )
         self._pending_user_text = ""
         self._resolution_in_flight = False
-        self._load_conversations(offset=0)
         # REQ-021 (pieza 8): el TTS va DESPUÉS de liberar el guard, y la ventana de
         # micrófono se arma más tarde todavía, al terminar la locución. Son dos instantes
         # separados por toda la locución — es lo que hace que el segundo turno de una
@@ -584,14 +610,31 @@ class Bridge(QObject):
 
         if not self._conversation_id:
             self._conversation_id = memory.new_conversation_id()
+            if self._pending_project_id is not None:
+                # REQ-051 — nació desde «Nuevo chat aquí». `assign` exige que el chat ya
+                # tenga turnos guardados, y eso pasa al terminar el turno: queda pedido y
+                # `_tras_guardar_turno()` lo aplica. Mismo camino que la herramienta
+                # `chat_project_assign_current` en un chat recién empezado.
+                from core import conversacion_activa
+
+                proyecto, self._pending_project_id = self._pending_project_id, None
+                conversacion_activa.pedir_asignacion(self._conversation_id, proyecto)
         return self._conversation_id
 
     # ------------------------------------------------------------ conversaciones (§4.1)
     @pyqtSlot()
     def new_conversation(self) -> None:
         self._conversation_id = None
+        self._pending_project_id = None
         self._pending_user_text = ""
         self.conversation_cleared.emit()
+
+    @pyqtSlot(int)
+    def new_conversation_in_project(self, project_id: int) -> None:
+        """REQ-051 — «Nuevo chat aquí» en la barra lateral: como `new_conversation()`, pero
+        el chat que nazca con el primer mensaje queda en `project_id`."""
+        self.new_conversation()
+        self._pending_project_id = int(project_id) if project_id else None
 
     @pyqtSlot(str)
     def select_conversation(self, conversation_id: str) -> None:
@@ -650,9 +693,11 @@ class Bridge(QObject):
         from ai.memory_manager import memory
 
         self._pending_conversation_offset = offset
+        # REQ-051 — «Recientes» muestra lo que no está en ningún proyecto; lo demás se ve
+        # bajo su proyecto en la misma barra.
         run_async(memory.list_conversations, self._on_conversations_loaded,
                   self._on_conversations_error, user_id=OWNER_USER_ID,
-                  limit=_CONVERSATION_PAGE_SIZE, offset=offset)
+                  limit=_CONVERSATION_PAGE_SIZE, offset=offset, sin_proyecto=True)
 
     def _on_conversations_loaded(self, conversations) -> None:
         payload = [
@@ -797,6 +842,7 @@ class Bridge(QObject):
         from ai.memory_manager import memory
         memory.assign_conversation_to_project(conversation_id, project_id, user_id=OWNER_USER_ID)
         self._emit_projects_loaded()
+        self._load_conversations(offset=0)   # REQ-051: sale de «Recientes»
 
     @pyqtSlot(str)
     def unassign_conversation_from_project(self, conversation_id: str) -> None:
@@ -807,6 +853,7 @@ class Bridge(QObject):
         from ai.memory_manager import memory
         memory.unassign_conversation_from_project(conversation_id, user_id=OWNER_USER_ID)
         self._emit_projects_loaded()
+        self._load_conversations(offset=0)   # REQ-051: vuelve a «Recientes»
 
     @pyqtSlot(int)
     def request_project_conversations(self, project_id: int) -> None:

@@ -325,7 +325,7 @@ class UnifiedMemory:
             logger.warning(f"store_turn(): respuesta vacia (conv={conversation_id})")
 
     def list_conversations(self, user_id: str = "default", limit: int = 30,
-                           offset: int = 0) -> List[ConversationSummary]:
+                           offset: int = 0, sin_proyecto: bool = False) -> List[ConversationSummary]:
         """Lista las conversaciones de `user_id`, mas reciente primero (REQ-013/CA-05, CA-10).
 
         Una sola query agregada (sin N+1 ni tabla espejo). `conversation_id IS NOT NULL`
@@ -348,6 +348,15 @@ class UnifiedMemory:
         """
         try:
             with sqlite3.connect(DB_PATH) as conn:
+                # REQ-051 — `sin_proyecto`: la barra lateral muestra en «Recientes» solo lo que no
+                # está en ningún proyecto; lo demás se ve bajo su proyecto. Los proyectos se
+                # consultan por separado (`list_conversations_by_project`, CA-17 de REQ-016).
+                filtro_proyecto = (
+                    "AND NOT EXISTS (SELECT 1 FROM project_conversations pc "
+                    "WHERE pc.conversation_id = m.conversation_id AND pc.user_id = ?)"
+                    if sin_proyecto else ""
+                )
+                params_proyecto = (user_id,) if sin_proyecto else ()
                 rows = conn.execute(
                     """SELECT  m.conversation_id,
                                MAX(m.timestamp) AS last_activity,
@@ -362,13 +371,14 @@ class UnifiedMemory:
                        FROM memories m
                        WHERE m.user_id = ? AND m.archived = 0
                              AND m.conversation_id IS NOT NULL
+                             """ + filtro_proyecto + """
                        GROUP BY m.conversation_id
                       HAVING SUM(CASE WHEN m.source IS NULL
                                         OR m.source NOT LIKE 'migracion:%'
                                       THEN 1 ELSE 0 END) > 0
                        ORDER BY last_activity DESC
                        LIMIT ? OFFSET ?""",
-                    (user_id, limit, offset)
+                    (user_id, *params_proyecto, limit, offset)
                 ).fetchall()
             return [
                 ConversationSummary(

@@ -50,6 +50,7 @@ export function assignConversationToProject(conversationId, projectId) { _bridge
 export function unassignConversationFromProject(conversationId) { _bridge.unassign_conversation_from_project(conversationId); }
 export function requestProjectConversations(projectId) { _bridge.request_project_conversations(projectId); }
 export function requestDeleteProject(projectId) { _bridge.request_delete_project(projectId); }
+export function newConversationInProject(projectId) { _bridge.new_conversation_in_project(projectId); }
 
 // ------------------------------------------------------------ JS → Python (perfil)
 export function requestProfile() { _bridge.request_profile(); }

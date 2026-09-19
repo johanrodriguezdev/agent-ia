@@ -914,6 +914,69 @@ def test_los_atajos_de_teclado_responden(ventana, qtbot):
     _sin_errores(page)
 
 
+# --------------------------------------------------------------------------- proyectos (REQ-051)
+
+def test_el_mas_de_proyectos_pide_el_nombre_y_lo_crea(ventana, qtbot, monkeypatch):
+    """El «+» de la sección Proyectos abre una entrada inline; Enter crea el proyecto."""
+    window, page, _ = ventana
+    from ai.memory_manager import memory
+
+    creados = []
+    monkeypatch.setattr(memory, "create_project", lambda **kw: creados.append(kw["name"]) or 7)
+    monkeypatch.setattr(memory, "list_projects", lambda **kw: [])
+
+    _click(page, "document.getElementById('project-add-btn')")
+    _esperar(qtbot, 200)
+    assert _run_js(page, "document.querySelector('#project-list .project-new-input') !== null") is True
+
+    _run_js(page, """
+        const campo = document.querySelector('.project-new-input');
+        campo.value = 'Tesis';
+        campo.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
+        true;
+    """)
+    qtbot.waitUntil(lambda: creados != [], timeout=5000)
+
+    assert creados == ["Tesis"]
+    assert _run_js(page, "document.querySelector('.project-new-input') === null") is True
+    _sin_errores(page)
+
+
+def test_los_proyectos_se_despliegan_y_un_chat_se_puede_mover(ventana, qtbot, monkeypatch):
+    """La lista llega del bridge; desplegar pide sus chats; el menú de un chat de
+    Recientes ofrece moverlo y llama a asignar."""
+    window, page, _ = ventana
+    from ai.memory_manager import memory
+
+    asignados = []
+    monkeypatch.setattr(memory, "assign_conversation_to_project",
+                        lambda cid, pid, **kw: asignados.append((cid, pid)) or True)
+    monkeypatch.setattr(memory, "list_projects", lambda **kw: [])
+    monkeypatch.setattr(memory, "list_conversations_by_project", lambda pid, **kw: [])
+
+    window.bridge.projects_loaded.emit(json.dumps([
+        {"id": 3, "name": "Tesis", "created_at": "2026-09-01", "conversation_count": 0},
+    ]))
+    window.bridge.conversation_list_updated.emit(json.dumps([
+        {"conversation_id": "a", "title": "Una charla", "last_activity": None},
+    ]))
+    _esperar(qtbot, 300)
+    assert _run_js(page, "document.querySelector('.project-row[data-project-id=\"3\"] .project-name').textContent") == "Tesis"
+
+    _click(page, "document.querySelector('.project-row[data-project-id=\"3\"]')")
+    _esperar(qtbot, 300)
+    assert _run_js(page, "document.querySelector('.project-chats .project-new-chat') !== null") is True
+
+    _click(page, "document.querySelector('#conversation-list .conv-item [aria-label=\"Mover a un proyecto\"]')")
+    _esperar(qtbot, 200)
+    assert _run_js(page, "document.querySelector('.conv-menu') !== null") is True
+    _click(page, "Array.from(document.querySelectorAll('.conv-menu-item')).find(b => b.textContent === 'Tesis')")
+    qtbot.waitUntil(lambda: asignados != [], timeout=5000)
+
+    assert asignados == [("a", 3)]
+    _sin_errores(page)
+
+
 # --------------------------------------------------------------------------- cobertura
 
 def test_todo_boton_con_id_del_html_tiene_su_manejador(ventana):
@@ -932,6 +995,7 @@ def test_todo_boton_con_id_del_html_tiene_su_manejador(ventana):
         "new-conversation-btn", "sidebar-collapse-toggle", "theme-toggle-btn",
         "load-more-btn", "attach-btn", "wake-toggle-btn", "send-btn", "stop-btn",
         "model-btn", "attachment-chip-remove",
+        "project-add-btn",   # REQ-051 — test_el_mas_de_proyectos_pide_el_nombre_y_lo_crea
     }
     assert set(ids) == esperados, (
         "cambió el inventario de botones del HTML: agregá el nuevo a un test de este "

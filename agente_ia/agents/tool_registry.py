@@ -3096,3 +3096,143 @@ register_tool(ToolSpec(
     risk_level=RiskLevel.YELLOW,
     invoke=_mcp_remove_invoke,
 ))
+
+
+# ── REQ-051 — proyectos de chats, por instrucción ─────────────────────────────────────────
+#
+# Los proyectos agrupan conversaciones en la barra lateral (REQ-016 los creó; REQ-051 los
+# puso donde se buscan). Estas tres herramientas son la versión "decírselo al agente":
+# «creá un proyecto Tesis», «guardá este chat en Tesis», «¿qué proyectos tengo?». Son
+# verdes —crear una carpeta de chats o mover un chat de una a otra no toca nada fuera del
+# historial— y solo de escritorio: los proyectos son de la barra lateral, y «este chat»
+# solo tiene sentido ahí (`core/conversacion_activa.py`).
+
+def _proyectos_del_dueno():
+    from ai.memory_manager import memory
+    from core.user_identity import OWNER_USER_ID
+
+    return memory.list_projects(user_id=OWNER_USER_ID)
+
+
+def _buscar_proyecto(nombre: str):
+    """Return el proyecto cuyo nombre coincide (sin distinguir mayúsculas), o None."""
+    objetivo = (nombre or "").strip().lower()
+    if not objetivo:
+        return None
+    for p in _proyectos_del_dueno():
+        if p.name.strip().lower() == objetivo:
+            return p
+    return None
+
+
+def _chat_project_list_invoke(params: dict) -> str:
+    proyectos = _proyectos_del_dueno()
+    if not proyectos:
+        return f"No hay ningún proyecto todavía{vocative()}. Puedo crear uno si me dice el nombre."
+    lineas = [f"- {p.name} ({p.conversation_count} chat{'s' if p.conversation_count != 1 else ''})"
+              for p in proyectos]
+    return "Proyectos:\n" + "\n".join(lineas)
+
+
+register_tool(ToolSpec(
+    name="chat_project_list",
+    description=(
+        "Lista los proyectos de la barra lateral (carpetas que agrupan chats) y cuántos "
+        "chats tiene cada uno. Usala cuando el usuario pregunte qué proyectos tiene o antes "
+        "de mover un chat, para usar el nombre exacto."
+    ),
+    parameters_schema={"type": "object", "properties": {}},
+    risk_level=RiskLevel.GREEN,
+    invoke=_chat_project_list_invoke,
+))
+
+
+def _chat_project_create_invoke(params: dict) -> str:
+    from ai.memory_manager import memory
+    from core.user_identity import OWNER_USER_ID
+
+    nombre = str(params.get("name") or "").strip()
+    if not nombre:
+        return f"Necesito el nombre del proyecto{vocative()}."
+    existente = _buscar_proyecto(nombre)
+    if existente is not None:
+        return f"Ya hay un proyecto llamado '{existente.name}'."
+    nuevo = memory.create_project(user_id=OWNER_USER_ID, name=nombre)
+    if nuevo is None:
+        return f"No pude crear el proyecto '{nombre}'."
+    return f"Proyecto '{nombre}' creado. Ya aparece en la barra lateral."
+
+
+register_tool(ToolSpec(
+    name="chat_project_create",
+    description=(
+        "Crea un proyecto en la barra lateral: una carpeta para agrupar chats sobre un mismo "
+        "tema. Usala cuando el usuario pida crear un proyecto o guardar un chat en uno que "
+        "todavía no existe."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {"name": {"type": "string", "description": "Nombre del proyecto."}},
+        "required": ["name"],
+    },
+    risk_level=RiskLevel.GREEN,
+    invoke=_chat_project_create_invoke,
+))
+
+
+def _chat_project_assign_invoke(params: dict) -> str:
+    from ai.memory_manager import memory
+    from core import conversacion_activa
+    from core.user_identity import OWNER_USER_ID
+
+    conversation_id = conversacion_activa.actual()
+    if not conversation_id:
+        return f"No hay ningún chat abierto que pueda mover{vocative()}."
+
+    nombre = str(params.get("project") or "").strip()
+    if not nombre:
+        return f"Necesito el nombre del proyecto{vocative()}."
+    proyecto = _buscar_proyecto(nombre)
+    if proyecto is None:
+        if not params.get("create_if_missing"):
+            return (
+                f"No hay ningún proyecto llamado '{nombre}'. Puedo crearlo y guardar el chat ahí "
+                f"si el usuario quiere (create_if_missing)."
+            )
+        nuevo_id = memory.create_project(user_id=OWNER_USER_ID, name=nombre)
+        if nuevo_id is None:
+            return f"No pude crear el proyecto '{nombre}'."
+        proyecto = next((p for p in _proyectos_del_dueno() if p.id == nuevo_id), None)
+        if proyecto is None:
+            return f"No pude crear el proyecto '{nombre}'."
+
+    if not memory.assign_conversation_to_project(conversation_id, proyecto.id, user_id=OWNER_USER_ID):
+        # Un chat recién empezado todavía no tiene turnos guardados (se guardan al terminar
+        # el turno), y `assign` exige que exista. Queda pedido: el bridge lo aplica en
+        # cuanto guarde este turno.
+        conversacion_activa.pedir_asignacion(conversation_id, proyecto.id)
+        return (
+            f"Este chat quedará en el proyecto '{proyecto.name}' en cuanto termine este turno."
+        )
+    return f"Listo: este chat quedó en el proyecto '{proyecto.name}'."
+
+
+register_tool(ToolSpec(
+    name="chat_project_assign_current",
+    description=(
+        "Guarda el chat ACTUAL (esta conversación) en un proyecto de la barra lateral. Usala "
+        "cuando el usuario diga «guardá este chat en X», «mové esta conversación al proyecto "
+        "X» o similar. Con create_if_missing el proyecto se crea si no existe."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "project": {"type": "string", "description": "Nombre del proyecto destino."},
+            "create_if_missing": {"type": "boolean",
+                                  "description": "Crear el proyecto si no existe."},
+        },
+        "required": ["project"],
+    },
+    risk_level=RiskLevel.GREEN,
+    invoke=_chat_project_assign_invoke,
+))

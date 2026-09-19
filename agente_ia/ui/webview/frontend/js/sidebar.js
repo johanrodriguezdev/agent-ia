@@ -32,6 +32,13 @@ let _searchTerm = "";
 let _loadedConversations = [];   // REQ-016/§0.2 — fuente del picker de projects_panel.js
 let _temporizadorBusqueda = null;
 let _enResultados = false;
+// REQ-051 — quien construye el botón «Mover a proyecto» de cada chat. Lo registra
+// `sidebar_projects.js` al arrancar; así este módulo no importa de aquel (sin ciclo).
+let _menuBuilder = null;
+
+export function setConversationMenuBuilder(fn) {
+  _menuBuilder = fn;
+}
 
 function $(id) {
   return document.getElementById(id);
@@ -105,7 +112,7 @@ function empezarRenombrado(item, conv) {
   entrada.select();
 }
 
-function buildConversationItem(conv) {
+export function buildConversationItem(conv, contexto = null) {
   const item = document.createElement("div");
   item.className = "conv-item";
   item.dataset.conversationId = conv.conversation_id;
@@ -134,6 +141,9 @@ function buildConversationItem(conv) {
     empezarRenombrado(item, conv);
   });
   item.appendChild(renameBtn);
+
+  // REQ-051 — «Mover a proyecto» / «Sacar del proyecto».
+  if (_menuBuilder) item.appendChild(_menuBuilder(conv, contexto));
 
   const deleteBtn = document.createElement("button");
   deleteBtn.type = "button";
@@ -336,6 +346,10 @@ export function setActiveConversationId(conversationId) {
 
 export function clearActiveConversation() {
   setActiveConversationId(null);
+}
+
+export function getActiveConversationId() {
+  return _activeConversationId;
 }
 
 export function removeConversationFromList(conversationId) {

@@ -59,6 +59,10 @@ import {
   renderEmailCapabilities, handleEmailCapabilitySaved, handleEmailCapabilityRejected,
   renderTaskModels, renderConnections, renderAutonomy, renderMcpServers, renderMcpProbe,
 } from "./settings_panel.js";
+import {
+  initSidebarProjects, renderSidebarProjects, renderSidebarProjectConversations,
+  handleProjectRemovedInSidebar, completarMovimientoPendiente,
+} from "./sidebar_projects.js";
 
 const GREETINGS_BY_HOUR = [
   { from: 5, to: 12, text: "Buenos días" },
@@ -218,9 +222,22 @@ async function bootstrap() {
   if (flowsBtn) flowsBtn.addEventListener("click", openFlowsPanel);
   document.getElementById("projects-btn").addEventListener("click", openProjectsPanel);
   onTasksLoaded((json) => renderTasks(JSON.parse(json)));
-  onProjectsLoaded((json) => renderProjects(JSON.parse(json)));
-  onProjectConversationsLoaded((json, projectId) => renderProjectConversations(JSON.parse(json), projectId));
-  onProjectRemoved((projectId) => handleProjectRemoved(projectId));
+  onProjectsLoaded((json) => {
+    const projects = JSON.parse(json);
+    renderProjects(projects);
+    renderSidebarProjects(projects);       // REQ-051: también en la barra lateral
+    completarMovimientoPendiente(projects);
+  });
+  onProjectConversationsLoaded((json, projectId) => {
+    const conversations = JSON.parse(json);
+    renderProjectConversations(conversations, projectId);
+    renderSidebarProjectConversations(conversations, projectId);
+  });
+  onProjectRemoved((projectId) => {
+    handleProjectRemoved(projectId);
+    handleProjectRemovedInSidebar(projectId);
+  });
+  initSidebarProjects();
   onProjectItemsLoaded((json, projectId) => renderProjectItems(JSON.parse(json), projectId));
   onAssignableItemsLoaded((json) => renderAssignableItems(JSON.parse(json)));
 
