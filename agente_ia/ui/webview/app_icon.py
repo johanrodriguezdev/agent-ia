@@ -63,10 +63,16 @@ _GRADIENT_DEF = (
 _APP_BG = "#0a0a0b"
 _APP_CANVAS = 240
 _APP_BG_RX = 54
-_APP_MARCA_SCALE = 0.9  # = 180/200, la marca (200x200 nativo) ocupa 180x180 = 75% de 240
-_APP_MARCA_OFFSET = 30  # = (240 - 180) / 2, margen uniforme por lado
 _APP_RING_STROKE_WIDTH = 3.2
 _APP_NODE_R = 8.5
+#: Fracción del lado del icono que ocupa la marca — medida sobre la caja REAL de los
+#: anillos (`_marca_bbox`), no sobre su viewBox 200x200. La SPEC pedía "≈75% del lienzo"
+#: y se aplicó al viewBox (`scale(0.9)` sobre 240), pero dentro de ese viewBox los anillos
+#: solo llenan ~65%: la marca visible quedaba en ~50% del cuadro negro, y en la barra de
+#: tareas —donde el cuadro negro se funde con el fondo oscuro— el icono se veía la mitad
+#: de chico que los vecinos. En la prueba manual el humano pidió agrandarlo; 0.84 lo deja
+#: del tamaño de los demás y todavía con margen para que los anillos no toquen el `rx`.
+_APP_MARCA_FILL = 0.84
 
 #: Tamaños que Windows pide según dónde dibuje el icono de app.
 _TAMANOS = (16, 24, 32, 48, 64, 128, 256)
@@ -99,21 +105,47 @@ def _marca_svg(*, stroke: str, stroke_width: float, node_r: float) -> str:
     return circulos + nodo
 
 
+def _marca_bbox(stroke_width: float) -> tuple[float, float, float, float]:
+    """Return `(x_min, y_min, x_max, y_max)` de lo que la marca pinta de verdad.
+
+    En su espacio nativo 200x200: los tres círculos completos más medio trazo por lado
+    (el trazo se pinta centrado sobre la circunferencia). Los huecos del `dasharray` no se
+    descuentan — la caja es la del círculo entero, así da igual en qué ángulo caigan.
+    """
+    medio = stroke_width / 2
+    return (
+        min(cx - _RING_R for cx, _, _ in _RINGS) - medio,
+        min(cy - _RING_R for _, cy, _ in _RINGS) - medio,
+        max(cx + _RING_R for cx, _, _ in _RINGS) + medio,
+        max(cy + _RING_R for _, cy, _ in _RINGS) + medio,
+    )
+
+
 def _app_icon_svg() -> str:
-    """Return el SVG completo del icono de app: fondo negro + marca con degradado."""
+    """Return el SVG completo del icono de app: fondo negro + marca con degradado.
+
+    La marca se escala y centra por su caja real (`_marca_bbox`), no por el viewBox: el
+    lado mayor de esa caja pasa a medir `_APP_MARCA_FILL` del icono y su centro cae en el
+    centro del cuadro. Los anillos no están centrados en su propio viewBox (el centro de
+    la caja está en y=94, no en 100), así que centrar el viewBox dejaba la marca corrida
+    hacia arriba además de chica.
+    """
     marca = _marca_svg(
         stroke=f"url(#{_GRADIENT_ID})",
         stroke_width=_APP_RING_STROKE_WIDTH,
         node_r=_APP_NODE_R,
     )
+    x_min, y_min, x_max, y_max = _marca_bbox(_APP_RING_STROKE_WIDTH)
+    escala = _APP_CANVAS * _APP_MARCA_FILL / max(x_max - x_min, y_max - y_min)
+    tx = _APP_CANVAS / 2 - (x_min + x_max) / 2 * escala
+    ty = _APP_CANVAS / 2 - (y_min + y_max) / 2 * escala
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" '
         f'viewBox="0 0 {_APP_CANVAS} {_APP_CANVAS}">'
         f"<defs>{_GRADIENT_DEF}</defs>"
         f'<rect x="0" y="0" width="{_APP_CANVAS}" height="{_APP_CANVAS}" '
         f'rx="{_APP_BG_RX}" fill="{_APP_BG}"/>'
-        f'<g transform="translate({_APP_MARCA_OFFSET},{_APP_MARCA_OFFSET}) '
-        f'scale({_APP_MARCA_SCALE})">{marca}</g>'
+        f'<g transform="translate({tx:.3f},{ty:.3f}) scale({escala:.4f})">{marca}</g>'
         f"</svg>"
     )
 

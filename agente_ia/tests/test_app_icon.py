@@ -92,6 +92,45 @@ def test_las_esquinas_del_icono_de_app_son_transparentes_por_el_redondeo(qapp):
     assert all(imagen.pixelColor(x, y).alpha() == 0 for x, y in esquinas)
 
 
+def _caja_de_lo_pintado(imagen, fondo):
+    """Return `(x_min, y_min, x_max, y_max)` de los píxeles que no son `fondo`."""
+    puntos = [
+        (x, y)
+        for y in range(imagen.height())
+        for x in range(imagen.width())
+        if imagen.pixelColor(x, y).alpha() == 255
+        and (imagen.pixelColor(x, y).red(), imagen.pixelColor(x, y).green(),
+             imagen.pixelColor(x, y).blue()) != fondo
+    ]
+    xs = [p[0] for p in puntos]
+    ys = [p[1] for p in puntos]
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def test_la_marca_llena_el_icono_de_app_y_queda_centrada(qapp):
+    """En la prueba manual de REQ-041 el icono se veía la mitad de chico que los vecinos
+    de la barra de tareas: la SPEC pedía la marca al ≈75% del lienzo, pero eso se aplicó al
+    viewBox 200x200 y los anillos solo llenan ~65% de ese viewBox — la marca visible
+    quedaba en ~50% del cuadro negro, que sobre una barra oscura no se distingue del fondo.
+    Ahora se escala por la caja real de los anillos (`_APP_MARCA_FILL`): se mide a 256 px
+    que lo pintado ocupe al menos el 80% del lado, sin llegar a tocar el borde redondeado, y
+    que su centro sea el centro del icono (la caja de los anillos no está centrada en su
+    propio viewBox, así que centrar el viewBox la dejaba corrida hacia arriba)."""
+    size = 256
+    imagen = dibujar_app(size).toImage()
+    x_min, y_min, x_max, y_max = _caja_de_lo_pintado(imagen, (0x0A, 0x0A, 0x0B))
+
+    ancho = (x_max - x_min + 1) / size
+    alto = (y_max - y_min + 1) / size
+    assert max(ancho, alto) >= 0.80, f"la marca ocupa solo {max(ancho, alto):.0%} del icono"
+    assert max(ancho, alto) <= 0.92, "la marca llega hasta el borde redondeado del icono"
+
+    centro_x = (x_min + x_max) / 2 / size
+    centro_y = (y_min + y_max) / 2 / size
+    assert abs(centro_x - 0.5) < 0.03, f"la marca está corrida en x (centro en {centro_x:.2f})"
+    assert abs(centro_y - 0.5) < 0.03, f"la marca está corrida en y (centro en {centro_y:.2f})"
+
+
 def test_a_16_pixeles_todavia_hay_una_figura(qapp):
     """El icono de app a 16 px literales. Con la geometría EXACTA del canvas aprobado
     (trazo de 3.2 sobre un anillo escalado a ~0.9 y luego a 16/240), `orion-architect`
@@ -103,7 +142,6 @@ def test_a_16_pixeles_todavia_hay_una_figura(qapp):
     Con fondo ahora opaco, se compara color contra `_APP_BG` en vez de usar alfa."""
     imagen = dibujar_app(16).toImage()
     fondo = (0x0A, 0x0A, 0x0B)
-    total = 16 * 16
     distintos = sum(
         1
         for y in range(16)
@@ -177,7 +215,7 @@ def test_bandeja_usa_color_plano_sin_degradado(qapp):
         and imagen.pixelColor(x, y).alpha() == 255
     ]
 
-    assert len(exactos) >= 2, "no se encontraron suficientes píxeles de trazo con cobertura completa"
+    assert len(exactos) >= 2, "no hay suficientes píxeles de trazo con cobertura completa"
     # Dos puntos espacialmente separados (no adyacentes) del mismo trazo: si hubiera
     # degradado, distintas posiciones del anillo tendrían distinto color: acá, por
     # construcción, todos los píxeles filtrados ya son el mismo color exacto — lo que
