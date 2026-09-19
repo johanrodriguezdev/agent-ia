@@ -29,6 +29,8 @@ import {
   requestEmailCapabilities, saveEmailCapability,
   requestTaskModels, saveTaskModels,
   requestConnections, saveConnection, clearConnection,
+  requestMcpServers, setMcpServerEnabled, removeMcpServer, probeMcpServer, loginMcpServer,
+  saveMcpAllowedTools, saveMcpVariable, clearMcpVariable,
   setAutonomyMode,
 } from "./bridge_client.js";
 import { icon } from "./icons.js";
@@ -183,7 +185,9 @@ function renderActiveSection() {
     requestTaskModels();       // mismo criterio: solo al entrar en la sección
   } else if (_activeSection === "conexiones") {
     content.appendChild(buildConnectionsCard(null));
+    content.appendChild(buildMcpCard(null));
     requestConnections();
+    requestMcpServers();
   } else {
     content.appendChild(buildAutonomyCard());
     content.appendChild(buildSecurityCard());
@@ -632,6 +636,7 @@ export function renderTaskModels(payload) {
 function buildConnectionsCard(payload) {
   const card = document.createElement("div");
   card.className = "settings-card";
+  card.id = "connections-card";
 
   const title = document.createElement("div");
   title.className = "settings-card-title";
@@ -708,7 +713,7 @@ function buildConnectionRow(fila) {
   if (fila.origen === "archivo") {
     const quitar = document.createElement("button");
     quitar.type = "button";
-    quitar.className = "panel-secondary-btn conexion-quitar";
+    quitar.className = "panel-submit-btn panel-submit-btn-secundario conexion-quitar";
     quitar.textContent = "Quitar";
     quitar.addEventListener("click", () => clearConnection(fila.id));
     acciones.appendChild(quitar);
@@ -724,10 +729,323 @@ export function renderConnections(payload) {
   const content = document.getElementById("settings-content");
   if (!content) return;
 
-  const anterior = content.querySelector(".settings-card");
+  const anterior = content.querySelector("#connections-card");
   const nueva = buildConnectionsCard(payload);
   if (anterior) anterior.replaceWith(nueva);
   else content.appendChild(nueva);
+}
+
+// ---------------------------------------------------------------- servidores MCP (REQ-043)
+//
+// Segunda tarjeta de la sección "Conexiones". No hay formulario para AGREGAR un servidor:
+// eso se le pide al agente ("conectate al servidor MCP de Notion, el comando es ...") y
+// él lo declara con confirmación. La pantalla es para ver cómo están, apagarlos,
+// probarlos, quitarlos, decidir qué herramientas se aceptan y pegar los secretos que
+// necesitan — que es justo lo que no debe pasar por el chat.
+
+const EJEMPLO_PEDIDO_MCP =
+  "«Conectate al servidor MCP de Notion: el comando es npx -y @notionhq/notion-mcp-server "
+  + "y necesita la variable NOTION_TOKEN».";
+
+function buildMcpCard(payload) {
+  const card = document.createElement("div");
+  card.className = "settings-card";
+  card.id = "mcp-card";
+
+  const title = document.createElement("div");
+  title.className = "settings-card-title";
+  title.textContent = "Servidores MCP";
+  card.appendChild(title);
+
+  const ayuda = document.createElement("p");
+  ayuda.className = "settings-help";
+  if (!payload) {
+    ayuda.textContent = "Cargando…";
+    card.appendChild(ayuda);
+    return card;
+  }
+  ayuda.textContent =
+    "Programas externos que le prestan herramientas al agente. Para agregar uno, pedíselo "
+    + "en el chat, por ejemplo: " + EJEMPLO_PEDIDO_MCP + " Nada queda habilitado hasta que "
+    + "digas qué herramientas aceptás.";
+  card.appendChild(ayuda);
+
+  if (!payload.servidores.length) {
+    const vacio = document.createElement("p");
+    vacio.className = "settings-help mcp-vacio";
+    vacio.textContent = "Todavía no hay ningún servidor declarado.";
+    card.appendChild(vacio);
+    return card;
+  }
+
+  for (const servidor of payload.servidores) {
+    card.appendChild(buildMcpServerRow(servidor, payload.canales));
+  }
+
+  if (payload.variables.length) {
+    card.appendChild(buildMcpVariablesBlock(payload.variables));
+  }
+  return card;
+}
+
+function estadoMcp(servidor) {
+  if (!servidor.enabled) return { clase: "vacia", texto: "Deshabilitado" };
+  if (!servidor.conectado) return { clase: "error", texto: "Desconectado" };
+  if (!servidor.herramientas.length) {
+    return { clase: "vacia", texto: "Conectado · sin herramientas habilitadas" };
+  }
+  const n = servidor.herramientas.length;
+  return { clase: "archivo", texto: `Conectado · ${n} herramienta${n === 1 ? "" : "s"}` };
+}
+
+function buildMcpServerRow(servidor, canalesPosibles) {
+  const row = document.createElement("div");
+  row.className = "settings-row settings-row-block mcp-servidor";
+  row.dataset.mcpServer = servidor.nombre;
+
+  const cabecera = document.createElement("div");
+  cabecera.className = "mcp-cabecera";
+
+  const info = document.createElement("div");
+  info.className = "settings-row-info";
+  const nombre = document.createElement("span");
+  nombre.className = "settings-row-label";
+  nombre.textContent = servidor.nombre;               // nunca innerHTML
+  const destino = document.createElement("span");
+  destino.className = "settings-row-desc mcp-destino";
+  destino.textContent = (servidor.transporte === "http" ? "HTTP · " : "Local · ") + servidor.destino;
+  const estado = estadoMcp(servidor);
+  const chip = document.createElement("span");
+  chip.className = "conexion-estado conexion-estado-" + estado.clase;
+  chip.textContent = estado.texto;
+  info.append(nombre, destino, chip);
+
+  const interruptor = document.createElement("input");
+  interruptor.type = "checkbox";
+  interruptor.className = "settings-row-check";
+  interruptor.checked = Boolean(servidor.enabled);
+  interruptor.setAttribute("aria-label", "Habilitar " + servidor.nombre);
+  interruptor.addEventListener("change", () => {
+    interruptor.disabled = true;                      // se repinta con la respuesta
+    setMcpServerEnabled(servidor.nombre, interruptor.checked);
+  });
+
+  cabecera.append(info, interruptor);
+  row.appendChild(cabecera);
+
+  if (servidor.herramientas.length) {
+    const lista = document.createElement("span");
+    lista.className = "settings-row-desc";
+    lista.textContent = "Habilitadas ahora: " + servidor.herramientas.join(", ");
+    row.appendChild(lista);
+  }
+
+  row.appendChild(buildMcpAllowedEditor(servidor, canalesPosibles));
+
+  const acciones = document.createElement("div");
+  acciones.className = "conexion-acciones";
+
+  const probar = document.createElement("button");
+  probar.type = "button";
+  probar.className = "panel-submit-btn panel-submit-btn-secundario";
+  probar.textContent = "Probar";
+  probar.addEventListener("click", () => {
+    probar.disabled = true;
+    mostrarSondeoMcp(row, "Probando…");
+    probeMcpServer(servidor.nombre);
+  });
+  acciones.appendChild(probar);
+
+  if (servidor.transporte === "http") {
+    const autorizar = document.createElement("button");
+    autorizar.type = "button";
+    autorizar.className = "panel-submit-btn panel-submit-btn-secundario";
+    autorizar.textContent = "Autorizar (OAuth)";
+    autorizar.title = "Abre el navegador para autorizar el acceso, si el servidor lo pide.";
+    autorizar.addEventListener("click", () => loginMcpServer(servidor.nombre));
+    acciones.appendChild(autorizar);
+  }
+
+  const quitar = document.createElement("button");
+  quitar.type = "button";
+  quitar.className = "panel-submit-btn panel-submit-btn-secundario conexion-quitar";
+  quitar.textContent = "Quitar";
+  quitar.addEventListener("click", () => removeMcpServer(servidor.nombre));
+  acciones.appendChild(quitar);
+
+  row.appendChild(acciones);
+
+  const sondeo = document.createElement("pre");
+  sondeo.className = "mcp-sondeo";
+  sondeo.hidden = true;
+  row.appendChild(sondeo);
+  return row;
+}
+
+function buildMcpAllowedEditor(servidor, canalesPosibles) {
+  const bloque = document.createElement("div");
+  bloque.className = "mcp-permitidas";
+
+  const etiqueta = document.createElement("label");
+  etiqueta.className = "settings-row-desc";
+  etiqueta.textContent = "Herramientas permitidas (nombres o patrones, separados por coma)";
+  const campo = document.createElement("input");
+  campo.type = "text";
+  campo.className = "settings-input";
+  campo.value = servidor.permitidas.join(", ");
+  campo.placeholder = "search, read_*";
+  campo.setAttribute("aria-label", "Herramientas permitidas de " + servidor.nombre);
+  etiqueta.appendChild(campo);
+
+  const canales = document.createElement("div");
+  canales.className = "mcp-canales";
+  const marcados = new Set(servidor.canales.length ? servidor.canales : ["desktop"]);
+  const casillas = [];
+  for (const canal of canalesPosibles) {
+    const item = document.createElement("label");
+    item.className = "mcp-canal";
+    const check = document.createElement("input");
+    check.type = "checkbox";
+    check.value = canal;
+    check.checked = marcados.has(canal);
+    check.disabled = canal === "desktop";             // siempre: es donde se confirma
+    const texto = document.createElement("span");
+    texto.textContent = { desktop: "escritorio", telegram: "Telegram", discord: "Discord", voice: "voz" }[canal] || canal;
+    item.append(check, texto);
+    canales.appendChild(item);
+    casillas.push(check);
+  }
+
+  const guardar = document.createElement("button");
+  guardar.type = "button";
+  guardar.className = "panel-submit-btn conexion-guardar";
+  guardar.textContent = "Guardar";
+  guardar.addEventListener("click", () => {
+    const patrones = campo.value.trim();
+    if (!patrones) {
+      showSettingsBanner("Escribe al menos una herramienta. Para cortar todo, deshabilita o quita el servidor.", true);
+      return;
+    }
+    const elegidos = casillas.filter((c) => c.checked).map((c) => c.value).join(",");
+    guardar.disabled = true;
+    saveMcpAllowedTools(servidor.nombre, patrones, elegidos);
+  });
+  campo.addEventListener("keydown", (evt) => {
+    if (evt.key === "Enter") guardar.click();
+  });
+
+  const fila = document.createElement("div");
+  fila.className = "conexion-acciones";
+  fila.append(canales, guardar);
+  bloque.append(etiqueta, fila);
+  return bloque;
+}
+
+function buildMcpVariablesBlock(variables) {
+  const bloque = document.createElement("div");
+  bloque.className = "mcp-variables";
+
+  const titulo = document.createElement("div");
+  titulo.className = "settings-row-label";
+  titulo.textContent = "Variables";
+  const ayuda = document.createElement("p");
+  ayuda.className = "settings-help";
+  ayuda.textContent =
+    "Los tokens que los servidores necesitan. Se guardan en config.json, en este equipo, y no "
+    + "pasan por el chat. Una variable de entorno con el mismo nombre manda sobre lo que pongas aquí.";
+  bloque.append(titulo, ayuda);
+
+  for (const variable of variables) {
+    bloque.appendChild(buildMcpVariableRow(variable));
+  }
+  return bloque;
+}
+
+function buildMcpVariableRow(variable) {
+  const row = document.createElement("div");
+  row.className = "settings-row settings-row-block";
+
+  const info = document.createElement("div");
+  info.className = "settings-row-info";
+  const nombre = document.createElement("span");
+  nombre.className = "settings-row-label";
+  nombre.textContent = variable.nombre;
+  const usada = document.createElement("span");
+  usada.className = "settings-row-desc";
+  usada.textContent = "La usa: " + variable.servidores.join(", ");
+  const estado = document.createElement("span");
+  estado.className = "conexion-estado conexion-estado-" + (variable.origen || "vacia");
+  estado.textContent = {
+    entorno: "Definida (variable de entorno)",
+    archivo: "Definida",
+  }[variable.origen] || "Sin definir";
+  info.append(nombre, usada, estado);
+  row.appendChild(info);
+
+  const acciones = document.createElement("div");
+  acciones.className = "conexion-acciones";
+
+  const campo = document.createElement("input");
+  campo.type = "password";                            // no se ve al escribir ni al pegar
+  campo.className = "settings-input conexion-input";
+  campo.placeholder = variable.origen ? "Reemplazar…" : "Pegar el valor…";
+  campo.setAttribute("aria-label", "Valor de " + variable.nombre);
+  campo.autocomplete = "off";
+
+  const guardar = document.createElement("button");
+  guardar.type = "button";
+  guardar.className = "panel-submit-btn conexion-guardar";
+  guardar.textContent = "Guardar";
+  guardar.addEventListener("click", () => {
+    const valor = campo.value.trim();
+    if (!valor) return;
+    saveMcpVariable(variable.nombre, valor);
+    campo.value = "";                                 // no se queda en el DOM
+  });
+  campo.addEventListener("keydown", (evt) => {
+    if (evt.key === "Enter") guardar.click();
+  });
+  acciones.append(campo, guardar);
+
+  if (variable.origen === "archivo") {
+    const quitar = document.createElement("button");
+    quitar.type = "button";
+    quitar.className = "panel-submit-btn panel-submit-btn-secundario conexion-quitar";
+    quitar.textContent = "Quitar";
+    quitar.addEventListener("click", () => clearMcpVariable(variable.nombre));
+    acciones.appendChild(quitar);
+  }
+
+  row.appendChild(acciones);
+  return row;
+}
+
+function mostrarSondeoMcp(row, texto) {
+  const sondeo = row.querySelector(".mcp-sondeo");
+  if (!sondeo) return;
+  sondeo.textContent = texto;                         // texto plano del sondeo
+  sondeo.hidden = !texto;
+}
+
+/** Llega de `mcp_servers_loaded`: repinta la tarjeta con el estado actual. */
+export function renderMcpServers(payload) {
+  if (_activeSection !== "conexiones") return;
+  const content = document.getElementById("settings-content");
+  if (!content) return;
+
+  const anterior = content.querySelector("#mcp-card");
+  const nueva = buildMcpCard(payload);
+  if (anterior) anterior.replaceWith(nueva);
+  else content.appendChild(nueva);
+}
+
+/** Llega de `mcp_probe_result`: el texto del sondeo va en la fila del servidor. */
+export function renderMcpProbe(nombre, texto) {
+  const row = document.querySelector(`.mcp-servidor[data-mcp-server="${CSS.escape(nombre)}"]`);
+  if (!row) return;
+  mostrarSondeoMcp(row, texto);
+  const probar = Array.from(row.querySelectorAll("button")).find((b) => b.textContent === "Probar");
+  if (probar) probar.disabled = false;
 }
 
 // ---------------------------------------------------------------- modo autonomía (REQ-033)

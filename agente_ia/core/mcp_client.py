@@ -70,7 +70,16 @@ def expandir_secreto(valor: Any) -> Any:
     nombre = match.group(1)
     resuelto = os.environ.get(nombre)
     if resuelto is None:
-        logger.warning(f"La variable de entorno '{nombre}' no está definida — se envía vacía")
+        # REQ-043 — el valor pegado en Configuración → Conexiones (`config.json →
+        # mcp_variables`). El entorno manda, igual que con las claves de API.
+        from core.mcp_config import valor_de_variable
+
+        resuelto = valor_de_variable(nombre)
+    if resuelto is None:
+        logger.warning(
+            f"La variable '{nombre}' no está definida ni en el entorno ni en la configuración "
+            f"— se envía vacía"
+        )
         return ""
     return resuelto
 

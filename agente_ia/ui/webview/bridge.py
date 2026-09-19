@@ -46,6 +46,7 @@ desarrollo-log-015.md para el detalle completo):
 import json
 import logging
 import os
+import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -222,6 +223,8 @@ class Bridge(QObject):
     setup_required = pyqtSignal(str)                  # id de la seccion que hay que abrir
     project_items_loaded = pyqtSignal(str, int)       # json: [{kind, item_id, label}], project_id
     assignable_items_loaded = pyqtSignal(str)         # json: {flujos, modulos}
+    mcp_servers_loaded = pyqtSignal(str)              # json: {servidores, variables}, sin valores
+    mcp_probe_result = pyqtSignal(str, str)           # servidor, texto del sondeo
 
     def __init__(self, main_window, parent=None):
         super().__init__(parent)
@@ -1220,6 +1223,182 @@ class Bridge(QObject):
             self.notice_shown.emit("ok", f"Clave de {etiqueta} borrada.")
         self.request_connections()
 
+    # ------------------------------------------------------------ servidores MCP (REQ-043)
+    @pyqtSlot()
+    def request_mcp_servers(self) -> None:
+        """Qué servidores MCP hay, cómo están y qué variables usan. Nunca sus valores."""
+        self.mcp_servers_loaded.emit(json.dumps(_build_mcp_payload()))
+
+    def _mcp_nombre_valido(self, nombre: str) -> str:
+        """Return el nombre normalizado si es un servidor declarado; "" si no.
+
+        Los slots de abajo son invocables desde cualquier script de la página, así que lo
+        que llega no decide sobre qué servidor se actúa: solo uno que exista en la
+        configuración (mismo criterio que `_CONEXIONES` para las claves).
+        """
+        from core.mcp_config import MCPConfigRechazada, listar_servidores, normalizar_nombre
+
+        try:
+            clave = normalizar_nombre(nombre)
+        except MCPConfigRechazada:
+            clave = ""
+        if clave and any(f["nombre"] == clave for f in listar_servidores()):
+            return clave
+        logger.warning(f"MCP: servidor desconocido desde la página: {nombre!r}")
+        self.notice_shown.emit("error", "Ese servidor MCP no existe.")
+        return ""
+
+    @pyqtSlot(str, bool)
+    def set_mcp_server_enabled(self, nombre: str, activo: bool) -> None:
+        """Enciende o apaga un servidor. Aplica en caliente, en un hilo."""
+        clave = self._mcp_nombre_valido(nombre)
+        if not clave:
+            return
+        run_async(
+            self._mcp_set_enabled_flow, self._on_mcp_done, self._on_mcp_error, clave, bool(activo),
+        )
+
+    def _mcp_set_enabled_flow(self, clave: str, activo: bool) -> str:
+        from core.mcp_config import aplicar_y_resumir, habilitar_servidor
+
+        habilitar_servidor(clave, activo)
+        return aplicar_y_resumir(clave)
+
+    @pyqtSlot(str)
+    def remove_mcp_server(self, nombre: str) -> None:
+        """Quita un servidor. Pasa por el mismo gate amarillo que la herramienta del agente.
+
+        Va por `run_async()` como todo lo que confirma: `require_confirmation()` bloquea
+        esperando el modal y el hilo de la GUI es el que tiene que pintarlo.
+        """
+        clave = self._mcp_nombre_valido(nombre)
+        if not clave:
+            return
+        run_async(self._mcp_remove_flow, self._on_mcp_done, self._on_mcp_error, clave)
+
+    def _mcp_remove_flow(self, clave: str) -> str:
+        from core.mcp_config import quitar_servidor
+        from core.mcp_manager import desregistrar_servidor
+        from core.security_manager import format_details, security_manager
+
+        confirmada = security_manager.require_confirmation(
+            "mcp_remove_server",
+            ChannelType.DESKTOP,
+            details=format_details("webview:mcp_remove_server", {"name": clave}),
+            user_id=OWNER_USER_ID,
+        )
+        if not confirmada:
+            return ""
+        quitadas = desregistrar_servidor(clave)
+        quitar_servidor(clave)
+        return f"'{clave}' quitado ({quitadas} herramienta(s) desregistrada(s))."
+
+    @pyqtSlot(str, str, str)
+    def save_mcp_allowed_tools(self, nombre: str, patrones: str, canales: str) -> None:
+        """Guarda qué herramientas se aceptan. Gate amarillo con la lista a la vista."""
+        clave = self._mcp_nombre_valido(nombre)
+        if not clave:
+            return
+        run_async(
+            self._mcp_allow_flow, self._on_mcp_done, self._on_mcp_error,
+            clave, str(patrones or ""), str(canales or ""),
+        )
+
+    def _mcp_allow_flow(self, clave: str, patrones: str, canales: str) -> str:
+        from core.mcp_config import aplicar_y_resumir, permitir_herramientas
+        from core.security_manager import format_details, security_manager
+
+        lista = [p for p in re.split(r"[,\s]+", patrones) if p]
+        lista_canales = [c for c in re.split(r"[,\s]+", canales) if c]
+        confirmada = security_manager.require_confirmation(
+            "mcp_allow_tools",
+            ChannelType.DESKTOP,
+            details=format_details(
+                "webview:mcp_allow_tools",
+                {"name": clave, "herramientas": lista, "canales": lista_canales},
+            ),
+            user_id=OWNER_USER_ID,
+        )
+        if not confirmada:
+            return ""
+        permitir_herramientas(clave, lista, lista_canales or None)
+        return aplicar_y_resumir(clave)
+
+    @pyqtSlot(str)
+    def probe_mcp_server(self, nombre: str) -> None:
+        """Conecta y lista sin registrar nada; el resultado vuelve por `mcp_probe_result`."""
+        clave = self._mcp_nombre_valido(nombre)
+        if not clave:
+            return
+        run_async(self._mcp_probe_flow, None, self._on_mcp_error, clave)
+
+    def _mcp_probe_flow(self, clave: str) -> None:
+        from core.mcp_manager import probar_servidor
+
+        self.mcp_probe_result.emit(clave, probar_servidor(clave))
+
+    @pyqtSlot(str)
+    def login_mcp_server(self, nombre: str) -> None:
+        """Flujo OAuth del servidor (abre el navegador). El resultado vuelve como aviso."""
+        clave = self._mcp_nombre_valido(nombre)
+        if not clave:
+            return
+        run_async(self._mcp_login_flow, self._on_mcp_done, self._on_mcp_error, clave)
+
+    def _mcp_login_flow(self, clave: str) -> str:
+        from core.mcp_config import aplicar_y_resumir
+        from core.mcp_manager import login_servidor
+
+        resultado = login_servidor(clave)
+        if "autorizado" in resultado.lower():
+            resultado = f"{resultado.split('.')[0]}. {aplicar_y_resumir(clave)}"
+        return resultado
+
+    @pyqtSlot(str, str)
+    def save_mcp_variable(self, variable: str, valor: str) -> None:
+        """Guarda el valor de una `${VARIABLE}` que algún servidor referencia.
+
+        `definir_variable()` rechaza cualquier nombre que ningún servidor use: lo que llega
+        del JS no decide qué clave se escribe. El valor no pasa por el modelo ni por el log.
+        """
+        from core.mcp_config import definir_variable, origen_de_variable
+
+        if not definir_variable(variable, valor):
+            self.notice_shown.emit(
+                "error", "No se guardó: esa variable no la usa ningún servidor, o venía vacía.",
+            )
+            return
+        self.request_mcp_servers()
+        if origen_de_variable(variable) == "entorno":
+            self.notice_shown.emit(
+                "info",
+                f"Guardada, pero {variable} sigue tomándose del entorno, que manda sobre el "
+                f"archivo.",
+            )
+        else:
+            self.notice_shown.emit(
+                "ok", f"Variable {variable} guardada. Reconectá el servidor para que la use.",
+            )
+
+    @pyqtSlot(str)
+    def clear_mcp_variable(self, variable: str) -> None:
+        """Quita una variable guardada en el archivo."""
+        from core.mcp_config import borrar_variable
+
+        if borrar_variable(variable):
+            self.notice_shown.emit("ok", f"Variable {variable} borrada.")
+        self.request_mcp_servers()
+
+    def _on_mcp_done(self, resumen) -> None:
+        self.request_mcp_servers()
+        if resumen:
+            self.notice_shown.emit("ok", str(resumen))
+
+    def _on_mcp_error(self, message: str) -> None:
+        logger.error(f"MCP desde la pantalla: {message}")
+        self.notice_shown.emit("error", f"No se pudo: {message}")
+        self.request_mcp_servers()
+
     # ------------------------------------------------------------ modelo por tarea
     @pyqtSlot()
     def request_task_models(self) -> None:
@@ -1944,6 +2123,29 @@ def falta_configurar_proveedor() -> bool:
     return not any(
         config_manager.origen_de_credencial(clave) for clave in _CLAVES_DE_PROVEEDOR
     )
+
+
+def _build_mcp_payload() -> Dict[str, Any]:
+    """Servidores MCP y las variables que referencian. NUNCA el valor de una variable.
+
+    `listar_servidores()` ya devuelve solo el origen de cada variable ("entorno",
+    "archivo" o ""); acá se agrupan las variables por nombre para el bloque de la pantalla.
+    """
+    from core.mcp_config import CANALES_HABILITABLES, listar_servidores
+
+    servidores = listar_servidores()
+    variables: Dict[str, Dict[str, Any]] = {}
+    for fila in servidores:
+        for v in fila["variables"]:
+            entrada = variables.setdefault(
+                v["nombre"], {"nombre": v["nombre"], "origen": v["origen"], "servidores": []},
+            )
+            entrada["servidores"].append(fila["nombre"])
+    return {
+        "servidores": servidores,
+        "variables": sorted(variables.values(), key=lambda v: v["nombre"]),
+        "canales": list(CANALES_HABILITABLES),
+    }
 
 
 def _build_connections_payload() -> Dict[str, Any]:

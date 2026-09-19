@@ -11,5 +11,20 @@
     "weather_city": "",
     "ui_theme": "dark",
     "telegram_autostart": true,
-    "_claves": "Las claves de API se pueden poner aqui (deepseek_api_key, openrouter_api_key, anthropic_api_key, openai_api_key, gemini_api_key, telegram_token) o en variables de entorno, que mandan sobre este archivo. Desde la app: Configuracion > Conexiones."
+    "_claves": "Las claves de API se pueden poner aqui (deepseek_api_key, openrouter_api_key, anthropic_api_key, openai_api_key, gemini_api_key, telegram_token) o en variables de entorno, que mandan sobre este archivo. Desde la app: Configuracion > Conexiones.",
+    "_mcp": "Servidores MCP (REQ-043). No hace falta editarlos aca: se le pide al agente en el chat ('conectate al servidor MCP de Notion, el comando es npx -y @notionhq/notion-mcp-server') y se administran desde Configuracion > Conexiones. Un servidor local lleva command/args; uno remoto, url. Los secretos van SIEMPRE como referencia ${VARIABLE}: el valor se pega en la pantalla (mcp_variables) o se define como variable de entorno. Que herramientas se aceptan lo decide mcp_allowlist.json.",
+    "mcp_servers": {
+        "ejemplo-notion": {
+            "enabled": false,
+            "command": "npx",
+            "args": [
+                "-y",
+                "@notionhq/notion-mcp-server"
+            ],
+            "env": {
+                "NOTION_TOKEN": "${NOTION_TOKEN}"
+            }
+        }
+    },
+    "mcp_variables": {}
 }

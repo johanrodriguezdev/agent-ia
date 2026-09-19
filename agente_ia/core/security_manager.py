@@ -172,6 +172,16 @@ DESKTOP_ONLY_ACTIONS: set[str] = {
     # encabezados, sus primeros párrafos). Verde con razón, y por lo mismo que `file_read`:
     # solo delante del computador.
     "document_inspect",
+    # REQ-043 — declarar, habilitar, probar y quitar servidores MCP. Declarar uno stdio es
+    # arrancar un programa en la máquina; habilitar herramientas es abrirle capacidades al
+    # agente. Listar y probar son lecturas, pero cuentan qué hay conectado y con qué: las
+    # seis se deciden y se miran delante del computador, nunca por un mensaje remoto.
+    "mcp_list_servers",
+    "mcp_probe_server",
+    "mcp_add_server",
+    "mcp_allow_tools",
+    "mcp_set_server_enabled",
+    "mcp_remove_server",
 }
 
 _CHANNEL_STR_MAP: Dict[str, ChannelType] = {
@@ -215,6 +225,11 @@ _DETAILS_ALLOWED_KEYS = (
     # REQ-040 — qué archivo se va a crear, sobre qué plantilla y dónde. Autorizar "crear un
     # documento" sin ver que se llama «renuncia.docx» y va al Escritorio sería a ciegas.
     "nombre", "plantilla", "carpeta",
+    # REQ-043 — qué herramientas de un servidor MCP se habilitan y desde qué canales. El
+    # "sí" a «habilite herramientas del servidor notion» sin ver que son `*` y por Telegram
+    # no es una autorización. `name`, `command` y `url` (el servidor y cómo arranca) ya
+    # estaban en la lista.
+    "herramientas", "canales",
 )
 
 # Un `task`/`raw_text` puede traer código largo: se trunca para que el prompt siga siendo
@@ -230,8 +245,13 @@ def format_details(prefix: str, params: Optional[Dict] = None) -> str:
     partes: List[str] = []
     for key in _DETAILS_ALLOWED_KEYS:
         value = params.get(key)
-        if value is None or value == "":
+        if value is None or value == "" or value == []:
             continue
+        # Una lista (REQ-043: `herramientas`, `canales`) se escribe con " / " y no con su
+        # `repr`: las comas de `['a', 'b']` son justo el separador que `detalle_legible()`
+        # usa para partir los campos, y el modal mostraba la lista cortada a la mitad.
+        if isinstance(value, (list, tuple)):
+            value = " / ".join(" ".join(str(v).split()) for v in value if str(v).strip())
         texto = " ".join(str(value).split())
         if len(texto) > _DETAILS_MAX_VALUE_LEN:
             texto = texto[:_DETAILS_MAX_VALUE_LEN] + "..."

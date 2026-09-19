@@ -179,3 +179,17 @@ export function saveConnection(clave, valor) { _bridge.save_connection(clave, va
 export function clearConnection(clave) { _bridge.clear_connection(clave); }
 export function onConnectionsLoaded(cb) { _bridge.connections_loaded.connect(cb); }
 export function onSetupRequired(cb) { _bridge.setup_required.connect(cb); }
+
+// ------------------------------------------------------------ servidores MCP (REQ-043)
+export function requestMcpServers() { _bridge.request_mcp_servers(); }
+export function setMcpServerEnabled(nombre, activo) { _bridge.set_mcp_server_enabled(nombre, activo); }
+export function removeMcpServer(nombre) { _bridge.remove_mcp_server(nombre); }
+export function probeMcpServer(nombre) { _bridge.probe_mcp_server(nombre); }
+export function loginMcpServer(nombre) { _bridge.login_mcp_server(nombre); }
+export function saveMcpAllowedTools(nombre, patrones, canales) {
+  _bridge.save_mcp_allowed_tools(nombre, patrones, canales);
+}
+export function saveMcpVariable(variable, valor) { _bridge.save_mcp_variable(variable, valor); }
+export function clearMcpVariable(variable) { _bridge.clear_mcp_variable(variable); }
+export function onMcpServersLoaded(cb) { _bridge.mcp_servers_loaded.connect(cb); }
+export function onMcpProbeResult(cb) { _bridge.mcp_probe_result.connect(cb); }

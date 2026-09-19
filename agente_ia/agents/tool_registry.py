@@ -2815,3 +2815,272 @@ register_tool(ToolSpec(
     risk_level=RiskLevel.YELLOW,
     invoke=_document_edit_invoke,
 ))
+
+
+# ── REQ-043 — servidores MCP desde el chat, sin editar JSON ─────────────────────────────
+#
+# El soporte MCP existía completo (`core/mcp_manager.py`) pero solo se manejaba editando
+# `config.json` y `mcp_allowlist.json` a mano. Estas seis herramientas son la versión
+# "decírselo al agente" (mismo criterio que `workspace_add_folder`, REQ-030). La lógica vive
+# en `core/mcp_config.py`; acá solo se traduce entre el modelo y ese módulo.
+#
+# Seguridad: declarar un servidor stdio es habilitar un programa que ejecuta código en la
+# máquina. Por eso `mcp_add_server` es AMARILLA con el comando completo a la vista (`command`
+# está en `_DETAILS_ALLOWED_KEYS`), igual que `terminal_run_command`; y las seis son solo
+# de escritorio (`DESKTOP_ONLY_ACTIONS`): esto se decide delante del computador, nunca por
+# un mensaje remoto. Ningún secreto pasa por acá: `env`/`headers` solo aceptan `${VARIABLE}`.
+
+def _mcp_list_invoke(params: dict) -> str:
+    from core.mcp_config import listar_servidores
+
+    filas = listar_servidores()
+    if not filas:
+        return (
+            f"No hay ningún servidor MCP declarado{vocative()}. Para agregar uno, decime su "
+            f"nombre y el comando que lo arranca (o su URL)."
+        )
+    lineas = []
+    for f in filas:
+        if not f["enabled"]:
+            estado = "deshabilitado"
+        elif not f["conectado"]:
+            estado = "desconectado"
+        elif not f["herramientas"]:
+            estado = "conectado, sin herramientas habilitadas"
+        else:
+            estado = f"conectado, {len(f['herramientas'])} herramienta(s) habilitada(s)"
+        lineas.append(f"- {f['nombre']} ({f['transporte']}: {f['destino']}) — {estado}")
+        if f["permitidas"]:
+            lineas.append(
+                f"    permitidas: {', '.join(f['permitidas'])} | canales: {', '.join(f['canales'])}"
+            )
+        if f["herramientas"]:
+            lineas.append(f"    habilitadas ahora: {', '.join(f['herramientas'])}")
+        faltan = [v["nombre"] for v in f["variables"] if not v["origen"]]
+        if faltan:
+            lineas.append(f"    variables sin definir: {', '.join(faltan)}")
+    return "Servidores MCP:\n" + "\n".join(lineas)
+
+
+register_tool(ToolSpec(
+    name="mcp_list_servers",
+    description=(
+        "Lista los servidores MCP declarados: si están conectados, qué herramientas tienen "
+        "habilitadas y qué variables les faltan. Usala cuando el usuario pregunte qué "
+        "servidores o conexiones MCP tiene, o antes de agregar uno para no repetirlo."
+    ),
+    parameters_schema={"type": "object", "properties": {}},
+    risk_level=RiskLevel.GREEN,
+    invoke=_mcp_list_invoke,
+))
+
+
+def _mcp_probe_invoke(params: dict) -> str:
+    from core.mcp_manager import probar_servidor
+
+    nombre = str(params.get("name") or "").strip()
+    if not nombre:
+        return f"Necesito el nombre del servidor a probar{vocative()}."
+    return probar_servidor(nombre)
+
+
+register_tool(ToolSpec(
+    name="mcp_probe_server",
+    description=(
+        "Prueba un servidor MCP ya declarado: se conecta, dice si respondió y lista TODAS las "
+        "herramientas que publica, marcando cuáles están permitidas y cuáles bloqueadas. No "
+        "cambia nada. Usala para diagnosticar uno que no anda o para ver qué ofrece antes de "
+        "habilitar herramientas."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {"name": {"type": "string", "description": "Nombre del servidor."}},
+        "required": ["name"],
+    },
+    risk_level=RiskLevel.GREEN,
+    invoke=_mcp_probe_invoke,
+))
+
+
+def _mcp_add_invoke(params: dict) -> str:
+    from core.mcp_config import MCPConfigRechazada, agregar_servidor, aplicar_y_resumir
+
+    try:
+        agregar_servidor(
+            params.get("name"),
+            command=params.get("command"),
+            args=params.get("args"),
+            url=params.get("url"),
+            env=params.get("env"),
+            headers=params.get("headers"),
+        )
+    except MCPConfigRechazada as e:
+        logger.warning(f"'mcp_add_server' rechazada: {e}")
+        return str(e)
+    except OSError as e:
+        logger.error(f"'mcp_add_server' falló al guardar: {e}")
+        return f"No pude guardar la configuración: {e}"
+    return aplicar_y_resumir(params.get("name"))
+
+
+register_tool(ToolSpec(
+    name="mcp_add_server",
+    description=(
+        "Declara y conecta un servidor MCP nuevo para que sus herramientas queden "
+        "disponibles. Un servidor local se define con 'command' (el comando COMPLETO que lo "
+        "arranca, por ejemplo 'npx -y @notionhq/notion-mcp-server'); uno remoto con 'url'. "
+        "Si necesita un token, ponelo en 'env' (o 'headers') SOLO como referencia "
+        "'${NOMBRE_VARIABLE}': nunca pidas ni escribas el valor del secreto, el usuario lo "
+        "pega en Configuración → Conexiones. Al terminar te dice qué herramientas publica: "
+        "ninguna queda habilitada hasta que el usuario elija cuáles (mcp_allow_tools)."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "name": {"type": "string",
+                     "description": "Nombre corto en minúsculas: 'notion', 'github'."},
+            "command": {"type": "string",
+                        "description": "Comando completo que arranca el servidor local (stdio)."},
+            "url": {"type": "string", "description": "URL del servidor remoto (HTTP)."},
+            "env": {"type": "object",
+                    "description": ("Variables de entorno para el comando, solo como "
+                                    "referencias: {'NOTION_TOKEN': '${NOTION_TOKEN}'}.")},
+            "headers": {"type": "object",
+                        "description": "Cabeceras HTTP: {'Authorization': '${MI_TOKEN}'}."},
+        },
+        "required": ["name"],
+    },
+    # YELLOW: arranca un programa en la máquina del usuario (el servidor stdio). La
+    # confirmación muestra `name` y `command`/`url`, que están en `_DETAILS_ALLOWED_KEYS`.
+    risk_level=RiskLevel.YELLOW,
+    invoke=_mcp_add_invoke,
+))
+
+
+def _mcp_allow_invoke(params: dict) -> str:
+    from core.mcp_config import MCPConfigRechazada, aplicar_y_resumir, permitir_herramientas
+
+    try:
+        escrito = permitir_herramientas(
+            params.get("name"), params.get("herramientas") or [], params.get("canales"),
+        )
+    except MCPConfigRechazada as e:
+        logger.warning(f"'mcp_allow_tools' rechazada: {e}")
+        return str(e)
+    except OSError as e:
+        logger.error(f"'mcp_allow_tools' falló al guardar: {e}")
+        return f"No pude guardar la lista de herramientas: {e}"
+    aviso = ""
+    if "*" in escrito["tools"]:
+        aviso = (
+            " Ojo: con '*' se acepta CUALQUIER herramienta que el servidor publique, incluidas "
+            "las que agregue mañana."
+        )
+    return aplicar_y_resumir(params.get("name")) + aviso
+
+
+register_tool(ToolSpec(
+    name="mcp_allow_tools",
+    description=(
+        "Habilita qué herramientas de un servidor MCP puede usar el agente (las que no se "
+        "nombran quedan bloqueadas) y desde qué canales. 'herramientas' son nombres tal como "
+        "los publica el servidor o patrones ('search', 'read_*'); reemplaza la lista anterior. "
+        "'canales' por defecto es solo escritorio; se puede sumar telegram, discord o voice. "
+        "Usala después de mcp_add_server, cuando el usuario haya dicho cuáles quiere."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "Nombre del servidor."},
+            "herramientas": {"type": "array", "items": {"type": "string"},
+                             "description": "Nombres o patrones de herramientas a permitir."},
+            "canales": {"type": "array", "items": {"type": "string"},
+                        "description": ("Canales: desktop, telegram, discord, voice. "
+                                        "Vacío = solo escritorio.")},
+        },
+        "required": ["name", "herramientas"],
+    },
+    # YELLOW: abre capacidades nuevas al agente. La confirmación muestra `herramientas` y
+    # `canales` (en `_DETAILS_ALLOWED_KEYS`): un "sí" sin ver la lista sería a ciegas.
+    risk_level=RiskLevel.YELLOW,
+    invoke=_mcp_allow_invoke,
+))
+
+
+def _mcp_set_enabled_invoke(params: dict) -> str:
+    from core.mcp_config import MCPConfigRechazada, aplicar_y_resumir, habilitar_servidor
+
+    activo = params.get("enabled")
+    if not isinstance(activo, bool):
+        return (
+            f"Necesito saber si el servidor se habilita (true) o se deshabilita "
+            f"(false){vocative()}."
+        )
+    try:
+        habilitar_servidor(params.get("name"), activo)
+    except MCPConfigRechazada as e:
+        logger.warning(f"'mcp_set_server_enabled' rechazada: {e}")
+        return str(e)
+    except OSError as e:
+        logger.error(f"'mcp_set_server_enabled' falló al guardar: {e}")
+        return f"No pude guardar la configuración: {e}"
+    return aplicar_y_resumir(params.get("name"))
+
+
+register_tool(ToolSpec(
+    name="mcp_set_server_enabled",
+    description=(
+        "Habilita o deshabilita un servidor MCP sin borrar su configuración. Deshabilitado, "
+        "sus herramientas dejan de estar disponibles hasta que se vuelva a habilitar."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "Nombre del servidor."},
+            "enabled": {"type": "boolean",
+                        "description": "true para habilitar, false para deshabilitar."},
+        },
+        "required": ["name", "enabled"],
+    },
+    risk_level=RiskLevel.YELLOW,
+    invoke=_mcp_set_enabled_invoke,
+))
+
+
+def _mcp_remove_invoke(params: dict) -> str:
+    from core.mcp_config import MCPConfigRechazada, normalizar_nombre, quitar_servidor
+    from core.mcp_manager import desregistrar_servidor
+
+    try:
+        clave = normalizar_nombre(params.get("name"))
+    except MCPConfigRechazada as e:
+        return str(e)
+    quitadas = desregistrar_servidor(clave)
+    try:
+        existia = quitar_servidor(clave)
+    except OSError as e:
+        logger.error(f"'mcp_remove_server' falló al guardar: {e}")
+        return f"Desconecté '{clave}' pero no pude borrar su configuración: {e}"
+    if not existia:
+        return f"No había ningún servidor '{clave}'."
+    return (
+        f"'{clave}' quitado: {quitadas} herramienta(s) desregistrada(s) y su configuración "
+        f"borrada. Sus variables guardadas no se tocan; se quitan desde Configuración si ya "
+        f"no hacen falta."
+    )
+
+
+register_tool(ToolSpec(
+    name="mcp_remove_server",
+    description=(
+        "Quita un servidor MCP: lo desconecta, desregistra sus herramientas y borra su "
+        "configuración y su lista de herramientas permitidas."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {"name": {"type": "string", "description": "Nombre del servidor."}},
+        "required": ["name"],
+    },
+    risk_level=RiskLevel.YELLOW,
+    invoke=_mcp_remove_invoke,
+))

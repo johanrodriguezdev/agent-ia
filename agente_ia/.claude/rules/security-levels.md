@@ -133,6 +133,39 @@ introduce una superficie que puede ejecutar cualquier cosa. Se acota así:
 - **La sesión muere con la ventana.** Cerrar el panel o salir de la app termina el proceso
   (`MainWindow.aboutToQuit`): nunca queda una shell viva sin nada que la muestre.
 
+## Servidores MCP — el permiso es por herramienta nombrada, y los secretos no pasan por el chat
+
+Un servidor MCP (`core/mcp_manager.py`) es un programa ajeno que le presta herramientas al
+agente y que describe él mismo qué hacen. Desde REQ-043 se administra desde el chat y desde
+Configuración → Conexiones, con estas reglas:
+
+- **Declarar un servidor (`mcp_add_server`) es 🟡 amarillo y solo escritorio**: un servidor
+  stdio es un proceso que se arranca en la máquina. La confirmación muestra el comando
+  completo o la URL (`command`/`url` en `_DETAILS_ALLOWED_KEYS`) — mismo criterio que
+  `terminal_run_command`. No es rojo por lo mismo que las herramientas destructivas de un
+  servidor no suben a rojo: sin `ORION_AUTH_PIN` sería un autobloqueo.
+- **Nada queda habilitado al conectar.** La allow-list (`mcp_allowlist.json`,
+  `core/remote_tools_policy.py`) es fail-closed: lo que el usuario no nombró no entra.
+  `mcp_allow_tools` es 🟡 y la confirmación muestra los patrones y los canales
+  (`herramientas`, `canales`); `*` se acepta pero se avisa que es aceptar lo que el servidor
+  publique mañana.
+- **Toda herramienta remota es 🟡 como mínimo** (`_nivel_declarado()`): las anotaciones del
+  servidor solo endurecen. Se registra como `mcp__servidor__tool` para que nunca pise una
+  acción local, y la confirmación dice «use la herramienta 'X' del servidor MCP 'Y'».
+- **Canales**: por defecto solo escritorio. Se puede sumar `telegram`, `discord` o `voice` vía
+  `CHANNEL_ACTION_EXCEPTIONS` (REQ-018). `email`, `api` y `unknown` **nunca** son
+  habilitables (`core/mcp_config.py::CANALES_HABILITABLES`): la entrada que un tercero
+  puede originar no alcanza acciones amarillas. Las seis herramientas `mcp_*` de
+  administración están en `DESKTOP_ONLY_ACTIONS`.
+- **Los secretos no viajan por el chat.** `env` y `headers` solo aceptan referencias
+  `${VARIABLE}`; un valor literal se rechaza (`core/mcp_config.py::_validar_solo_referencias`).
+  El valor se pega en Configuración → Conexiones (`config.json → mcp_variables`, nunca en el
+  payload hacia la página, nunca en el log) o se define como variable de entorno, que manda.
+  La pantalla solo acepta nombres de variable que algún servidor declarado referencie.
+- **Quitar un servidor y cambiar su allow-list desde la pantalla pasan por el mismo gate**
+  (`mcp_remove_server`, `mcp_allow_tools`) que desde el chat: los slots del bridge son
+  alcanzables desde cualquier script de la página, así que la confirmación va en el slot.
+
 ## Verificación en QA
 - [ ] Toda acción destructiva tiene su nivel clasificado
 - [ ] Las acciones Amarillo piden confirmación antes de ejecutar

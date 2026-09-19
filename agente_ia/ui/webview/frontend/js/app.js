@@ -22,7 +22,7 @@ import {
   onTerminalOutput, onTerminalState, onTerminalTabs,
   onNoticeShown, onMessageChunk, onConversationSearchResults, onModelsLoaded,
   onProjectItemsLoaded, onAssignableItemsLoaded, onDragOverChanged, onTaskModelsLoaded,
-  onConnectionsLoaded, onSetupRequired,
+  onConnectionsLoaded, onSetupRequired, onMcpServersLoaded, onMcpProbeResult,
   requestModels, newConversation,
 } from "./bridge_client.js";
 import {
@@ -57,7 +57,7 @@ import {
   openSettingsPanel, renderSecurityOverrides, handleSecurityOverrideSaved,
   handleSecurityOverrideRejected, renderProfile, handleProfileSaved,
   renderEmailCapabilities, handleEmailCapabilitySaved, handleEmailCapabilityRejected,
-  renderTaskModels, renderConnections, renderAutonomy,
+  renderTaskModels, renderConnections, renderAutonomy, renderMcpServers, renderMcpProbe,
 } from "./settings_panel.js";
 
 const GREETINGS_BY_HOUR = [
@@ -183,6 +183,8 @@ async function bootstrap() {
   onModelsLoaded((json) => renderModels(JSON.parse(json)));
   onTaskModelsLoaded((json) => renderTaskModels(JSON.parse(json)));
   onConnectionsLoaded((json) => renderConnections(JSON.parse(json)));
+  onMcpServersLoaded((json) => renderMcpServers(JSON.parse(json)));
+  onMcpProbeResult((nombre, texto) => renderMcpProbe(nombre, texto));
 
   // Arranque sin ninguna clave de proveedor: la app no puede contestar, asi que se abre
   // donde se ponen en vez de dejar al usuario delante de un chat que solo da errores.

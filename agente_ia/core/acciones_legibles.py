@@ -82,6 +82,11 @@ _DESCRIPCIONES: Dict[str, str] = {
     # operación suelta.
     "workspace_add_folder": "habilite una carpeta para trabajar con sus archivos",
     "workspace_remove_folder": "deje de tener acceso a una carpeta de trabajo",
+    # REQ-043 — servidores MCP desde el chat y desde la pantalla de Configuración.
+    "mcp_add_server": "conecte un servidor MCP nuevo",
+    "mcp_allow_tools": "habilite herramientas de un servidor MCP",
+    "mcp_set_server_enabled": "encienda o apague un servidor MCP",
+    "mcp_remove_server": "quite un servidor MCP",
     # REQ-031 — la frase dice "mande datos" a propósito: lo que hay que entender al
     # confirmar es que algo sale del equipo hacia afuera, no que se hace una petición.
     "http_request": "llame a un servicio de internet y le mande datos",
@@ -139,6 +144,17 @@ _DESCRIPCIONES: Dict[str, str] = {
 _RUIDO = ("_tool", "_invoke", "_action", "handle_", "_handler")
 
 
+def _partir_nombre_remoto(nombre: str):
+    """Return `(servidor, tool)` si `nombre` es una herramienta MCP registrada, o None."""
+    try:
+        from core.remote_tools_policy import parse_nombre_calificado
+
+        return parse_nombre_calificado(nombre)
+    except Exception as e:
+        logger.debug(f"no se pudo interpretar '{nombre}' como herramienta remota: {e}")
+        return None
+
+
 def describir(action_name: str) -> str:
     """Return qué hace `action_name`, en español llano y en infinitivo.
 
@@ -152,6 +168,13 @@ def describir(action_name: str) -> str:
 
     if nombre in _DESCRIPCIONES:
         return _DESCRIPCIONES[nombre]
+
+    # Una herramienta remota se registra como `mcp__servidor__tool`. Derivarla daría
+    # "ejecute mcp notion search", que no dice ni que es remota ni de quién.
+    remota = _partir_nombre_remoto(nombre)
+    if remota is not None:
+        servidor, tool = remota
+        return f"use la herramienta '{tool}' del servidor MCP '{servidor}'"
 
     derivado = nombre
     for ruido in _RUIDO:
@@ -180,7 +203,7 @@ _ETIQUETAS = {
     "app_name": "", "app": "", "command": "", "path": "", "filename": "",
     "folder": "", "query": "", "url": "", "name": "", "task": "", "raw_text": "",
     "skill_name": "la habilidad", "destinatario": "para", "asunto": "asunto",
-    "direction": "hacia",
+    "direction": "hacia", "herramientas": "herramientas", "canales": "desde",
 }
 
 

@@ -99,6 +99,20 @@ rebajar la seguridad del sistema.
 Variables de entorno relevantes: `ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`, `DISCORD_BOT_TOKEN`,
 `OPENROUTER_API_KEY`, y `ORION_AUTH_PIN` para las acciones que exigen verificación.
 
+### Servidores MCP
+
+El agente puede tomar prestadas herramientas de otros programas por el Model Context Protocol
+(Notion, GitHub, un calendario, un servidor tuyo). No hace falta editar ningún archivo: se le pide
+en el chat —*«conectate al servidor MCP de Notion, el comando es `npx -y @notionhq/notion-mcp-server`
+y necesita la variable NOTION_TOKEN»*— y él lo declara (con confirmación que muestra el comando
+exacto), lo conecta y te dice qué herramientas publica. **Ninguna queda habilitada hasta que digas
+cuáles** (*«habilitale search y create_page»*): lo que no se nombra no entra.
+
+En **Configuración → Conexiones** ves cada servidor con su estado, lo pruebas, lo apagas, lo quitas,
+editas qué herramientas acepta y desde qué canales, y pegas los tokens que necesita. Los tokens
+nunca pasan por el chat: el agente solo acepta referencias `${VARIABLE}` y el valor se pone en esa
+pantalla o como variable de entorno.
+
 ### Un modelo distinto para cada tipo de trabajo
 
 No todo lo que hace el agente necesita el mismo modelo. Resumir un correo o compactar el
