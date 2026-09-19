@@ -3236,3 +3236,39 @@ register_tool(ToolSpec(
     risk_level=RiskLevel.GREEN,
     invoke=_chat_project_assign_invoke,
 ))
+
+
+# ── REQ-052 — «¿qué tenés conectado?» ─────────────────────────────────────────────────────
+#
+# El mismo mapa que dibuja el panel «Mapa» de la barra superior, en texto: con qué modelo
+# responde, qué canales están vivos, qué servidores MCP conectaron y qué flujos hay. Es una
+# lectura y nunca lleva una credencial (`ui/webview/mapa_conexiones.py`), pero cuenta qué
+# hay conectado y con qué: por lo mismo que `mcp_list_servers`, solo delante del computador.
+
+def _connection_map_invoke(params: dict) -> str:
+    from core.terminal_session import terminal_manager
+    from ui.webview import gui_state, mapa_conexiones
+
+    try:
+        sesiones = terminal_manager.listado()
+    except Exception as e:
+        logger.warning(f"connection_map: sin listado de terminales: {e}")
+        sesiones = []
+    mapa = mapa_conexiones.construir(gui_state.WAKE_STATE, sesiones)
+    return mapa_conexiones.resumen_para_modelo(mapa)
+
+
+register_tool(ToolSpec(
+    name="connection_map",
+    description=(
+        "Resume qué tiene conectado el agente ahora mismo: con qué modelo responde y qué "
+        "proveedores tienen clave, qué canales están activos (escritorio, voz, Telegram, "
+        "Discord, correo), qué servidores MCP están conectados y con cuántas herramientas, "
+        "y qué flujos existen. Usala cuando el usuario pregunte qué tiene conectado, qué "
+        "canales o servidores están activos, o por qué algo no responde. Es lo mismo que "
+        "muestra el panel «Mapa» de la barra superior."
+    ),
+    parameters_schema={"type": "object", "properties": {}},
+    risk_level=RiskLevel.GREEN,
+    invoke=_connection_map_invoke,
+))

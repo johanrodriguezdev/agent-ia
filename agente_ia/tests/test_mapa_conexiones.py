@@ -258,3 +258,37 @@ def test_el_bridge_emite_el_mapa(qtbot, monkeypatch, entorno):
     assert mapa["agente"]["nombre"] == "Orion"
     assert mapa["wake"] in ("INACTIVE", "LISTENING_WAKE", "AWAKE", "RECONNECTING")
     assert isinstance(mapa["sesiones"], list)
+
+
+# ── herramienta «¿qué tenés conectado?» ─────────────────────────────
+
+def test_el_resumen_para_el_modelo_lista_cada_nodo_con_su_estado(entorno, monkeypatch):
+    _escribir(entorno, ai_provider="deepseek", ai_model="deepseek-chat",
+              deepseek_api_key=CLAVE_DE_PRUEBA,
+              mcp_servers={"notion": {"command": "npx", "args": ["-y", "srv"]}})
+    monkeypatch.setattr(mcp_manager, "estado", lambda: {"notion": ["mcp__notion__search"]})
+
+    texto = mapa_conexiones.resumen_para_modelo(mapa_conexiones.construir("AWAKE"))
+
+    assert texto.startswith("Orion responde con deepseek · deepseek-chat") or "responde con deepseek" in texto
+    assert "DeepSeek: activo" in texto
+    assert "Voz: activo — escuchando" in texto
+    assert "notion: activo — 1 herramienta habilitada" in texto
+    assert "Flujos:" in texto and "(ninguno)" in texto
+    assert CLAVE_DE_PRUEBA not in texto
+
+
+def test_la_herramienta_connection_map_es_verde_y_solo_de_escritorio(entorno):
+    import agents.tool_registry as registry
+    from core.security_manager import DESKTOP_ONLY_ACTIONS, ChannelType, RiskLevel, security_manager
+
+    spec = registry.get_tool("connection_map")
+    assert spec.risk_level is RiskLevel.GREEN
+    assert "connection_map" in DESKTOP_ONLY_ACTIONS
+    assert security_manager.is_action_allowed("connection_map", ChannelType.DESKTOP)
+    assert not security_manager.is_action_allowed("connection_map", ChannelType.TELEGRAM)
+
+    _escribir(entorno, deepseek_api_key=CLAVE_DE_PRUEBA)
+    texto = spec.invoke({})
+    assert "Canales:" in texto and "Escritorio: activo" in texto
+    assert CLAVE_DE_PRUEBA not in texto

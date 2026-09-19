@@ -50,6 +50,8 @@ modificaciones». Autorización en bloque; se validó con capturas offscreen.
 2026-09-19 | conversación principal | El detalle va al lado del lienzo (flex), no flotando encima; el lienzo tiene alto fijo y el SVG se escala adentro | Flotando tapaba justo el grupo del nodo elegido; sin alto fijo la caja del modal saltaba al abrir el detalle.
 
 ## Archivos
+- Herramienta `connection_map` en `agents/tool_registry.py` (+ `DESKTOP_ONLY_ACTIONS`,
+  `NIVELES_REQ052` en `tests/test_workspace_tools_seguridad.py`).
 - Nuevos: `ui/webview/frontend/js/marca.js`, `js/map_panel.js`, `css/marca.css`,
   `css/controles.css`, `css/map_panel.css`, `ui/webview/mapa_conexiones.py`,
   `tests/test_marca_webview.py`, `tests/test_mapa_conexiones.py`.
@@ -61,6 +63,9 @@ modificaciones». Autorización en bloque; se validó con capturas offscreen.
   `tests/test_webview_buttons.py`, `tests/test_webview_safe_dom_insertion.py`.
 
 ## Qué puede hacer ahora
+- Chat: *«¿qué tenés conectado?»*, *«¿qué canales están activos?»*, *«¿por qué no responde
+  Telegram?»* → herramienta `connection_map` (verde, solo escritorio, como
+  `mcp_list_servers`): el mismo mapa en texto (`mapa_conexiones.resumen_para_modelo`).
 - Barra superior: icono de nodos → «Mapa». Se ve de un vistazo con qué modelo responde,
   qué canales están vivos (escritorio, voz, Telegram, Discord, correo), qué servidores MCP
   conectaron y cuántas herramientas tienen, y qué flujos hay. Click en un nodo → detalle;
@@ -70,7 +75,7 @@ modificaciones». Autorización en bloque; se validó con capturas offscreen.
   botón roto.
 
 ## Verificación
-- `tests/test_mapa_conexiones.py`: 18 passed (nuevo). `tests/test_marca_webview.py`: 6
+- `tests/test_mapa_conexiones.py`: 20 passed (nuevo). `tests/test_marca_webview.py`: 6
   passed (nuevo). `tests/test_webview_buttons.py` + `test_webview_smoke.py`: 52 passed
   (3 tests nuevos + `map-btn` en el inventario y en la parametrización de paneles).
 - Suite completa: ver `pruebas/suite-052.txt`.

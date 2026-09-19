@@ -221,3 +221,38 @@ def construir(wake_state: str = "INACTIVE",
         except Exception as e:
             logger.error(f"Mapa: no se pudo armar el bloque '{clave}': {e}")
     return mapa
+
+
+# ---------------------------------------------------------------------------- para el agente
+
+_TITULOS = (("modelos", "Modelos"), ("canales", "Canales"), ("mcp", "Servidores MCP"),
+            ("flujos", "Flujos"))
+_MARCAS = {"activo": "●", "configurado": "◐", "inactivo": "○", "error": "✕"}
+
+
+def resumen_para_modelo(mapa: Dict[str, Any]) -> str:
+    """Return el mapa como texto, para que el agente conteste «¿qué tenés conectado?».
+
+    Mismo contenido que dibuja el panel (y por eso mismas garantías: sin secretos). Una
+    línea por nodo con su estado y su detalle; el modelo redacta a partir de esto.
+    """
+    agente = mapa.get("agente", {})
+    cabecera = f"{agente.get('nombre', 'Agente')} responde con {agente.get('proveedor') or '?'}"
+    if agente.get("modelo"):
+        cabecera += f" · {agente['modelo']}"
+    autonomia = agente.get("autonomia") or {}
+    if autonomia.get("activo"):
+        cabecera += f" · modo autonomía: {autonomia.get('nivel')}"
+    lineas = [cabecera]
+    for clave, titulo in _TITULOS:
+        nodos = mapa.get(clave) or []
+        lineas.append(f"\n{titulo}:")
+        if not nodos:
+            lineas.append("  (ninguno)")
+        for n in nodos:
+            detalle = f" — {n['detalle']}" if n.get("detalle") else ""
+            lineas.append(f"  {_MARCAS.get(n['estado'], '?')} {n['label']}: {n['estado']}{detalle}")
+    if mapa.get("terminales"):
+        lineas.append(f"\nTerminales abiertas: {mapa['terminales']}")
+    lineas.append("\n(● activo · ◐ configurado · ○ inactivo · ✕ con problema)")
+    return "\n".join(lineas)

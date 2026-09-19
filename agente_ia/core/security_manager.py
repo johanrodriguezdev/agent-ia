@@ -187,6 +187,9 @@ DESKTOP_ONLY_ACTIONS: set[str] = {
     "chat_project_list",
     "chat_project_create",
     "chat_project_assign_current",
+    # REQ-052 — el Mapa de conexiones en texto. Lectura sin secretos, pero cuenta qué hay
+    # conectado y con qué: mismo criterio que `mcp_list_servers`.
+    "connection_map",
 }
 
 _CHANNEL_STR_MAP: Dict[str, ChannelType] = {

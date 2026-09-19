@@ -102,11 +102,16 @@ NIVELES_REQ051 = {
     "chat_project_assign_current": RiskLevel.GREEN,
 }
 
+#: REQ-052 — el Mapa de conexiones en texto. Verde y solo escritorio, como `mcp_list_servers`.
+NIVELES_REQ052 = {
+    "connection_map": RiskLevel.GREEN,
+}
+
 #: Todas juntas. Las pruebas de canal recorren todas; las que fijan el alcance de REQ-029
 #: (el modo "codigo") siguen usando solo las 8 de v1.
 TODAS = {**NIVELES_ESPERADOS, **NIVELES_REQ030, **NIVELES_REQ032, **NIVELES_REQ034,
          **NIVELES_REQ035, **NIVELES_REQ036, **NIVELES_REQ040, **NIVELES_REQ043,
-         **NIVELES_REQ051}
+         **NIVELES_REQ051, **NIVELES_REQ052}
 
 TODOS_LOS_CANALES = [
     ChannelType.DESKTOP, ChannelType.TELEGRAM, ChannelType.DISCORD, ChannelType.VOICE,
