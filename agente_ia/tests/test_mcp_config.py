@@ -224,7 +224,7 @@ def test_solo_los_canales_con_adaptador_de_confirmacion_son_habilitables(entorno
     Discord o voz sería una casilla que no hace nada."""
     mcp_config.agregar_servidor("notion", command="npx x")
 
-    for canal in ("voice", "api", "unknown"):
+    for canal in ("email", "api", "unknown"):
         with pytest.raises(MCPConfigRechazada):
             mcp_config.permitir_herramientas("notion", ["search"], [canal])
 

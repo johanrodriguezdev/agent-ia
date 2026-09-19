@@ -996,7 +996,9 @@ function buildMcpAllowedEditor(servidor, canalesPosibles) {
     check.checked = marcados.has(canal);
     check.disabled = canal === "desktop";             // siempre: es donde se confirma
     const texto = document.createElement("span");
-    texto.textContent = { desktop: "escritorio", telegram: "Telegram", discord: "Discord", voice: "voz" }[canal] || canal;
+    texto.textContent = {
+      desktop: "escritorio", telegram: "Telegram", discord: "Discord", voice: "voz (confirmo)",
+    }[canal] || canal;
     item.append(check, texto);
     canales.appendChild(item);
     casillas.push(check);

@@ -61,6 +61,13 @@ def _desktop_confirm(action_name: str, message: str) -> bool:
 
 register_confirmation_adapter(ChannelType.DESKTOP, _desktop_confirm)
 
+# REQ-048 — el modo consola por voz (opciones 2 y 3) corre como canal VOICE, que hasta acá
+# no tenía a quién preguntar: toda acción amarilla se denegaba sin más. Ahora pregunta
+# hablando y solo un «confirmo» autoriza, igual que el manos libres del escritorio.
+from voice.voice_channel_adapter import voice_channel_confirmation_adapter
+
+register_confirmation_adapter(ChannelType.VOICE, voice_channel_confirmation_adapter.confirm)
+
 # REQ-007/CA-14: migrado de AgentTool (orchestrator.register_tool) a ToolSpec
 # (agents/tool_registry.py) — el catálogo de tools ahora es consumido por
 # core/reasoning_loop.py, no por AgentOrchestrator.

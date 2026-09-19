@@ -22,10 +22,10 @@ Decisiones:
   que algún servidor declarado referencie. El slot del bridge que la llama es alcanzable
   desde cualquier script de la página, así que lo que llega no decide qué clave se escribe
   (mismo criterio que `_CONEXIONES` en `ui/webview/bridge.py`).
-- **Sin canal de correo, nunca.** `permitir_herramientas()` admite `desktop`, `telegram` y
-  `discord` (los canales con adaptador de confirmación); `email`, `api` y `unknown` no son
-  habilitables: la entrada que un tercero puede originar no alcanza herramientas amarillas
-  (constraint del proyecto).
+- **Sin canal de correo, nunca.** `permitir_herramientas()` admite `desktop`, `telegram`,
+  `discord` y `voice` (los canales con adaptador de confirmación); `email`, `api` y
+  `unknown` no son habilitables: la entrada que un tercero puede originar no alcanza
+  herramientas amarillas (constraint del proyecto).
 - **Escritura atómica de la allow-list**, igual que `core/security_config.py`: un archivo
   a medio escribir es, para `remote_tools_policy.load_allowlist()`, "no se permite nada".
   Es fail-closed, pero dejaría al usuario sin herramientas hasta que alguien lo note.
@@ -55,12 +55,13 @@ class MCPConfigRechazada(ValueError):
 
 #: Canales desde los que se puede habilitar una herramienta remota: los que tienen un
 #: adaptador de confirmación registrado (`core/confirmation.py`), porque toda herramienta
-#: remota es amarilla como mínimo y sin adaptador el gate la deniega fail-closed. Voz no
-#: lo tiene (su política es solo verde): ofrecerla sería una casilla que no hace nada.
-#: `email`, `api` y `unknown` no están por otro motivo: lo que un desconocido puede
-#: originar no alcanza acciones amarillas (ver `project_entrada_no_confiable` y
-#: `security-levels.md`). Discord entró en REQ-045, con su adaptador.
-CANALES_HABILITABLES = ("desktop", "telegram", "discord")
+#: remota es amarilla como mínimo y sin adaptador el gate la deniega fail-closed. Discord
+#: entró en REQ-045 y voz en REQ-048 (confirmación hablada: solo «confirmo» autoriza),
+#: cada uno con su adaptador. `email`, `api` y `unknown` no están por otro motivo: lo que
+#: un desconocido puede originar no alcanza acciones amarillas (ver
+#: `project_entrada_no_confiable` y `security-levels.md`); el correo tiene su propio
+#: camino, acotado a herramientas de solo lectura (REQ-049).
+CANALES_HABILITABLES = ("desktop", "telegram", "discord", "voice")
 
 #: Sin `__` en ninguna parte ni `_` al final: `nombre_calificado()` arma
 #: `mcp__servidor__tool` y `parse_nombre_calificado()` parte por el PRIMER `__`, así que

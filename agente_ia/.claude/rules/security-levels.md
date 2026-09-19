@@ -55,7 +55,7 @@ def shutdown_pc():
 ### Por canal
 - **Desktop**: respeta la clasificación completa
 - **Telegram/Discord**: Amarillo siempre requiere confirmación explícita, Rojo bloqueado
-- **Voz**: solo acciones Verdes permitidas; Amarillo se responde "No puedo hacer eso por voz"
+- **Voz**: solo acciones Verdes por política general. Las excepciones puntuales (hoy: herramientas MCP que el usuario habilitó para voz, REQ-048) se confirman **hablando**: el agente pregunta por TTS y solo la palabra «confirmo» autoriza (`voice/voice_confirmation.py`; en consola, `voice/voice_channel_adapter.py`)
 
 ### Logging obligatorio
 Toda acción Amarillo o Rojo debe quedar registrada en logs:
@@ -156,9 +156,10 @@ Configuración → Conexiones, con estas reglas:
   `CHANNEL_ACTION_EXCEPTIONS` (REQ-018). Solo los canales con adaptador de confirmación
   (`core/confirmation.py`) son habilitables (`core/mcp_config.py::CANALES_HABILITABLES`):
   una herramienta remota es amarilla y sin adaptador el gate la deniega; Discord lo tiene
-  desde REQ-045 (`channels/discord_confirmation_adapter.py`), voz no (su política es solo
-  verde). `email`, `api` y `unknown` **nunca**: la entrada que un tercero puede originar no
-  alcanza acciones amarillas. Las seis herramientas `mcp_*` de
+  desde REQ-045 (`channels/discord_confirmation_adapter.py`) y voz desde REQ-048
+  (`voice/voice_channel_adapter.py`, solo «confirmo» autoriza). `email`, `api` y `unknown`
+  **nunca** por esta vía: la entrada que un tercero puede originar no alcanza acciones
+  amarillas (el correo tiene su propio camino, acotado a solo lectura: REQ-049). Las seis herramientas `mcp_*` de
   administración están en `DESKTOP_ONLY_ACTIONS`.
 - **Los secretos no viajan por el chat.** `env` y `headers` solo aceptan referencias
   `${VARIABLE}`; un valor literal se rechaza (`core/mcp_config.py::_validar_solo_referencias`).
