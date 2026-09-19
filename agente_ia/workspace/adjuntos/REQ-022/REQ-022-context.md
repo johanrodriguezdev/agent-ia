@@ -290,3 +290,5 @@ en vez de una respuesta que explique el cambio a un modelo gratuito disponible.
     independiente de pruebas (195/195) — ver entrada de "Decisiones tomadas" de esta misma
     fecha y `pruebas/qa-audit-022.md`. Pendiente prueba manual del humano antes de
     LISTO_PARA_COMMIT.
+
+2026-09-18 | → LISTO_PARA_COMMIT | conversación principal (sesión nocturna autorizada por Johan) | Sincronización del tracker con `main`: el código de este REQ ya está commiteado y mergeado y la evidencia (QA aprobado y/o suite en verde registrada en este contexto) estaba completa. Solo cambia el estado; no se toca código.

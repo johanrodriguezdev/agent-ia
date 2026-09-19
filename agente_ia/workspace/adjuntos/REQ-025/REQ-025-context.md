@@ -181,3 +181,5 @@ implícita), sin `str(e)` en el retorno, `git diff` sigue acotado al único bloq
 tests/test_discord_bot.py` → 7 passed, verificados de forma independiente | Veredicto: ✅
 COMPLETADO | `pruebas/qa-audit-025.md` actualizado con sección "Segunda vuelta" | Pendiente:
 prueba manual del humano antes de `LISTO_PARA_COMMIT` | siguiente: Humano (prueba manual)
+
+2026-09-18 | → LISTO_PARA_COMMIT | conversación principal (sesión nocturna autorizada por Johan) | Sincronización del tracker con `main`: el código de este REQ ya está commiteado y mergeado y la evidencia (QA aprobado y/o suite en verde registrada en este contexto) estaba completa. Solo cambia el estado; no se toca código.

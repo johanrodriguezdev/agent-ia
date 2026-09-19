@@ -109,3 +109,5 @@ cada minuto pisa la selección de quien está copiando).
 
 ## Log de transiciones
 2026-09-09 | EN_DESARROLLO → EN_PRUEBAS | conversación principal | Re-baseline + los dos arreglos, con 6 tests nuevos (4 de la skill de clima, 2 del saludo en el webview)
+
+2026-09-18 | → LISTO_PARA_COMMIT | conversación principal (sesión nocturna autorizada por Johan) | Sincronización del tracker con `main`: el código de este REQ ya está commiteado y mergeado y la evidencia (QA aprobado y/o suite en verde registrada en este contexto) estaba completa. Solo cambia el estado; no se toca código.

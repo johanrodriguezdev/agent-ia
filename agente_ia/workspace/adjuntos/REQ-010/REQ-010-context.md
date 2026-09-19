@@ -97,3 +97,5 @@ Sus criterios, en cambio, ya no son implementables:
 
 **Propuesta para Johan:** cerrarlo como superado por REQ-015, o reescribir su alcance cuando
 el nombre del producto este decidido. No requiere codigo.
+
+2026-09-18 | (sin cambio de estado) | conversación principal (sesión nocturna) | Este REQ quedó SUPERADO: el nombre "Noddoo" está en reconsideración, REQ-037 hizo que el nombre del agente lo elija el usuario y REQ-041 rediseñó el icono de app y de bandeja con un concepto sin texto ni logo "N". No se implementa. Queda para que Johan lo cierre o lo redefina.

@@ -648,3 +648,5 @@ no bloqueante, `qa-audit-017.md` generado con veredicto explícito, NO se ejecut
 pedido explícito del orquestador (REQ-015/016 también pendientes de la misma prueba manual), la
 solicitud de validación manual a Johan NO se emite desde esta sesión — se devuelve el resumen al
 orquestador para que la consolide con las de REQ-015/016.
+
+2026-09-18 | → LISTO_PARA_COMMIT | conversación principal (sesión nocturna autorizada por Johan) | Sincronización del tracker con `main`: el código de este REQ ya está commiteado y mergeado y la evidencia (QA aprobado y/o suite en verde registrada en este contexto) estaba completa. Solo cambia el estado; no se toca código.

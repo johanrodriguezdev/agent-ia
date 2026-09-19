@@ -455,3 +455,5 @@ generado; handoff a orion-qa emitido
 convenciones completa, veredicto ✅ COMPLETADO en qa-audit-008.md; verificación independiente
 de compilación y pytest (175/175); tracker permanece en EN_QA hasta la prueba manual del
 humano — no se avanza a LISTO_PARA_COMMIT ni se entrega mensaje de commit todavía
+
+2026-09-18 | → LISTO_PARA_COMMIT | conversación principal (sesión nocturna autorizada por Johan) | Sincronización del tracker con `main`: el código de este REQ ya está commiteado y mergeado y la evidencia (QA aprobado y/o suite en verde registrada en este contexto) estaba completa. Solo cambia el estado; no se toca código.

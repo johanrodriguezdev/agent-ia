@@ -173,3 +173,5 @@ parámetros de `run()`. La firma NO cambia, así que `tests/modelo_falso.py` no 
   (los conteos de CA-13/14/15/24 corregidos por aritmética contra CA-30)
 - Implementación (conversación principal)
 - Definir rama git con Johan antes de tocar código (P-5)
+
+2026-09-18 | → LISTO_PARA_COMMIT | conversación principal (sesión nocturna autorizada por Johan) | Sincronización del tracker con `main`: el código de este REQ ya está commiteado y mergeado y la evidencia (QA aprobado y/o suite en verde registrada en este contexto) estaba completa. Solo cambia el estado; no se toca código.

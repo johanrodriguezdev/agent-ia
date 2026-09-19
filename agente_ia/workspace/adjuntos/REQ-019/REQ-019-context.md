@@ -747,3 +747,5 @@ mantiene en `EN_QA` (NO avanza a `LISTO_PARA_COMMIT`: falta la prueba manual de 
 para cuando despierte). NO se ejecutó `git commit`. Próximo paso: prueba manual del humano
 (Configuración → Seguridad, subir un nivel, confirmar mensaje de "aplica al reiniciar", reiniciar
 y verificar que el nuevo nivel efectivamente pide confirmación) antes de cerrar el REQ.
+
+2026-09-18 | → LISTO_PARA_COMMIT | conversación principal (sesión nocturna autorizada por Johan) | Sincronización del tracker con `main`: el código de este REQ ya está commiteado y mergeado y la evidencia (QA aprobado y/o suite en verde registrada en este contexto) estaba completa. Solo cambia el estado; no se toca código.

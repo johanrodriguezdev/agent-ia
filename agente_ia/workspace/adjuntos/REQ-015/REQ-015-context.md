@@ -497,3 +497,5 @@ diagnóstico temporales confirmados ausentes de disco), `requirements.txt` actua
 dependencias nuevas. CSV actualizado vía update-tracker.mjs (Estado se mantiene en `EN_QA` hasta
 recibir el OK de la prueba manual). Siguiente: prueba manual de Johan — ver mensaje de solicitud
 entregado en el handoff de esta sesión.
+
+2026-09-18 | → LISTO_PARA_COMMIT | conversación principal (sesión nocturna autorizada por Johan) | Sincronización del tracker con `main`: el código de este REQ ya está commiteado y mergeado y la evidencia (QA aprobado y/o suite en verde registrada en este contexto) estaba completa. Solo cambia el estado; no se toca código.

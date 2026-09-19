@@ -128,3 +128,5 @@ cualquier intento de conexión.
 
 ## Log de transiciones
 2026-09-09 | NUEVO → EN_PRUEBAS | conversación principal | Guard, cableado en los dos caminos, herramienta nueva y 28 tests
+
+2026-09-18 | → LISTO_PARA_COMMIT | conversación principal (sesión nocturna autorizada por Johan) | Sincronización del tracker con `main`: el código de este REQ ya está commiteado y mergeado y la evidencia (QA aprobado y/o suite en verde registrada en este contexto) estaba completa. Solo cambia el estado; no se toca código.

@@ -45,3 +45,5 @@ La distinción quedó fijada por dos tests que se leen juntos: uno comprueba que
 
 ## Log de transiciones
 2026-09-09 | — → EN_PRUEBAS | conversación principal | Gestor de procesos, 3 herramientas, cierre al salir y 14 tests
+
+2026-09-18 | → LISTO_PARA_COMMIT | conversación principal (sesión nocturna autorizada por Johan) | Sincronización del tracker con `main`: el código de este REQ ya está commiteado y mergeado y la evidencia (QA aprobado y/o suite en verde registrada en este contexto) estaba completa. Solo cambia el estado; no se toca código.

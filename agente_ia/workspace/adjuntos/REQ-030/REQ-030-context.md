@@ -74,3 +74,5 @@ los sigue leyendo si se los piden por su nombre: eso sí es la decisión de algu
 
 ## Log de transiciones
 2026-09-09 | — → EN_PRUEBAS | conversación principal | Spec, arquitectura e implementación en una pasada, bajo la autorización de Johan de trabajar los pendientes
+
+2026-09-18 | → LISTO_PARA_COMMIT | conversación principal (sesión nocturna autorizada por Johan) | Sincronización del tracker con `main`: el código de este REQ ya está commiteado y mergeado y la evidencia (QA aprobado y/o suite en verde registrada en este contexto) estaba completa. Solo cambia el estado; no se toca código.

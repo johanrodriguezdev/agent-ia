@@ -119,3 +119,5 @@ multiidioma completo —respuestas, interfaz, voz— es un análisis aparte.
 
 ## Pendiente
 - Prueba manual de Johan: *"hazme una cotización con la plantilla de Documentos"*.
+
+2026-09-18 | → LISTO_PARA_COMMIT | conversación principal (sesión nocturna autorizada por Johan) | Sincronización del tracker con `main`: el código de este REQ ya está commiteado y mergeado y la evidencia (QA aprobado y/o suite en verde registrada en este contexto) estaba completa. Solo cambia el estado; no se toca código.
