@@ -833,7 +833,12 @@ def _ask_gemini(messages, system_prompt, image_path, model_name):
         role = "user" if m["role"] == "user" else "model"
         gemini_msgs.append({"role": role, "parts": [m["content"]]})
         
-    model = genai.GenerativeModel(model_id, system_instruction=system_prompt)
+    # El techo de salida también acá: sin `max_output_tokens`, el tope de voz (REQ-044)
+    # no valía para Gemini y una respuesta larga por TTS seguía siendo incortable.
+    model = genai.GenerativeModel(
+        model_id, system_instruction=system_prompt,
+        generation_config={"max_output_tokens": _max_tokens_salida()},
+    )
     chat = model.start_chat(history=gemini_msgs)
     
     last_msg_content = messages[-1]["content"] if messages else ""
@@ -866,7 +871,9 @@ def _ask_ollama(messages, system_prompt, image_path, model_name):
     ollama_msgs.append(last_msg)
     
     # Desactivar "thinking" para modelos qwen3 (causa 500 sin esto)
-    options = {}
+    # `num_predict` es el techo de salida de Ollama: sin él, el tope de voz (REQ-044) no
+    # valía para los modelos locales, que son justo los que más se usan por ser gratis.
+    options = {"num_predict": _max_tokens_salida()}
     if "qwen3" in model.lower():
         options["num_ctx"] = 4096
     

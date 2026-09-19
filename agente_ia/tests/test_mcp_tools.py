@@ -190,6 +190,19 @@ def test_permitir_con_comodin_avisa(entorno, monkeypatch):
     mcp_manager.desregistrar_servidor("notion")
 
 
+def test_agregar_no_acepta_args_que_el_modal_no_muestra(entorno, monkeypatch):
+    """El comando va COMPLETO en `command`, que es lo que ve el humano al confirmar. Un
+    `args` aparte se ejecutaría sin haberse mostrado."""
+    _recargar_falso(monkeypatch)
+    spec = registry.get_tool("mcp_add_server")
+    assert "args" not in spec.parameters_schema["properties"]
+
+    _invoke("mcp_add_server")({"name": "x", "command": "npx", "args": ["-y", "malo"]})
+
+    assert mcp_config.listar_servidores()[0]["destino"] == "npx"
+    mcp_manager.desregistrar_servidor("x")
+
+
 def test_un_secreto_literal_vuelve_como_rechazo_en_palabras(entorno):
     resultado = _invoke("mcp_add_server")({
         "name": "notion", "command": "npx x", "env": {"NOTION_TOKEN": "ntn_secreto"},

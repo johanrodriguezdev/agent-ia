@@ -477,6 +477,22 @@ def _llamada_de_cierre(
 ) -> Optional[str]:
     """Una última llamada al modelo SIN herramientas para que redacte con lo que reunió.
 
+    Arma los mensajes del turno de escritorio y delega en `cerrar_sin_herramientas()`, que
+    es la pieza que comparte con `ai/claude_brain.py` (REQ-044): el mismo contrato de
+    cierre para los dos caminos.
+    """
+    return cerrar_sin_herramientas(
+        _mensajes_del_turno(task, prior_turns, historial), instruccion,
+        system_prompt, tarea, aviso, canal=canal,
+    )
+
+
+def cerrar_sin_herramientas(
+    mensajes: list[dict], instruccion: str, system_prompt: str, tarea: str, aviso: dict,
+    canal=None, image_path: Optional[str] = None,
+) -> Optional[str]:
+    """Una última llamada al modelo SIN herramientas sobre `mensajes` ya armados.
+
     Return el texto, o `None` si no sirve —proveedor caído, texto vacío, o una respuesta
     que igual trajo tool calls—, en cuyo caso el caller usa el mensaje enlatado de siempre
     (CA-31).
@@ -490,7 +506,6 @@ def _llamada_de_cierre(
     historial, el último mensaje es el de resultados —también de rol `user`— y Anthropic
     exige alternancia estricta de roles.
     """
-    mensajes = _mensajes_del_turno(task, prior_turns, historial)
     ultimo = mensajes[-1]
     if tool_history.es_estructurado(ultimo):
         mensajes = mensajes[:-1] + [tool_history.con_texto_agregado(ultimo, instruccion)]
@@ -503,7 +518,7 @@ def _llamada_de_cierre(
     # escribe, igual que la de una vuelta normal.
     with streaming.permitido(), _tope_de_salida_del_canal(canal):
         respuesta = generate_response(
-            mensajes, system_prompt, tools=None, tarea=tarea, aviso=aviso,
+            mensajes, system_prompt, image_path=image_path, tools=None, tarea=tarea, aviso=aviso,
         )
 
     if isinstance(respuesta, LLMToolResponse):

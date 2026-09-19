@@ -21,6 +21,13 @@ Para un archivo específico:
 cd agente_ia && python -m pytest tests/test_archivo.py --tb=short -v
 ```
 
+## Dependencias opcionales
+Si falta un paquete opcional (`python-docx`, `openpyxl`, `python-pptx`, `pymupdf`,
+`uiautomation`, `pywin32`), los tests que lo necesitan se **saltan** con el nombre del
+paquete, no fallan: lo hace el hook `pytest_runtest_makereport` de `tests/conftest.py`
+sobre una lista cerrada (`_DEPENDENCIAS_OPCIONALES`). Un `ModuleNotFoundError` de
+cualquier otro nombre sigue siendo un fallo. Un rojo en la suite es siempre un bug.
+
 ## Lo que NO debe hacer un test
 - No depende de redes externas (API de Claude, DeepSeek, Google STT).
 - No depende del micrófono o altavoces.

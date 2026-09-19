@@ -53,7 +53,8 @@ def test_el_nombre_se_normaliza_a_minusculas():
     assert mcp_config.normalizar_nombre("  Notion ") == "notion"
 
 
-@pytest.mark.parametrize("malo", ["", "   ", "1abc", "con espacio", "__proto__", "a" * 41, "ñandú"])
+@pytest.mark.parametrize("malo", ["", "   ", "1abc", "con espacio", "__proto__", "a" * 41, "ñandú",
+                                  "foo_", "my__srv", "a__"])
 def test_un_nombre_invalido_se_rechaza(malo):
     with pytest.raises(MCPConfigRechazada):
         mcp_config.normalizar_nombre(malo)
@@ -105,6 +106,27 @@ def test_un_secreto_literal_en_headers_se_rechaza(entorno):
         mcp_config.agregar_servidor("docs", url="https://x.y/mcp", headers={"Authorization": "Bearer abc"})
 
 
+def test_un_nombre_con_guion_bajo_no_colisiona_con_el_separador():
+    """`foo_` + `bar` daría `mcp__foo___bar`, que `parse_nombre_calificado` lee como
+    servidor "foo" y herramienta "_bar": las herramientas de un servidor se atribuirían a
+    otro (y `desregistrar_servidor("foo")` las quitaría)."""
+    from core.remote_tools_policy import nombre_calificado, parse_nombre_calificado
+
+    nombre = mcp_config.normalizar_nombre("mi_srv-2")
+    assert parse_nombre_calificado(nombre_calificado(nombre, "bar")) == (nombre, "bar")
+
+
+def test_env_en_un_servidor_http_se_rechaza_en_vez_de_descartarse(entorno):
+    """Descartado en silencio, el servidor quedaba sin su token y el bloque «Variables»
+    nunca lo ofrecía."""
+    with pytest.raises(MCPConfigRechazada) as exc:
+        mcp_config.agregar_servidor("docs", url="https://x.y/mcp", env={"TOKEN": "${TOKEN}"})
+    assert "headers" in str(exc.value)
+    with pytest.raises(MCPConfigRechazada) as exc:
+        mcp_config.agregar_servidor("loc", command="npx x", headers={"Authorization": "${T}"})
+    assert "env" in str(exc.value)
+
+
 def test_command_y_url_a_la_vez_se_rechaza(entorno):
     with pytest.raises(MCPConfigRechazada):
         mcp_config.agregar_servidor("x", command="npx x", url="https://x.y/mcp")
@@ -139,6 +161,25 @@ def test_permitir_escribe_la_forma_larga_y_conserva_otros_servidores(entorno):
     assert _allow(entorno) == {"otro": ["algo"], "notion": escrito}
     assert politica.is_tool_allowed("notion", "search")
     assert not politica.is_tool_allowed("notion", "delete_page")
+
+
+def test_una_allowlist_danada_no_se_reescribe_desde_cero(entorno):
+    """Una coma de más al editar a mano no puede borrar los permisos de los demás."""
+    entorno["allow"].write_text('{"otro": ["algo"],}', encoding="utf-8")
+    mcp_config.agregar_servidor("notion", command="npx x")
+
+    with pytest.raises(MCPConfigRechazada) as exc:
+        mcp_config.permitir_herramientas("notion", ["search"])
+
+    assert "dañado" in str(exc.value)
+    assert entorno["allow"].read_text(encoding="utf-8") == '{"otro": ["algo"],}'
+
+
+def test_si_no_se_pudo_escribir_config_se_lanza_en_vez_de_parecer_exito(entorno, monkeypatch):
+    monkeypatch.setattr(config_manager, "save_config", lambda c: False)
+
+    with pytest.raises(OSError):
+        mcp_config.agregar_servidor("notion", command="npx x")
 
 
 def test_permitir_acepta_una_cadena_separada_por_comas(entorno):
@@ -176,6 +217,16 @@ def test_desktop_se_agrega_siempre_a_los_canales(entorno):
     escrito = mcp_config.permitir_herramientas("notion", ["search"], ["telegram"])
 
     assert escrito["canales"] == ["desktop", "telegram"]
+
+
+def test_solo_los_canales_con_adaptador_de_confirmacion_son_habilitables(entorno):
+    """Toda herramienta remota es amarilla: sin adaptador, el gate la deniega. Ofrecer
+    Discord o voz sería una casilla que no hace nada."""
+    mcp_config.agregar_servidor("notion", command="npx x")
+
+    for canal in ("discord", "voice", "api", "unknown"):
+        with pytest.raises(MCPConfigRechazada):
+            mcp_config.permitir_herramientas("notion", ["search"], [canal])
 
 
 # ── apagar y quitar ─────────────────────────────────────────────────

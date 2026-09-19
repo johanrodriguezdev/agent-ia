@@ -152,9 +152,11 @@ Configuración → Conexiones, con estas reglas:
 - **Toda herramienta remota es 🟡 como mínimo** (`_nivel_declarado()`): las anotaciones del
   servidor solo endurecen. Se registra como `mcp__servidor__tool` para que nunca pise una
   acción local, y la confirmación dice «use la herramienta 'X' del servidor MCP 'Y'».
-- **Canales**: por defecto solo escritorio. Se puede sumar `telegram`, `discord` o `voice` vía
-  `CHANNEL_ACTION_EXCEPTIONS` (REQ-018). `email`, `api` y `unknown` **nunca** son
-  habilitables (`core/mcp_config.py::CANALES_HABILITABLES`): la entrada que un tercero
+- **Canales**: por defecto solo escritorio. Se puede sumar `telegram` vía
+  `CHANNEL_ACTION_EXCEPTIONS` (REQ-018). Solo los canales con adaptador de confirmación
+  (`core/confirmation.py`) son habilitables (`core/mcp_config.py::CANALES_HABILITABLES`):
+  una herramienta remota es amarilla y sin adaptador el gate la deniega; `discord` y `voice`
+  entrarán cuando lo tengan. `email`, `api` y `unknown` **nunca**: la entrada que un tercero
   puede originar no alcanza acciones amarillas. Las seis herramientas `mcp_*` de
   administración están en `DESKTOP_ONLY_ACTIONS`.
 - **Los secretos no viajan por el chat.** `env` y `headers` solo aceptan referencias
@@ -162,9 +164,13 @@ Configuración → Conexiones, con estas reglas:
   El valor se pega en Configuración → Conexiones (`config.json → mcp_variables`, nunca en el
   payload hacia la página, nunca en el log) o se define como variable de entorno, que manda.
   La pantalla solo acepta nombres de variable que algún servidor declarado referencie.
-- **Quitar un servidor y cambiar su allow-list desde la pantalla pasan por el mismo gate**
-  (`mcp_remove_server`, `mcp_allow_tools`) que desde el chat: los slots del bridge son
-  alcanzables desde cualquier script de la página, así que la confirmación va en el slot.
+- **Quitar, encender/apagar y cambiar la allow-list desde la pantalla pasan por el mismo
+  gate** (`mcp_remove_server`, `mcp_set_server_enabled`, `mcp_allow_tools`) que desde el
+  chat: los slots del bridge son alcanzables desde cualquier script de la página, así que la
+  confirmación va en el slot. Encender no es inocuo: arranca el proceso del servidor.
+- **El nombre del servidor no puede llevar `__` ni terminar en `_`**: `mcp__servidor__tool`
+  se parte por el primer `__`, y un nombre que lo contenga haría que las herramientas de un
+  servidor se atribuyan —y se desregistren— como de otro.
 
 ## Verificación en QA
 - [ ] Toda acción destructiva tiene su nivel clasificado

@@ -53,7 +53,10 @@ def _resolver(respuestas, ejecutar=None):
             return ejecutar(nombre, params)
         return f"resultado de {nombre}"
 
+    # Las dos vías al modelo: el bucle importa `generate_response` dentro de la función
+    # (vía `ai.llm_provider`) y el cierre compartido la tiene ligada en `core.reasoning_loop`.
     with patch("ai.llm_provider.generate_response", side_effect=fake_generate), \
+         patch("core.reasoning_loop.generate_response", side_effect=fake_generate), \
          patch("agents.tool_registry.catalogo_para_modelo", return_value=CATALOGO), \
          patch("core.reasoning_loop.execute_tool", side_effect=fake_execute):
         texto = claude_brain._resolver_con_tools(
@@ -200,6 +203,7 @@ def test_el_historial_por_usuario_no_recibe_bloques_de_herramientas():
             LLMToolResponse(text=None, tool_calls=[_llamada("web_search", 0)]),
             LLMToolResponse(text="listo", tool_calls=[]),
          ]), \
+         patch("core.reasoning_loop.generate_response", return_value="no debería llegar acá"), \
          patch("agents.tool_registry.catalogo_para_modelo", return_value=CATALOGO), \
          patch("core.reasoning_loop.execute_tool", return_value="ok"):
         claude_brain._resolver_con_tools(
@@ -242,6 +246,9 @@ def test_los_adaptadores_leen_el_tope_y_no_la_constante():
     fuente = (Path(__file__).resolve().parent.parent / "ai" / "llm_provider.py").read_text(encoding="utf-8")
     assert "max_tokens=MAX_TOKENS_SALIDA" not in fuente
     assert fuente.count("max_tokens=_max_tokens_salida()") >= 5
+    # Gemini y Ollama no pasaban ningún techo: el tope de voz no valía para ellos.
+    assert '"max_output_tokens": _max_tokens_salida()' in fuente
+    assert '"num_predict": _max_tokens_salida()' in fuente
 
 
 # ── CA-10 / CA-11: voz acotada, el resto no ─────────────────────────

@@ -207,6 +207,9 @@ _ETIQUETAS = {
 }
 
 
+_RE_SEPARADOR_DE_CAMPOS = re.compile(r",\s*(?=[A-Za-z_][A-Za-z0-9_]*=)")
+
+
 def detalle_legible(detalle: str) -> str:
     """Return el detalle sin la forma de línea de log.
 
@@ -227,7 +230,10 @@ def detalle_legible(detalle: str) -> str:
         return ""
 
     partes = []
-    for trozo in cuerpo.split(","):
+    # Se parte solo en las comas que preceden a un `clave=`: un comando («node srv.js
+    # --ports 1,2») o una URL con comas en la query llevan comas dentro del valor, y
+    # partir por todas mostraba al humano un comando distinto del que se iba a ejecutar.
+    for trozo in _RE_SEPARADOR_DE_CAMPOS.split(cuerpo):
         clave, sep, valor = trozo.partition("=")
         if not sep:
             continue

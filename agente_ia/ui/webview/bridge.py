@@ -1234,23 +1234,40 @@ class Bridge(QObject):
 
         Los slots de abajo son invocables desde cualquier script de la página, así que lo
         que llega no decide sobre qué servidor se actúa: solo uno que exista en la
-        configuración (mismo criterio que `_CONEXIONES` para las claves).
+        configuración (mismo criterio que `_CONEXIONES` para las claves). `existe()` es una
+        lectura de config, no el listado completo: esto corre en el hilo de la GUI.
         """
-        from core.mcp_config import MCPConfigRechazada, listar_servidores, normalizar_nombre
+        from core.mcp_config import existe
 
-        try:
-            clave = normalizar_nombre(nombre)
-        except MCPConfigRechazada:
-            clave = ""
-        if clave and any(f["nombre"] == clave for f in listar_servidores()):
+        clave = existe(nombre)
+        if clave:
             return clave
         logger.warning(f"MCP: servidor desconocido desde la página: {nombre!r}")
         self.notice_shown.emit("error", "Ese servidor MCP no existe.")
         return ""
 
+    def _mcp_confirmar(self, accion: str, params: Dict[str, Any]) -> bool:
+        """El mismo gate amarillo que las herramientas del agente, con el mismo nombre.
+
+        Un solo `action_name` → una sola clasificación, un solo texto de confirmación y una
+        sola entrada de auditoría, venga del chat o del botón.
+        """
+        from core.security_manager import format_details, security_manager
+
+        return security_manager.require_confirmation(
+            accion, ChannelType.DESKTOP,
+            details=format_details(f"webview:{accion}", params),
+            user_id=OWNER_USER_ID,
+        )
+
     @pyqtSlot(str, bool)
     def set_mcp_server_enabled(self, nombre: str, activo: bool) -> None:
-        """Enciende o apaga un servidor. Aplica en caliente, en un hilo."""
+        """Enciende o apaga un servidor, con el gate amarillo de `mcp_set_server_enabled`.
+
+        Encender arranca el proceso del servidor y registra sus herramientas: es la misma
+        acción amarilla que desde el chat, y el slot es alcanzable desde cualquier script
+        de la página. Va por `run_async()` como todo lo que confirma.
+        """
         clave = self._mcp_nombre_valido(nombre)
         if not clave:
             return
@@ -1259,18 +1276,19 @@ class Bridge(QObject):
         )
 
     def _mcp_set_enabled_flow(self, clave: str, activo: bool) -> str:
-        from core.mcp_config import aplicar_y_resumir, habilitar_servidor
+        from core.mcp_config import aplicar, habilitar_servidor, resumen_para_humano
 
+        if not self._mcp_confirmar(
+            "mcp_set_server_enabled",
+            {"name": clave, "task": "encender" if activo else "apagar"},
+        ):
+            return ""
         habilitar_servidor(clave, activo)
-        return aplicar_y_resumir(clave)
+        return resumen_para_humano(aplicar(clave))
 
     @pyqtSlot(str)
     def remove_mcp_server(self, nombre: str) -> None:
-        """Quita un servidor. Pasa por el mismo gate amarillo que la herramienta del agente.
-
-        Va por `run_async()` como todo lo que confirma: `require_confirmation()` bloquea
-        esperando el modal y el hilo de la GUI es el que tiene que pintarlo.
-        """
+        """Quita un servidor. Pasa por el mismo gate amarillo que la herramienta del agente."""
         clave = self._mcp_nombre_valido(nombre)
         if not clave:
             return
@@ -1279,19 +1297,12 @@ class Bridge(QObject):
     def _mcp_remove_flow(self, clave: str) -> str:
         from core.mcp_config import quitar_servidor
         from core.mcp_manager import desregistrar_servidor
-        from core.security_manager import format_details, security_manager
 
-        confirmada = security_manager.require_confirmation(
-            "mcp_remove_server",
-            ChannelType.DESKTOP,
-            details=format_details("webview:mcp_remove_server", {"name": clave}),
-            user_id=OWNER_USER_ID,
-        )
-        if not confirmada:
+        if not self._mcp_confirmar("mcp_remove_server", {"name": clave}):
             return ""
         quitadas = desregistrar_servidor(clave)
         quitar_servidor(clave)
-        return f"'{clave}' quitado ({quitadas} herramienta(s) desregistrada(s))."
+        return f"{clave} quitado ({quitadas} herramienta(s) desregistrada(s))."
 
     @pyqtSlot(str, str, str)
     def save_mcp_allowed_tools(self, nombre: str, patrones: str, canales: str) -> None:
@@ -1305,24 +1316,17 @@ class Bridge(QObject):
         )
 
     def _mcp_allow_flow(self, clave: str, patrones: str, canales: str) -> str:
-        from core.mcp_config import aplicar_y_resumir, permitir_herramientas
-        from core.security_manager import format_details, security_manager
+        from core.mcp_config import aplicar, permitir_herramientas, resumen_para_humano
 
         lista = [p for p in re.split(r"[,\s]+", patrones) if p]
         lista_canales = [c for c in re.split(r"[,\s]+", canales) if c]
-        confirmada = security_manager.require_confirmation(
+        if not self._mcp_confirmar(
             "mcp_allow_tools",
-            ChannelType.DESKTOP,
-            details=format_details(
-                "webview:mcp_allow_tools",
-                {"name": clave, "herramientas": lista, "canales": lista_canales},
-            ),
-            user_id=OWNER_USER_ID,
-        )
-        if not confirmada:
+            {"name": clave, "herramientas": lista, "canales": lista_canales},
+        ):
             return ""
         permitir_herramientas(clave, lista, lista_canales or None)
-        return aplicar_y_resumir(clave)
+        return resumen_para_humano(aplicar(clave))
 
     @pyqtSlot(str)
     def probe_mcp_server(self, nombre: str) -> None:
@@ -1346,13 +1350,15 @@ class Bridge(QObject):
         run_async(self._mcp_login_flow, self._on_mcp_done, self._on_mcp_error, clave)
 
     def _mcp_login_flow(self, clave: str) -> str:
-        from core.mcp_config import aplicar_y_resumir
-        from core.mcp_manager import login_servidor
+        from core.mcp_config import aplicar, resumen_para_humano
+        from core.mcp_manager import login_servidor_detallado
 
-        resultado = login_servidor(clave)
-        if "autorizado" in resultado.lower():
-            resultado = f"{resultado.split('.')[0]}. {aplicar_y_resumir(clave)}"
-        return resultado
+        autorizado, mensaje = login_servidor_detallado(clave)
+        if not autorizado:
+            return mensaje
+        # Con credenciales nuevas, reconectar acá mismo: el mensaje de la CLI ("recargá
+        # con python -m ...") no le sirve a quien está delante de la pantalla.
+        return f"{clave} autorizado. {resumen_para_humano(aplicar(clave))}"
 
     @pyqtSlot(str, str)
     def save_mcp_variable(self, variable: str, valor: str) -> None:
@@ -1363,7 +1369,13 @@ class Bridge(QObject):
         """
         from core.mcp_config import definir_variable, origen_de_variable
 
-        if not definir_variable(variable, valor):
+        try:
+            guardada = definir_variable(variable, valor)
+        except OSError as e:
+            logger.error(f"MCP: no se pudo guardar la variable {variable}: {e}")
+            self.notice_shown.emit("error", f"No se pudo guardar {variable}: {e}")
+            return
+        if not guardada:
             self.notice_shown.emit(
                 "error", "No se guardó: esa variable no la usa ningún servidor, o venía vacía.",
             )
@@ -1385,8 +1397,12 @@ class Bridge(QObject):
         """Quita una variable guardada en el archivo."""
         from core.mcp_config import borrar_variable
 
-        if borrar_variable(variable):
-            self.notice_shown.emit("ok", f"Variable {variable} borrada.")
+        try:
+            if borrar_variable(variable):
+                self.notice_shown.emit("ok", f"Variable {variable} borrada.")
+        except OSError as e:
+            logger.error(f"MCP: no se pudo borrar la variable {variable}: {e}")
+            self.notice_shown.emit("error", f"No se pudo borrar {variable}: {e}")
         self.request_mcp_servers()
 
     def _on_mcp_done(self, resumen) -> None:

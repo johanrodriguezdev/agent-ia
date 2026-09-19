@@ -2,6 +2,7 @@ import json
 import os
 import logging
 import re
+import tempfile
 import unicodedata
 
 try:
@@ -68,19 +69,65 @@ def load_config():
             if "ui_theme" not in config:
                 config["ui_theme"] = DEFAULT_CONFIG["ui_theme"]
             return config
-    except (json.JSONDecodeError, IOError):
+    except (json.JSONDecodeError, IOError) as e:
+        # Antes se pisaba el archivo con los valores por defecto sin más: una coma de más
+        # al editarlo a mano, o un corte a mitad de escritura, borraban todas las claves de
+        # API, los servidores MCP y sus tokens sin dejar rastro. Ahora el archivo roto se
+        # aparta con fecha para poder recuperar lo que tenía, y recién ahí se crea uno nuevo.
+        _apartar_config_roto(e)
         save_config(DEFAULT_CONFIG)
         return dict(DEFAULT_CONFIG)
 
 
-def save_config(config):
+def _apartar_config_roto(motivo: Exception) -> None:
+    """Renombra el `config.json` ilegible a `config.json.corrupto-<fecha>` y lo registra."""
+    from datetime import datetime
+
+    if not os.path.exists(CONFIG_FILE):
+        return
+    respaldo = f"{CONFIG_FILE}.corrupto-{datetime.now():%Y%m%d-%H%M%S}"
     try:
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        os.replace(CONFIG_FILE, respaldo)
+    except OSError as e2:
+        logger.error(f"config.json ilegible ({motivo}) y no se pudo apartar: {e2}")
+        return
+    logger.error(
+        f"config.json ilegible ({motivo}). Se apartó en '{os.path.basename(respaldo)}' y se "
+        f"creó uno nuevo con los valores por defecto: las claves y servidores que tenía se "
+        f"recuperan de ese archivo."
+    )
+
+
+def save_config(config) -> bool:
+    """Guarda `config.json`. Return si se escribió.
+
+    Escritura atómica (temporal + `os.replace`), como `core/security_config.py`: este
+    archivo guarda claves de API y, desde REQ-043, servidores MCP y sus variables. Un
+    corte a mitad de escritura dejaba un JSON truncado, y `load_config()` responde a un
+    JSON truncado reescribiendo el archivo con los valores por defecto — o sea, borrando
+    todas las claves. Devuelve `bool` en vez de lanzar para no cambiar el contrato de los
+    ~30 callers que no lo miran; quien necesite saber si se guardó (REQ-043) lo mira.
+    """
+    directorio = os.path.dirname(os.path.abspath(CONFIG_FILE)) or "."
+    try:
+        fd, tmp_path = tempfile.mkstemp(prefix=".config_", suffix=".json", dir=directorio)
+    except OSError as e:
+        logger.error(f"Error saving config: {e}")
+        return False
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             # `ensure_ascii=False`: sin esto, "Peña" se guarda como "Peña" y el
             # archivo deja de ser legible para el humano que a veces lo edita a mano.
             json.dump(config, f, indent=4, ensure_ascii=False)
-    except IOError as e:
+        os.replace(tmp_path, CONFIG_FILE)   # atómico en Windows (MoveFileEx) y POSIX
+        return True
+    except (OSError, TypeError, ValueError) as e:
         logger.error(f"Error saving config: {e}")
+        try:
+            os.remove(tmp_path)
+        except OSError as e2:
+            logger.warning(f"No se pudo limpiar el temporal {tmp_path}: {e2}")
+        return False
 
 
 def _get_config_value(key: str, default: str = "") -> str:

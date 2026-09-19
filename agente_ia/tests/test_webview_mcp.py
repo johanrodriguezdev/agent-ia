@@ -95,7 +95,7 @@ def test_el_payload_lista_servidores_y_variables_sin_valores(entorno):
     assert "ntn_super_secreto" not in crudo
     assert payload["servidores"][0]["nombre"] == "notion"
     assert payload["variables"] == [{"nombre": "NOTION_TOKEN", "origen": "archivo", "servidores": ["notion"]}]
-    assert payload["canales"] == ["desktop", "telegram", "discord", "voice"]
+    assert payload["canales"] == ["desktop", "telegram"]
 
 
 def test_request_emite_el_payload(bridge, qtbot):
@@ -190,7 +190,10 @@ def test_permitir_con_canal_de_correo_se_rechaza_en_palabras(bridge, qtbot, ento
 
 # ── habilitar / deshabilitar ────────────────────────────────────────
 
-def test_apagar_y_encender_no_confirman_pero_escriben(bridge, entorno, confirmacion):
+def test_apagar_y_encender_pasan_por_el_gate_de_la_herramienta(bridge, entorno, confirmacion):
+    """Encender arranca el proceso del servidor y registra sus herramientas: es la misma
+    acción amarilla que `mcp_set_server_enabled` desde el chat, y el slot es alcanzable
+    desde cualquier script de la página."""
     _con_notion()
 
     bridge.set_mcp_server_enabled("notion", False)
@@ -198,7 +201,63 @@ def test_apagar_y_encender_no_confirman_pero_escriben(bridge, entorno, confirmac
 
     bridge.set_mcp_server_enabled("notion", True)
     assert mcp_config.listar_servidores()[0]["enabled"] is True
-    assert confirmacion["pedidas"] == []
+
+    assert [p["accion"] for p in confirmacion["pedidas"]] == [
+        "mcp_set_server_enabled", "mcp_set_server_enabled",
+    ]
+    assert "apagar" in confirmacion["pedidas"][0]["detalle"]
+    assert "encender" in confirmacion["pedidas"][1]["detalle"]
+
+
+def test_encender_denegado_deja_el_servidor_apagado(bridge, entorno, confirmacion):
+    _con_notion()
+    bridge.set_mcp_server_enabled("notion", False)
+    confirmacion["respuesta"][0] = False
+
+    bridge.set_mcp_server_enabled("notion", True)
+
+    assert mcp_config.listar_servidores()[0]["enabled"] is False
+
+
+def test_el_aviso_de_la_pantalla_no_le_habla_al_modelo(bridge, qtbot, entorno, confirmacion, monkeypatch):
+    """`aplicar_y_resumir()` está redactado para el modelo («preguntale al usuario, usá
+    mcp_allow_tools»); el toast de la pantalla usa la redacción para humanos."""
+    _con_notion()
+    monkeypatch.setattr(mcp_manager, "estado", lambda: {"notion": []})
+
+    class ClienteFalso:
+        def list_tools(self):
+            return [{"name": "search"}]
+
+    monkeypatch.setattr(mcp_manager, "recargar_servidor",
+                        lambda n: mcp_manager._CLIENTES.__setitem__(n, ClienteFalso()))
+
+    with qtbot.waitSignal(bridge.notice_shown, timeout=1000) as blocker:
+        bridge.set_mcp_server_enabled("notion", True)
+
+    assert blocker.args[0] == "ok"
+    assert "mcp_allow_tools" not in blocker.args[1]
+    assert "preguntale" not in blocker.args[1]
+    assert "Herramientas permitidas" in blocker.args[1]
+
+
+def test_el_login_recarga_solo_si_hubo_credenciales_nuevas(bridge, qtbot, entorno, confirmacion, monkeypatch):
+    _con_notion()
+    recargas = []
+    monkeypatch.setattr(mcp_manager, "recargar_servidor", lambda n: recargas.append(n))
+    monkeypatch.setattr(mcp_manager, "login_servidor_detallado",
+                        lambda n: (False, f"'{n}' es un servidor stdio local: no usa OAuth."))
+
+    with qtbot.waitSignal(bridge.notice_shown, timeout=1000) as blocker:
+        bridge.login_mcp_server("notion")
+
+    assert "no usa OAuth" in blocker.args[1]
+    assert recargas == []
+
+    monkeypatch.setattr(mcp_manager, "login_servidor_detallado", lambda n: (True, "autorizado"))
+    with qtbot.waitSignal(bridge.notice_shown, timeout=1000):
+        bridge.login_mcp_server("notion")
+    assert recargas == ["notion"]
 
 
 # ── variables ───────────────────────────────────────────────────────

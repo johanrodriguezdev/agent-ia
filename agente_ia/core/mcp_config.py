@@ -22,9 +22,10 @@ Decisiones:
   que algún servidor declarado referencie. El slot del bridge que la llama es alcanzable
   desde cualquier script de la página, así que lo que llega no decide qué clave se escribe
   (mismo criterio que `_CONEXIONES` en `ui/webview/bridge.py`).
-- **Sin canal de correo, nunca.** `permitir_herramientas()` admite `desktop`, `telegram`,
-  `discord` y `voice`; `email`, `api` y `unknown` no son habilitables: la entrada que un
-  tercero puede originar no alcanza herramientas amarillas (constraint del proyecto).
+- **Sin canal de correo, nunca.** `permitir_herramientas()` admite `desktop` y `telegram`
+  (los canales con adaptador de confirmación); `email`, `api` y `unknown` no son
+  habilitables: la entrada que un tercero puede originar no alcanza herramientas amarillas
+  (constraint del proyecto).
 - **Escritura atómica de la allow-list**, igual que `core/security_config.py`: un archivo
   a medio escribir es, para `remote_tools_policy.load_allowlist()`, "no se permite nada".
   Es fail-closed, pero dejaría al usuario sin herramientas hasta que alguien lo note.
@@ -52,12 +53,19 @@ class MCPConfigRechazada(ValueError):
     """La operación no se hizo; el mensaje dice por qué, en palabras para el usuario."""
 
 
-#: Canales desde los que se puede habilitar una herramienta remota. `email`, `api` y
-#: `unknown` no están a propósito: lo que un desconocido puede originar no alcanza acciones
-#: amarillas (ver `project_entrada_no_confiable` y `security-levels.md`).
-CANALES_HABILITABLES = ("desktop", "telegram", "discord", "voice")
+#: Canales desde los que se puede habilitar una herramienta remota: los que tienen un
+#: adaptador de confirmación registrado (`core/confirmation.py`), porque toda herramienta
+#: remota es amarilla como mínimo y sin adaptador el gate la deniega fail-closed. Discord y
+#: voz no lo tienen hoy: ofrecerlos sería una casilla que no hace nada. `email`, `api` y
+#: `unknown` no están por otro motivo: lo que un desconocido puede originar no alcanza
+#: acciones amarillas (ver `project_entrada_no_confiable` y `security-levels.md`).
+CANALES_HABILITABLES = ("desktop", "telegram")
 
-_PATRON_NOMBRE = re.compile(r"^[a-z][a-z0-9_-]{0,39}$")
+#: Sin `__` en ninguna parte ni `_` al final: `nombre_calificado()` arma
+#: `mcp__servidor__tool` y `parse_nombre_calificado()` parte por el PRIMER `__`, así que
+#: `foo_` + `bar` daría `mcp__foo___bar` → servidor "foo", herramienta "_bar", y las
+#: herramientas de un servidor se atribuirían (y desregistrarían) a otro.
+_PATRON_NOMBRE = re.compile(r"^[a-z](?:[a-z0-9-]|_(?!_))*(?<!_)$")
 _PATRON_REFERENCIA = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 _NOMBRES_RESERVADOS = frozenset({"__proto__", "constructor", "prototype"})
 
@@ -79,10 +87,11 @@ def normalizar_nombre(nombre: Any) -> str:
     limpio = str(nombre or "").strip().lower()
     if not limpio:
         raise MCPConfigRechazada("El servidor necesita un nombre.")
-    if limpio in _NOMBRES_RESERVADOS or not _PATRON_NOMBRE.match(limpio):
+    if limpio in _NOMBRES_RESERVADOS or len(limpio) > 40 or not _PATRON_NOMBRE.match(limpio):
         raise MCPConfigRechazada(
             f"'{limpio}' no sirve como nombre de servidor: letras minúsculas, números, guion "
-            f"y guion bajo, empezando por letra y de hasta 40 caracteres."
+            f"y guion bajo (nunca dos seguidos ni al final), empezando por letra y de hasta "
+            f"40 caracteres."
         )
     return limpio
 
@@ -100,7 +109,9 @@ def _validar_solo_referencias(datos: Any, etiqueta: str) -> Dict[str, str]:
     if datos in (None, "", {}):
         return {}
     if not isinstance(datos, dict):
-        raise MCPConfigRechazada(f"'{etiqueta}' tiene que ser un objeto {{nombre: '${{VARIABLE}}'}}.")
+        raise MCPConfigRechazada(
+            f"'{etiqueta}' tiene que ser un objeto {{nombre: '${{VARIABLE}}'}}."
+        )
     limpios: Dict[str, str] = {}
     for clave, valor in datos.items():
         nombre = str(clave or "").strip()
@@ -132,9 +143,15 @@ def _servidores_declarados(config: Optional[Dict[str, Any]] = None) -> Dict[str,
     return validos
 
 
+def _guardar_config(config: Dict[str, Any]) -> None:
+    """Escribe `config.json` o lanza `OSError`: un guardado que falló no puede parecer éxito."""
+    if not config_manager.save_config(config):
+        raise OSError(f"no se pudo escribir {config_manager.CONFIG_FILE}")
+
+
 def _guardar_servidores(config: Dict[str, Any], servidores: Dict[str, Dict[str, Any]]) -> None:
     config[_CLAVE_SERVIDORES] = servidores
-    config_manager.save_config(config)
+    _guardar_config(config)
 
 
 def partir_comando(comando: Any) -> List[str]:
@@ -179,9 +196,13 @@ def agregar_servidor(
     url_texto = str(url or "").strip()
 
     if comando_texto and url_texto:
-        raise MCPConfigRechazada("Un servidor se define con un comando (local) o con una URL, no con los dos.")
+        raise MCPConfigRechazada(
+            "Un servidor se define con un comando (local) o con una URL, no con los dos."
+        )
     if not comando_texto and not url_texto:
-        raise MCPConfigRechazada("Necesito el comando que lo arranca (servidor local) o su URL (servidor HTTP).")
+        raise MCPConfigRechazada(
+            "Necesito el comando que lo arranca (servidor local) o su URL (servidor HTTP)."
+        )
     if url_texto and not re.match(r"^https?://", url_texto, re.IGNORECASE):
         raise MCPConfigRechazada(f"La URL '{url_texto}' tiene que empezar por http:// o https://.")
 
@@ -190,6 +211,18 @@ def agregar_servidor(
     if clave in servidores:
         raise MCPConfigRechazada(
             f"Ya hay un servidor llamado '{clave}'. Quitalo primero o usá otro nombre."
+        )
+
+    # Cada transporte tiene su bloque de secretos: `env` para el proceso local, `headers`
+    # para HTTP. El otro no se descarta en silencio —el servidor quedaría sin su token y el
+    # bloque «Variables» nunca lo ofrecería—: se dice cuál corresponde.
+    if comando_texto and headers not in (None, "", {}):
+        raise MCPConfigRechazada(
+            "Un servidor local no lleva 'headers': su token va en 'env' como '${VARIABLE}'."
+        )
+    if url_texto and env not in (None, "", {}):
+        raise MCPConfigRechazada(
+            "Un servidor HTTP no lleva 'env': su token va en 'headers' como '${VARIABLE}'."
         )
 
     definicion: Dict[str, Any] = {"enabled": True}
@@ -259,9 +292,19 @@ def _leer_allowlist_cruda() -> Dict[str, Any]:
         with open(ruta, "r", encoding="utf-8") as f:
             crudo = json.load(f)
     except Exception as e:
-        logger.error(f"mcp_allowlist.json ilegible, se reescribe desde cero: {e}")
-        return {}
-    return crudo if isinstance(crudo, dict) else {}
+        # Reescribir desde `{}` borraría los permisos de TODOS los demás servidores por una
+        # coma de más que alguien dejó al editar a mano. Se rechaza y se señala el archivo.
+        logger.error(f"mcp_allowlist.json ilegible: {e}")
+        raise MCPConfigRechazada(
+            f"No toco la lista de herramientas: {os.path.basename(ruta)} está dañado "
+            f"({type(e).__name__}) y reescribirlo borraría lo de los demás servidores. "
+            f"Arreglalo o borralo primero."
+        ) from e
+    if not isinstance(crudo, dict):
+        raise MCPConfigRechazada(
+            f"No toco la lista de herramientas: {os.path.basename(ruta)} no es un objeto JSON."
+        )
+    return crudo
 
 
 def _escribir_allowlist(datos: Dict[str, Any]) -> None:
@@ -303,7 +346,10 @@ def permitir_herramientas(
         if texto and texto not in limpios:
             limpios.append(texto)
     if not limpios:
-        raise MCPConfigRechazada("Necesito al menos un nombre o patrón de herramienta (por ejemplo 'search' o 'read_*').")
+        raise MCPConfigRechazada(
+            "Necesito al menos un nombre o patrón de herramienta (por ejemplo 'search' o "
+            "'read_*')."
+        )
 
     if canales is None or canales == "" or canales == []:
         canales_limpios = list(CANALES_POR_DEFECTO)
@@ -370,16 +416,19 @@ def valor_de_variable(nombre: str) -> Optional[str]:
         return None
 
 
-def origen_de_variable(nombre: str) -> str:
-    """Return "entorno", "archivo" o "" — nunca el valor."""
+def origen_de_variable(nombre: str, config: Optional[Dict[str, Any]] = None) -> str:
+    """Return "entorno", "archivo" o "" — nunca el valor.
+
+    `config` evita releer `config.json` por cada variable cuando quien llama ya lo tiene.
+    """
     limpio = str(nombre or "").strip()
     if os.environ.get(limpio):
         return "entorno"
-    return "archivo" if _variables_guardadas().get(limpio) else ""
+    return "archivo" if _variables_guardadas(config).get(limpio) else ""
 
 
 def definir_variable(nombre: Any, valor: Any) -> bool:
-    """Guarda el valor de una `${VARIABLE}` que algún servidor referencia. Return si se escribió."""
+    """Guarda el valor de una `${VARIABLE}` que algún servidor use. Return si se escribió."""
     limpio = str(nombre or "").strip()
     if limpio not in variables_referenciadas():
         logger.warning(f"definir_variable: '{limpio}' no la usa ningún servidor MCP declarado")
@@ -391,7 +440,7 @@ def definir_variable(nombre: Any, valor: Any) -> bool:
     variables = _variables_guardadas(config)
     variables[limpio] = texto
     config[_CLAVE_VARIABLES] = variables
-    config_manager.save_config(config)
+    _guardar_config(config)
     # El VALOR no se registra nunca: este log acaba en un archivo.
     logger.info(f"mcp: variable '{limpio}' guardada en config.json")
     return True
@@ -406,9 +455,22 @@ def borrar_variable(nombre: Any) -> bool:
         return False
     variables.pop(limpio)
     config[_CLAVE_VARIABLES] = variables
-    config_manager.save_config(config)
+    _guardar_config(config)
     logger.info(f"mcp: variable '{limpio}' borrada de config.json")
     return True
+
+
+def existe(nombre: Any) -> Optional[str]:
+    """Return el nombre normalizado si está declarado en `config.json`, o None.
+
+    Es lo que un slot del bridge necesita para validar lo que llega del JS: una lectura de
+    config, sin recorrer el registro de herramientas ni la allow-list.
+    """
+    try:
+        clave = normalizar_nombre(nombre)
+    except MCPConfigRechazada:
+        return None
+    return clave if clave in _servidores_declarados() else None
 
 
 # ── Estado legible ──────────────────────────────────────────────────
@@ -447,7 +509,9 @@ def listar_servidores() -> List[Dict[str, Any]]:
             for valor in datos.values():
                 variable = _referencia(valor)
                 if variable and variable not in [v["nombre"] for v in variables]:
-                    variables.append({"nombre": variable, "origen": origen_de_variable(variable)})
+                    variables.append(
+                        {"nombre": variable, "origen": origen_de_variable(variable, config)}
+                    )
 
         filas.append({
             "nombre": nombre,
@@ -463,56 +527,127 @@ def listar_servidores() -> List[Dict[str, Any]]:
     return filas
 
 
-def aplicar_y_resumir(nombre: Any) -> str:
-    """Recarga `nombre` en caliente y return qué pasó, en palabras.
+def aplicar(nombre: Any) -> Dict[str, Any]:
+    """Recarga `nombre` en caliente y return qué pasó, como datos.
 
     Es lo que convierte "guardé el JSON" en "quedó andando": conecta, registra lo permitido
-    y cuenta. Un servidor que no levanta no lanza — se dice, con el motivo que dejó el log.
+    y cuenta. Un servidor que no levanta no lanza — se informa en `estado`. Las dos
+    redacciones (`resumen_para_modelo`, `resumen_para_humano`) salen de este dict: el
+    modelo necesita instrucciones («preguntale al usuario, usá mcp_allow_tools»); el
+    humano, delante de la pantalla, no.
+
+    `estado`: "ausente" | "deshabilitado" | "error" | "sin_respuesta" | "conectado".
     """
     from core import mcp_manager
 
     clave = normalizar_nombre(nombre)
+    resultado: Dict[str, Any] = {
+        "nombre": clave, "estado": "ausente", "error": "", "publicadas": None,
+        "habilitadas": [], "canales": [], "faltan": [],
+    }
     definicion = _servidores_declarados().get(clave)
     if definicion is None:
-        return f"'{clave}' ya no está declarado."
+        return resultado
     if definicion.get("enabled") is False:
         mcp_manager.desregistrar_servidor(clave)
-        return f"'{clave}' quedó deshabilitado: sus herramientas ya no están disponibles."
+        resultado["estado"] = "deshabilitado"
+        return resultado
 
     try:
         mcp_manager.recargar_servidor(clave)
     except Exception as e:
         logger.error(f"mcp:{clave}: error inesperado al recargar: {e}")
-        return f"'{clave}' guardado, pero no se pudo conectar: {e}"
+        resultado.update(estado="error", error=str(e))
+        return resultado
 
     fila = next((f for f in listar_servidores() if f["nombre"] == clave), None)
+    variables = fila["variables"] if fila else []
+    resultado["faltan"] = [v["nombre"] for v in variables if not v["origen"]]
     if fila is None or not fila["conectado"]:
+        resultado["estado"] = "sin_respuesta"
+        return resultado
+
+    resultado.update(
+        estado="conectado",
+        publicadas=_herramientas_publicadas(clave),
+        habilitadas=list(fila["herramientas"]),
+        canales=list(fila["canales"]),
+    )
+    return resultado
+
+
+def resumen_para_modelo(r: Dict[str, Any]) -> str:
+    """Return el resultado de `aplicar()` redactado para el modelo, con qué hacer después."""
+    clave = r["nombre"]
+    if r["estado"] == "ausente":
+        return f"'{clave}' ya no está declarado."
+    if r["estado"] == "deshabilitado":
+        return f"'{clave}' quedó deshabilitado: sus herramientas ya no están disponibles."
+    if r["estado"] == "error":
+        return f"'{clave}' guardado, pero no se pudo conectar: {r['error']}"
+    if r["estado"] == "sin_respuesta":
         return (
             f"'{clave}' quedó guardado pero no respondió al conectar. Probalo con "
             f"mcp_probe_server para ver el error; si necesita una variable, hay que definirla en "
             f"{_DONDE_VAN_LOS_SECRETOS}."
         )
-
-    publicadas = _herramientas_publicadas(clave)
     partes = [f"'{clave}' conectado."]
-    if publicadas is not None:
-        partes.append(f"Publica {len(publicadas)} herramienta(s): {', '.join(publicadas) or '—'}.")
-    if fila["herramientas"]:
+    if r["publicadas"] is not None:
         partes.append(
-            f"Habilitadas {len(fila['herramientas'])}: {', '.join(fila['herramientas'])} "
-            f"(canales: {', '.join(fila['canales']) or 'escritorio'})."
+            f"Publica {len(r['publicadas'])} herramienta(s): {', '.join(r['publicadas']) or '—'}."
+        )
+    if r["habilitadas"]:
+        partes.append(
+            f"Habilitadas {len(r['habilitadas'])}: {', '.join(r['habilitadas'])} "
+            f"(canales: {', '.join(r['canales']) or 'escritorio'})."
         )
     else:
         partes.append(
             "Ninguna está habilitada todavía: preguntale al usuario cuáles quiere usar y "
             "habilitalas con mcp_allow_tools. Lo que no se nombra no entra."
         )
-    faltan = [v["nombre"] for v in fila["variables"] if not v["origen"]]
-    if faltan:
+    if r["faltan"]:
         partes.append(
-            f"Variables sin definir: {', '.join(faltan)} — se definen en {_DONDE_VAN_LOS_SECRETOS}."
+            f"Variables sin definir: {', '.join(r['faltan'])} — se definen en "
+            f"{_DONDE_VAN_LOS_SECRETOS}."
         )
     return " ".join(partes)
+
+
+def resumen_para_humano(r: Dict[str, Any]) -> str:
+    """Return el resultado de `aplicar()` para un aviso en la pantalla: corto y sin órdenes."""
+    clave = r["nombre"]
+    if r["estado"] == "ausente":
+        return f"El servidor {clave} ya no existe."
+    if r["estado"] == "deshabilitado":
+        return f"{clave} deshabilitado: sus herramientas dejan de estar disponibles."
+    if r["estado"] == "error":
+        return f"{clave} guardado, pero no se pudo conectar: {r['error']}"
+    if r["estado"] == "sin_respuesta":
+        texto = (
+            f"{clave} guardado, pero no respondió al conectar. Usá «Probar» para ver el error."
+        )
+        if r["faltan"]:
+            texto += f" Falta definir: {', '.join(r['faltan'])}."
+        return texto
+    n = len(r["habilitadas"])
+    if n:
+        plural = "s" if n != 1 else ""
+        texto = f"{clave} conectado: {n} herramienta{plural} habilitada{plural}."
+    else:
+        publicadas = len(r["publicadas"] or [])
+        texto = (
+            f"{clave} conectado. Publica {publicadas} herramienta{'s' if publicadas != 1 else ''}; "
+            f"ninguna está habilitada todavía: elegilas en «Herramientas permitidas»."
+        )
+    if r["faltan"]:
+        texto += f" Falta definir: {', '.join(r['faltan'])}."
+    return texto
+
+
+def aplicar_y_resumir(nombre: Any) -> str:
+    """Recarga `nombre` y return el resumen para el modelo (lo que usan las herramientas)."""
+    return resumen_para_modelo(aplicar(nombre))
 
 
 def _herramientas_publicadas(clave: str) -> Optional[List[str]]:

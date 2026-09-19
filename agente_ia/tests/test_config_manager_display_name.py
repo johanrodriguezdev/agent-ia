@@ -43,3 +43,21 @@ def test_load_config_backfills_display_name_for_old_config(tmp_path, monkeypatch
 
 def test_default_config_includes_empty_display_name():
     assert config_manager.DEFAULT_CONFIG["display_name"] == ""
+
+
+def test_un_config_ilegible_se_aparta_con_fecha_en_vez_de_pisarse(tmp_path, monkeypatch):
+    """Antes se sobrescribía con los valores por defecto y las claves de API, los servidores
+    MCP y sus tokens desaparecían sin rastro."""
+    import config_manager
+
+    ruta = tmp_path / "config.json"
+    ruta.write_text('{"deepseek_api_key": "sk-valiosa",', encoding="utf-8")
+    monkeypatch.setattr(config_manager, "CONFIG_FILE", str(ruta))
+
+    config = config_manager.load_config()
+
+    assert config["agent_name"] == config_manager.DEFAULT_CONFIG["agent_name"]
+    apartados = list(tmp_path.glob("config.json.corrupto-*"))
+    assert len(apartados) == 1
+    assert "sk-valiosa" in apartados[0].read_text(encoding="utf-8")
+    assert "sk-valiosa" not in ruta.read_text(encoding="utf-8")

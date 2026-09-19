@@ -122,41 +122,6 @@ def _ultimo_mensaje_del_usuario(history) -> str:
     return ""
 
 
-def _cerrar_sin_herramientas(mensajes, instruccion, system_prompt, image_path):
-    """Una última llamada con `tools=None` para redactar con lo reunido (REQ-044/CA-05).
-
-    Misma pieza que `core/reasoning_loop._llamada_de_cierre()`: la instrucción se cuelga
-    del último mensaje —con historial de herramientas es el de resultados, también de rol
-    `user`, y Anthropic exige alternancia estricta— y sin herramientas la garantía de "no
-    reintenta la acción denegada" es estructural, no una frase del prompt. Return
-    `(texto_o_None, aviso_de_cambio)`.
-    """
-    from ai.llm_provider import LLMToolResponse, es_respuesta_de_fallo, generate_response
-    from core import tool_history
-
-    ultimo = mensajes[-1]
-    if tool_history.es_estructurado(ultimo):
-        mensajes = mensajes[:-1] + [tool_history.con_texto_agregado(ultimo, instruccion)]
-    else:
-        mensajes = mensajes[:-1] + [
-            {**ultimo, "content": f"{ultimo.get('content', '')}\n\n{instruccion}"}
-        ]
-
-    aviso: dict = {}
-    with streaming.permitido():
-        respuesta = generate_response(
-            messages=mensajes, system_prompt=system_prompt, image_path=image_path or None,
-            tools=None, tarea="razonamiento", aviso=aviso,
-        )
-    if isinstance(respuesta, LLMToolResponse):
-        texto = respuesta.text if not respuesta.tool_calls else None
-    else:
-        texto = respuesta
-    if not texto or es_respuesta_de_fallo(texto):
-        return None, aviso
-    return texto, aviso
-
-
 def _resolver_con_tools(history, system_prompt, image_path, channel, user_id):
     """Pide respuesta al modelo dejandole usar herramientas, y devuelve el texto final.
 
@@ -186,7 +151,7 @@ def _resolver_con_tools(history, system_prompt, image_path, channel, user_id):
     from core import tool_history
     from core.reasoning_loop import (
         _INSTRUCCION_CIERRE_DENEGACION, _INSTRUCCION_CIERRE_PRESUPUESTO,
-        TECHO_CANAL_NO_ESCRITORIO, ejecutar_vuelta,
+        TECHO_CANAL_NO_ESCRITORIO, cerrar_sin_herramientas, ejecutar_vuelta,
     )
     from core.security_manager import security_manager
 
@@ -249,8 +214,10 @@ def _resolver_con_tools(history, system_prompt, image_path, channel, user_id):
         _INSTRUCCION_CIERRE_DENEGACION if denegacion is not None
         else _INSTRUCCION_CIERRE_PRESUPUESTO
     )
-    texto, aviso_cierre = _cerrar_sin_herramientas(
-        list(history) + historial, instruccion, system_prompt, image_path,
+    aviso_cierre: dict = {}
+    texto = cerrar_sin_herramientas(
+        list(history) + historial, instruccion, system_prompt, "razonamiento", aviso_cierre,
+        canal=canal, image_path=image_path or None,
     )
     if texto:
         return con_aviso_de_cambio(texto, aviso_cierre or ultimo_aviso)

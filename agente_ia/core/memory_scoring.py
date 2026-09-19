@@ -27,7 +27,7 @@ import logging
 import re
 import unicodedata
 from dataclasses import dataclass, field
-from typing import Dict, List, Sequence, Set, Tuple
+from typing import Dict, FrozenSet, List, Optional, Sequence, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -84,10 +84,22 @@ def _nombre_del_usuario() -> Set[str]:
     return set(re.findall(r"[a-z0-9]+", _normalizar(nombre or "")))
 
 
-def _palabras_significativas(texto: str) -> Set[str]:
+def _palabras_significativas(texto: str, vacias: Optional[FrozenSet[str]] = None) -> Set[str]:
+    """Return las palabras de `texto` que cuentan para compararlo con otro hecho.
+
+    `vacias` es el conjunto ya resuelto (`palabras_vacias()`); se pasa desde el bucle de
+    agrupamiento, que compara cada par de candidatos, para no releer la configuración en
+    cada comparación (con 200 hechos son ~20.000 llamadas).
+    """
     palabras = re.findall(r"[a-z0-9]+", _normalizar(texto))
-    vacias = _PALABRAS_VACIAS | _nombre_del_usuario()
+    if vacias is None:
+        vacias = palabras_vacias()
     return {p for p in palabras if len(p) > 3 and p not in vacias}
+
+
+def palabras_vacias() -> FrozenSet[str]:
+    """Return las palabras vacías de esta ejecución: las fijas más el nombre del usuario."""
+    return _PALABRAS_VACIAS | frozenset(_nombre_del_usuario())
 
 
 def _similitud(a: Set[str], b: Set[str]) -> float:
@@ -113,10 +125,14 @@ class Candidato:
     apariciones: int = 1
     lotes: Tuple[int, ...] = field(default_factory=tuple)
     puntuacion: float = 0.0
+    _palabras: Optional[Set[str]] = field(default=None, repr=False, compare=False)
 
     @property
     def palabras(self) -> Set[str]:
-        return _palabras_significativas(self.texto)
+        # Se calcula una vez: `texto` no cambia y el agrupamiento las consulta por cada par.
+        if self._palabras is None:
+            self._palabras = _palabras_significativas(self.texto)
+        return self._palabras
 
 
 def _puntuar(candidato: Candidato, total_lotes: int) -> float:
@@ -155,6 +171,7 @@ def agrupar_candidatos(hechos_por_lote: Sequence[Sequence[str]]) -> List[Candida
     en Windows 11 para el proyecto agente_ia", la segunda contiene a la primera.
     """
     candidatos: List[Candidato] = []
+    vacias = palabras_vacias()   # una lectura de configuración por agrupamiento, no por par
 
     for indice_lote, hechos in enumerate(hechos_por_lote):
         vistos_en_este_lote: Set[int] = set()
@@ -163,7 +180,7 @@ def agrupar_candidatos(hechos_por_lote: Sequence[Sequence[str]]) -> List[Candida
             texto = hecho.strip()
             if not texto:
                 continue
-            palabras = _palabras_significativas(texto)
+            palabras = _palabras_significativas(texto, vacias)
 
             for i, existente in enumerate(candidatos):
                 if _similitud(palabras, existente.palabras) >= UMBRAL_DUPLICADO:
@@ -174,11 +191,12 @@ def agrupar_candidatos(hechos_por_lote: Sequence[Sequence[str]]) -> List[Candida
                         existente.lotes = existente.lotes + (indice_lote,)
                     if len(texto) > len(existente.texto):
                         existente.texto = texto
+                        existente._palabras = palabras   # el texto cambió: la caché también
                     vistos_en_este_lote.add(i)
                     break
             else:
                 candidatos.append(Candidato(
-                    texto=texto, apariciones=1, lotes=(indice_lote,),
+                    texto=texto, apariciones=1, lotes=(indice_lote,), _palabras=palabras,
                 ))
                 vistos_en_este_lote.add(len(candidatos) - 1)
 

@@ -2906,10 +2906,11 @@ def _mcp_add_invoke(params: dict) -> str:
     from core.mcp_config import MCPConfigRechazada, agregar_servidor, aplicar_y_resumir
 
     try:
+        # Sin `args` aparte, a propósito: el comando va COMPLETO en `command`, que es lo que
+        # muestra el modal. Un `args` que el modal no muestra sería confirmar a ciegas.
         agregar_servidor(
             params.get("name"),
             command=params.get("command"),
-            args=params.get("args"),
             url=params.get("url"),
             env=params.get("env"),
             headers=params.get("headers"),
@@ -2985,7 +2986,7 @@ register_tool(ToolSpec(
         "Habilita qué herramientas de un servidor MCP puede usar el agente (las que no se "
         "nombran quedan bloqueadas) y desde qué canales. 'herramientas' son nombres tal como "
         "los publica el servidor o patrones ('search', 'read_*'); reemplaza la lista anterior. "
-        "'canales' por defecto es solo escritorio; se puede sumar telegram, discord o voice. "
+        "'canales' por defecto es solo escritorio; se puede sumar telegram. "
         "Usala después de mcp_add_server, cuando el usuario haya dicho cuáles quiere."
     ),
     parameters_schema={
@@ -2995,8 +2996,7 @@ register_tool(ToolSpec(
             "herramientas": {"type": "array", "items": {"type": "string"},
                              "description": "Nombres o patrones de herramientas a permitir."},
             "canales": {"type": "array", "items": {"type": "string"},
-                        "description": ("Canales: desktop, telegram, discord, voice. "
-                                        "Vacío = solo escritorio.")},
+                        "description": "Canales: desktop, telegram. Vacío = solo escritorio."},
         },
         "required": ["name", "herramientas"],
     },

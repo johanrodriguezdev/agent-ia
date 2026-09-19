@@ -58,6 +58,7 @@ authorized_users.json
 # en el repositorio. Perderlo es seguro: `config_manager.load_config()` crea uno nuevo con
 # los valores por defecto. Ver config.example.json.
 config.json
+config.json.corrupto-*
 
 # Copias de seguridad que genera el propio agente (migracion de memoria, destilacion de
 # MEMORY.md). Son datos personales y ademas se regeneran solas: no van al repositorio.

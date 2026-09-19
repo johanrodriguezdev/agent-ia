@@ -353,7 +353,17 @@ def recargar() -> Dict[str, str]:
 # ── OAuth ───────────────────────────────────────────────────────────
 
 def login_servidor(nombre: str) -> str:
-    """Corre el flujo OAuth interactivo para `nombre` y guarda las credenciales.
+    """Corre el flujo OAuth interactivo para `nombre` y return el resultado en palabras."""
+    return login_servidor_detallado(nombre)[1]
+
+
+def login_servidor_detallado(nombre: str) -> Tuple[bool, str]:
+    """Corre el flujo OAuth interactivo para `nombre`. Return `(autorizado, mensaje)`.
+
+    `autorizado` es True solo cuando se obtuvieron y guardaron credenciales nuevas: es lo
+    que la pantalla usa para decidir si recarga el servidor (REQ-043). Antes lo deducía
+    buscando "autorizado" en el texto, y un servidor llamado "autorizador" bastaba para
+    engañarla.
 
     Antes de abrir el navegador se intenta conectar a propósito: el 401 que devuelve el
     servidor trae la ubicación de su metadata (RFC 9728), y con eso el descubrimiento no
@@ -364,16 +374,16 @@ def login_servidor(nombre: str) -> str:
     clave = nombre.strip().lower()
     definicion = cargar_definiciones().get(clave)
     if definicion is None:
-        return f"No hay ningún servidor '{nombre}' en config.json."
+        return False, f"No hay ningún servidor '{nombre}' en config.json."
     url = (definicion.get("url") or "").strip()
     if not url:
-        return f"'{nombre}' es un servidor stdio local: no usa OAuth."
+        return False, f"'{nombre}' es un servidor stdio local: no usa OAuth."
 
     url_metadata = None
     try:
         transporte = crear_transporte(clave, definicion)
         MCPClient(clave, transporte).initialize()
-        return (f"'{nombre}' ya respondió sin pedir autorización: no hace falta loguearse.")
+        return False, f"'{nombre}' ya respondió sin pedir autorización: no hace falta loguearse."
     except MCPError:
         url_metadata = getattr(transporte, "url_metadata_oauth", None)
     except Exception as e:
@@ -382,8 +392,8 @@ def login_servidor(nombre: str) -> str:
     try:
         mcp_oauth.login(clave, url, definicion.get("oauth"), url_metadata)
     except mcp_oauth.OAuthError as e:
-        return f"No se pudo autorizar '{nombre}': {e}"
-    return f"'{nombre}' autorizado. Recargá con: python -m core.mcp_manager reload {nombre}"
+        return False, f"No se pudo autorizar '{nombre}': {e}"
+    return True, f"'{nombre}' autorizado. Recargá con: python -m core.mcp_manager reload {nombre}"
 
 
 def logout_servidor(nombre: str) -> str:
