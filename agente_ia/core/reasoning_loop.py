@@ -59,6 +59,11 @@ MAX_LLM_CALLS = 8
 #: turno largo es silencio que nadie puede cortar — el botón de detener es de escritorio.
 TECHO_CANAL_NO_ESCRITORIO = 5
 
+#: REQ-047 — Telegram y Discord ya pueden frenar un turno (`/detener`, `!detener`), que
+#: era el único motivo del techo de 5. Pasan al presupuesto del escritorio sin modo. Voz,
+#: API, correo y desconocido siguen en 5: ahí sigue sin haber forma de parar.
+TECHO_CANAL_REMOTO_CON_STOP = MAX_LLM_CALLS
+
 #: REQ-044 (P-4 de REQ-027) — techo de tokens de salida cuando la respuesta va a leerse en
 #: voz alta. Con 4096 una respuesta larga por TTS son minutos que no se pueden cortar; 500
 #: son unos 40 segundos de lectura, que ya es mucho para una conversación hablada. Aplica
@@ -307,6 +312,8 @@ def _presupuesto_de_llamadas(modo_def: Optional[ModoComposer], canal) -> int:
     del_modo = modo_def.presupuesto if modo_def is not None else MAX_LLM_CALLS
     if canal == ChannelType.DESKTOP:
         return del_modo
+    if canal in (ChannelType.TELEGRAM, ChannelType.DISCORD):
+        return min(TECHO_CANAL_REMOTO_CON_STOP, del_modo)
     return min(TECHO_CANAL_NO_ESCRITORIO, del_modo)
 
 
@@ -384,7 +391,7 @@ def _mensajes_del_turno(
 
 def ejecutar_vuelta(
     tool_calls: list, numero_de_vuelta: int, canal, user_id: str, task: str,
-    cancelable: bool = True,
+    cancelable: bool = True, control=None,
 ) -> tuple[list[dict], list[dict], Optional[str]]:
     """Ejecuta EN SECUENCIA todas las tool calls de una vuelta (REQ-027/CA-20 a CA-27).
 
@@ -394,7 +401,10 @@ def ejecutar_vuelta(
     (`ai/claude_brain.py`), que antes ejecutaba solo `tool_calls[0]` y descartaba el resto.
     `cancelable=False` es para el camino remoto: el botón de detener es del escritorio, y
     `abortar_si_cancelado()` mira un estado de proceso — un turno de escritorio cancelado
-    no puede abortar un mensaje de Telegram que corre en otro hilo.
+    no puede abortar un mensaje de Telegram que corre en otro hilo. Desde REQ-047 ese
+    camino pasa su propio punto de control en `control` (un callable `(donde) -> None` que
+    levanta `TurnoCancelado`, ver `core/cancelacion.control_remoto`): `/detener` frena el
+    turno de ESE usuario entre dos herramientas, igual que el botón en el escritorio.
 
     `llamadas` y `resultados` tienen SIEMPRE la misma longitud y los mismos ids, incluso
     cuando la secuencia se cortó: a las que no llegaron a ejecutarse se les registra un
@@ -441,10 +451,11 @@ def ejecutar_vuelta(
         # CA-27: el botón de detener se evalúa ENTRE herramientas, no solo entre vueltas.
         # Con varias herramientas por vuelta, esperar a la vuelta siguiente sería esperar a
         # que terminen todas.
-        if cancelable:
-            abortar_si_cancelado(
-                f"reasoning_loop, vuelta {numero_de_vuelta}, antes de '{call.name}'"
-            )
+        donde = f"reasoning_loop, vuelta {numero_de_vuelta}, antes de '{call.name}'"
+        if control is not None:
+            control(donde)
+        elif cancelable:
+            abortar_si_cancelado(donde)
 
         try:
             resultado = execute_tool(call.name, params, canal, user_id)

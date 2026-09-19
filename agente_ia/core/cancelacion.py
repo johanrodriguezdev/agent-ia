@@ -30,7 +30,7 @@ cancelaría el siguiente, que ya nada tiene que ver. Cada turno abre el suyo con
 import itertools
 import logging
 import threading
-from typing import Optional
+from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -108,3 +108,68 @@ def abortar_si_cancelado(donde: str = "") -> None:
     if esta_cancelado():
         logger.info("turno abandonado%s", f" en {donde}" if donde else "")
         raise TurnoCancelado(donde or "cancelado por el usuario")
+# ── Turnos remotos (REQ-047) ──────────────────────────────────────────────────────────
+#
+# Lo de arriba es UN turno de proceso: el del escritorio, que tiene un botón de detener. Un
+# canal remoto es otra cosa: varios usuarios, cada uno con su mensaje en curso en su propio
+# hilo, y cada uno tiene que poder frenar EL SUYO con `/detener` sin tocar el de nadie más
+# ni el del escritorio. Por eso acá los turnos se identifican por una clave
+# (`canal:usuario`) además del número. El diseño es el mismo: cooperativo, con puntos de
+# control, y un stop tardío no se lleva puesto al turno siguiente de la misma clave.
+
+_remotos_en_curso: dict[str, int] = {}
+_remotos_cancelados: set[int] = set()
+
+
+def clave_remota(canal, user_id: str) -> str:
+    """Return la clave con la que se identifica el turno de un usuario en un canal."""
+    valor = getattr(canal, "value", canal)
+    return f"{str(valor or '').strip().lower()}:{str(user_id or '').strip()}"
+
+
+def abrir_turno_remoto(clave: str) -> int:
+    """Abre (o reemplaza) el turno en curso de `clave` y devuelve su identificador."""
+    with _lock:
+        turno_id = next(_contador)
+        anterior = _remotos_en_curso.get(clave)
+        if anterior is not None:
+            _remotos_cancelados.discard(anterior)
+        _remotos_en_curso[clave] = turno_id
+        return turno_id
+
+
+def cerrar_turno_remoto(clave: str, turno_id: int) -> None:
+    """Cierra el turno si sigue siendo el de `clave`; olvida su cancelación."""
+    with _lock:
+        if _remotos_en_curso.get(clave) == turno_id:
+            del _remotos_en_curso[clave]
+        _remotos_cancelados.discard(turno_id)
+
+
+def cancelar_remoto(clave: str) -> bool:
+    """Pide frenar el turno en curso de `clave`. Return True si había uno."""
+    with _lock:
+        turno_id = _remotos_en_curso.get(clave)
+        if turno_id is None:
+            return False
+        _remotos_cancelados.add(turno_id)
+    logger.info("turno remoto %s (%s) cancelado por el usuario", turno_id, clave)
+    return True
+
+
+def esta_cancelado_remoto(turno_id: int) -> bool:
+    with _lock:
+        return turno_id in _remotos_cancelados
+
+
+def abortar_si_cancelado_remoto(turno_id: int, donde: str = "") -> None:
+    """Punto de control para un turno remoto: levanta `TurnoCancelado` si se pidió parar."""
+    if esta_cancelado_remoto(turno_id):
+        logger.info("turno remoto %s abandonado%s", turno_id, f" en {donde}" if donde else "")
+        raise TurnoCancelado(donde or "detenido por el usuario")
+
+
+def control_remoto(turno_id: int):
+    """Return el callable `(donde) -> None` que `reasoning_loop.ejecutar_vuelta` usa como
+    punto de control entre herramientas para un turno remoto."""
+    return lambda donde="": abortar_si_cancelado_remoto(turno_id, donde)

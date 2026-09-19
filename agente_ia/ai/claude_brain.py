@@ -122,7 +122,7 @@ def _ultimo_mensaje_del_usuario(history) -> str:
     return ""
 
 
-def _resolver_con_tools(history, system_prompt, image_path, channel, user_id):
+def _resolver_con_tools(history, system_prompt, image_path, channel, user_id, control=None):
     """Pide respuesta al modelo dejandole usar herramientas, y devuelve el texto final.
 
     Este camino —el de Telegram y Discord— llamaba al modelo SIN herramientas, asi que el
@@ -151,7 +151,7 @@ def _resolver_con_tools(history, system_prompt, image_path, channel, user_id):
     from core import tool_history
     from core.reasoning_loop import (
         _INSTRUCCION_CIERRE_DENEGACION, _INSTRUCCION_CIERRE_PRESUPUESTO,
-        TECHO_CANAL_NO_ESCRITORIO, cerrar_sin_herramientas, ejecutar_vuelta,
+        TECHO_CANAL_REMOTO_CON_STOP, cerrar_sin_herramientas, ejecutar_vuelta,
     )
     from core.security_manager import security_manager
 
@@ -170,7 +170,12 @@ def _resolver_con_tools(history, system_prompt, image_path, channel, user_id):
     denegacion = None
     ultimo_aviso: dict = {}
 
-    for ronda in range(1, TECHO_CANAL_NO_ESCRITORIO + 1):
+    for ronda in range(1, TECHO_CANAL_REMOTO_CON_STOP + 1):
+        # REQ-047 — `/detener` del usuario: se mira antes de gastar otra llamada al modelo,
+        # que es donde parar es seguro. `control` lo pone `ask_claude()` con el turno de
+        # ESTE usuario; sin él (tests, callers viejos) no se frena nada.
+        if control is not None:
+            control(f"claude_brain, vuelta {ronda}")
         progress_report("Pensando" if ronda == 1 else f"Pensando ({ronda})")
         aviso_cambio: dict = {}   # REQ-022/CA-12 — vacío otra vez en cada ronda
         # Igual que en `core/reasoning_loop.py`: lo que salga de ESTA llamada es la
@@ -201,7 +206,8 @@ def _resolver_con_tools(history, system_prompt, image_path, channel, user_id):
         # `tool_calls[0]` y el resto se descartaba: el modelo tenia que volver a pedirlas
         # gastando otra vuelta entera del presupuesto.
         llamadas, resultados, denegacion = ejecutar_vuelta(
-            respuesta.tool_calls, ronda, canal, user_id, tarea_del_usuario, cancelable=False,
+            respuesta.tool_calls, ronda, canal, user_id, tarea_del_usuario,
+            cancelable=False, control=control,
         )
         historial.append(tool_history.mensaje_de_llamadas(respuesta.text, llamadas))
         historial.append(tool_history.mensaje_de_resultados(resultados))
@@ -284,6 +290,12 @@ def ask_claude(
     except Exception as e:
         logger.warning(f"no se pudo leer lo que recuerda del usuario: {e}")
 
+    # REQ-047 — el turno de ESTE usuario en ESTE canal, para que `/detener` lo frene sin
+    # tocar el de nadie más. Se cierra siempre, salga como salga.
+    from core import cancelacion
+
+    clave_turno = cancelacion.clave_remota(channel, user_id)
+    turno = cancelacion.abrir_turno_remoto(clave_turno)
     try:
         assistant_message = _resolver_con_tools(
             history,
@@ -298,6 +310,7 @@ def ask_claude(
             image_path,
             channel,
             user_id,
+            control=cancelacion.control_remoto(turno),
         )
 
         json_match = re.search(r'```json\s*(\{.*?\})\s*```', assistant_message, re.DOTALL)
@@ -339,6 +352,13 @@ def ask_claude(
         history.append({"role": "assistant", "content": assistant_message})
         return assistant_message
 
+    except cancelacion.TurnoCancelado:
+        # El usuario pidió parar: el mensaje no cuenta como turno (no queda en el historial
+        # ni se le contesta con un error).
+        if history and history[-1]["role"] == "user":
+            history.pop()
+        return f"Detenido{vocative()}."
+
     except Exception as e:
         error_str = str(e)
 
@@ -352,6 +372,8 @@ def ask_claude(
             if history and history[-1]["role"] == "user":
                 history.pop()
             return f"{vocative_start()}mi módulo de inteligencia ha encontrado un inconveniente: {error_str}"
+    finally:
+        cancelacion.cerrar_turno_remoto(clave_turno, turno)
 
 
 def clear_conversation(user_id: str = "default"):

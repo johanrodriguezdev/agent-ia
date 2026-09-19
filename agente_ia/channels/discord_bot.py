@@ -105,6 +105,22 @@ async def _slash_autorizado(interaction, comando: str) -> bool:
     return False
 
 
+def _detener_turno(author_id) -> str:
+    """`!detener` / `/detener`: frena el turno en curso de ESTE usuario (REQ-047).
+
+    Cooperativo, como el botón del escritorio: para en el próximo punto seguro. Llega
+    mientras el turno corre porque, desde REQ-045, el turno va en un hilo y el event loop
+    sigue atendiendo mensajes.
+    """
+    from core import cancelacion
+    from core.user_identity import canonical_user_id
+
+    clave = cancelacion.clave_remota("discord", canonical_user_id("discord", author_id))
+    if cancelacion.cancelar_remoto(clave):
+        return f"Deteniendo{vocative()}. Paro en cuanto termine lo que está haciendo ahora."
+    return f"No hay nada en curso que detener{vocative()}."
+
+
 def _responder_confirmacion(author_id: str, texto: str) -> bool:
     """Return True si `texto` era la respuesta a una confirmación pendiente de `author_id`.
 
@@ -297,6 +313,21 @@ def run_discord_bot():
         embed.set_footer(text=f"{agent} Assistant")
         await interaction.followup.send(embed=embed)
 
+    @bot.command(name="detener")
+    async def prefijo_detener(ctx):
+        """`!detener` en el canal: frena el turno en curso del que lo escribe."""
+        from core.authorized_users import is_authorized
+
+        if not is_authorized("discord", str(ctx.author.id)):
+            return
+        await ctx.reply(_detener_turno(ctx.author.id))
+
+    @bot.tree.command(name="detener", description=f"Frena lo que {agent} está haciendo")
+    async def slash_detener(interaction: discord.Interaction):
+        if not await _slash_autorizado(interaction, "detener"):
+            return
+        await interaction.response.send_message(_detener_turno(interaction.user.id), ephemeral=True)
+
     @bot.tree.command(name="limpiar", description=f"Reinicia la conversación con {agent}")
     async def slash_limpiar(interaction: discord.Interaction):
         if not await _slash_autorizado(interaction, "limpiar"):
@@ -328,7 +359,8 @@ def run_discord_bot():
         )
         embed.add_field(
             name="Comandos slash",
-            value="`/noddoo` — hacer una pregunta\n`/limpiar` — reiniciar conversación\n`/ayuda` — este menú",
+            value=("`/noddoo` — hacer una pregunta\n`/limpiar` — reiniciar conversación\n"
+                   "`/detener` (o `!detener`) — frenar lo que está haciendo\n`/ayuda` — este menú"),
             inline=False
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)

@@ -120,7 +120,7 @@ def test_el_presupuesto_es_el_del_canal_y_el_cierre_va_sin_herramientas():
 
     con_tools = [l for l in llamadas if l["tools"]]
     sin_tools = [l for l in llamadas if not l["tools"]]
-    assert len(con_tools) == reasoning_loop.TECHO_CANAL_NO_ESCRITORIO
+    assert len(con_tools) == reasoning_loop.TECHO_CANAL_REMOTO_CON_STOP
     assert len(sin_tools) == 1                                # el cierre, fuera del presupuesto
     assert llamadas[-1]["tools"] is None
     assert not hasattr(claude_brain, "MAX_TOOL_ROUNDS")
@@ -129,7 +129,7 @@ def test_el_presupuesto_es_el_del_canal_y_el_cierre_va_sin_herramientas():
 def test_el_cierre_redacta_con_lo_reunido_al_agotar_el_presupuesto():
     pide = LLMToolResponse(text=None, tool_calls=[_llamada("web_search", 0)])
     cierre = LLMToolResponse(text="con lo que encontré: llueve", tool_calls=[])
-    texto, llamadas, _ = _resolver([pide] * reasoning_loop.TECHO_CANAL_NO_ESCRITORIO + [cierre])
+    texto, llamadas, _ = _resolver([pide] * reasoning_loop.TECHO_CANAL_REMOTO_CON_STOP + [cierre])
 
     assert texto == "con lo que encontré: llueve"
     ultimo = llamadas[-1]["messages"][-1]

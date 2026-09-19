@@ -343,6 +343,7 @@ async def cmd_ayuda(update, context):
         f"*Conversación:*\n"
         f"/memoria — ver historial de conversaciones\n"
         f"/limpiar — reiniciar conversación\n"
+        f"/detener — frenar lo que está haciendo\n"
         f"/estado — verificar sistemas\n"
         f"/skills — administrar módulos (skills)\n\n"
         f"*Tareas y Recordatorios:*\n"
@@ -396,6 +397,24 @@ async def cmd_memoria(update, context):
         f"*Registros de {user.first_name}*\n\n{summary}",
         parse_mode="Markdown"
     )
+
+
+async def cmd_detener(update, context):
+    """`/detener`: frena el turno en curso de ESTE usuario (REQ-047).
+
+    Es el botón de detener del escritorio, para el celular. Cooperativo: el turno para en
+    el próximo punto seguro (antes de la siguiente llamada al modelo o de la siguiente
+    herramienta), así que puede tardar lo que tarde la llamada en curso. Llega mientras el
+    turno corre porque la Application procesa updates en concurrencia (REQ-018).
+    """
+    from core import cancelacion
+
+    clave = cancelacion.clave_remota("telegram", _owner_uid(update.effective_user))
+    if cancelacion.cancelar_remoto(clave):
+        texto = f"Deteniendo{vocative()}. Paro en cuanto termine lo que está haciendo ahora."
+    else:
+        texto = f"No hay nada en curso que detener{vocative()}."
+    await update.message.reply_text(texto)
 
 
 async def cmd_limpiar(update, context):
@@ -1093,6 +1112,8 @@ def run_telegram_bot():
     app.add_handler(CommandHandler("texto",   cmd_texto))
     app.add_handler(CommandHandler("memoria", cmd_memoria))
     app.add_handler(CommandHandler("limpiar", cmd_limpiar))
+    app.add_handler(CommandHandler("detener", cmd_detener))
+    app.add_handler(CommandHandler("stop",    cmd_detener))
     app.add_handler(CommandHandler("estado",  cmd_estado))
     app.add_handler(CommandHandler("skills",  cmd_skills))
 

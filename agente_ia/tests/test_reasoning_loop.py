@@ -612,21 +612,25 @@ def test_ca14_modo_vacio_o_desconocido_cae_en_el_default():
         assert len(_llamadas_con_tools(mock_gen)) == reasoning_loop.MAX_LLM_CALLS, modo
 
 
-def test_ca15_todo_canal_que_no_sea_escritorio_tiene_techo_5():
+def test_ca15_todo_canal_que_no_sea_escritorio_tiene_techo():
     """CA-15: cero regresión fuera del escritorio, y fail-closed para canales nuevos.
 
     Se prueba con `modo="codigo"` (presupuesto 40) a propósito: el techo tiene que ganar
     aunque llegue un modo con presupuesto alto desde donde sea.
+
+    REQ-047: Telegram y Discord tienen `/detener`, así que su techo es el del escritorio
+    sin modo (8); voz, correo y desconocido siguen en 5 porque ahí no hay forma de parar.
     """
-    for canal in ("voice", "telegram", "email", "unknown", "discord"):
+    techos = {"voice": 5, "email": 5, "unknown": 5, "telegram": 8, "discord": 8}
+    for canal, techo in techos.items():
         _, mock_gen, mock_exec = _corrida(
             [_respuesta_con("test_ca02_tool")], canal=canal, modo="codigo",
         )
         # Se cuentan VUELTAS (una herramienta por vuelta en esta simulacion) y no llamadas
         # con `tools`: en EMAIL el catalogo por canal queda vacio y `tools` llega falsy,
         # que mediria otra cosa. Lo que el presupuesto acota son las vueltas.
-        assert mock_exec.call_count == 5, canal
-        assert mock_gen.call_count == 5 + 1, canal   # + la llamada de cierre (CA-30)
+        assert mock_exec.call_count == techo, canal
+        assert mock_gen.call_count == techo + 1, canal   # + la llamada de cierre (CA-30)
 
 
 def test_ca15_el_escritorio_no_tiene_ese_techo():
