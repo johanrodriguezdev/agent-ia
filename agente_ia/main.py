@@ -68,6 +68,13 @@ from voice.voice_channel_adapter import voice_channel_confirmation_adapter
 
 register_confirmation_adapter(ChannelType.VOICE, voice_channel_confirmation_adapter.confirm)
 
+# REQ-049 — órdenes por correo. El canal EMAIL no tiene a nadie delante: su "adaptador"
+# aprueba solo las herramientas MCP de solo lectura que el usuario habilitó para correo y
+# deniega todo lo demás. El poller arranca solo con el interruptor encendido.
+from core.email_commands import confirmar_por_correo as _confirmar_por_correo
+
+register_confirmation_adapter(ChannelType.EMAIL, _confirmar_por_correo)
+
 # REQ-007/CA-14: migrado de AgentTool (orchestrator.register_tool) a ToolSpec
 # (agents/tool_registry.py) — el catálogo de tools ahora es consumido por
 # core/reasoning_loop.py, no por AgentOrchestrator.
@@ -362,6 +369,15 @@ if __name__ == "__main__":
     from core.dreaming import start_dreaming
 
     start_dreaming()
+
+    # REQ-049 — revisar órdenes por correo cada N minutos, solo si el usuario encendió
+    # «Atender órdenes por correo» en Configuración.
+    from core.email_commands import start_polling as _start_email_commands
+
+    try:
+        _start_email_commands()
+    except Exception as e:
+        logger.error(f"No se pudieron arrancar las órdenes por correo: {e}")
 
     # El canal de Telegram, en su propia terminal. Hasta ahora habia que lanzarlo a mano en
     # otra consola, asi que en la practica el agente casi nunca estaba disponible desde el

@@ -34,6 +34,7 @@ from core.mcp_client import MCPClient, MCPError, crear_transporte
 from core.remote_tools_policy import canales_permitidos, is_tool_allowed, nombre_calificado
 from core.security_manager import (
     CHANNEL_ACTION_EXCEPTIONS,
+    ChannelType,
     RiskLevel,
     security_manager,
 )
@@ -75,6 +76,17 @@ def cargar_definiciones() -> Dict[str, Dict[str, Any]]:
             continue
         validos[nombre.strip().lower()] = definicion
     return validos
+
+
+def _es_solo_lectura(tool: Dict[str, Any]) -> bool:
+    """Return True si el servidor anota la herramienta como de solo lectura.
+
+    REQ-049: es lo único que un correo puede pedir. Igual que `_nivel_declarado`, la
+    anotación viene del servidor y solo se usa para RESTRINGIR (qué entra al canal correo),
+    nunca para ablandar el nivel.
+    """
+    anotaciones = tool.get("annotations")
+    return bool(isinstance(anotaciones, dict) and anotaciones.get("readOnlyHint") is True)
 
 
 def _nivel_declarado(tool: Dict[str, Any]) -> Tuple[RiskLevel, bool]:
@@ -200,12 +212,17 @@ def _schema_de(tool: Dict[str, Any]) -> Dict[str, Any]:
     return {"type": "object", "properties": {}}
 
 
-def _habilitar_canales(nombre_registrado: str, servidor: str, destructiva: bool) -> List[str]:
+def _habilitar_canales(nombre_registrado: str, servidor: str, destructiva: bool,
+                       solo_lectura: bool = False) -> List[str]:
     """Agrega las excepciones de canal declaradas para `servidor`. Return los aplicados.
 
     Usa `CHANNEL_ACTION_EXCEPTIONS`, el mecanismo que REQ-018 creó exactamente para esto:
     habilitar una acción amarilla puntual en un canal que de otro modo no la tendría, sin
     abrirle el resto. Nunca toca la política general del canal.
+
+    REQ-049: el canal `email` solo se aplica a herramientas de solo lectura. Un correo lo
+    puede mandar cualquiera; lo que un correo verificado del dueño puede pedir es, como
+    máximo, LEER algo de un servidor que él habilitó para eso.
     """
     if destructiva:
         logger.warning(
@@ -219,6 +236,12 @@ def _habilitar_canales(nombre_registrado: str, servidor: str, destructiva: bool)
         canal = security_manager.resolve_channel(canal_str)
         if canal.value != canal_str:
             logger.warning(f"Canal '{canal_str}' desconocido en mcp_allowlist.json — se ignora")
+            continue
+        if canal is ChannelType.EMAIL and not solo_lectura:
+            logger.warning(
+                f"'{nombre_registrado}' no está anotada como de solo lectura por el servidor: "
+                f"no se habilita por correo (solo se aceptan readOnlyHint)."
+            )
             continue
         CHANNEL_ACTION_EXCEPTIONS.add((canal, nombre_registrado))
         aplicados.append(canal_str)
@@ -265,7 +288,9 @@ def registrar_tools(cliente: MCPClient, servidor: str) -> Tuple[int, int]:
             continue
 
         registradas += 1
-        canales = _habilitar_canales(nombre_registrado, servidor, destructiva)
+        canales = _habilitar_canales(
+            nombre_registrado, servidor, destructiva, solo_lectura=_es_solo_lectura(tool),
+        )
         logger.info(
             f"mcp:{servidor}: '{nombre_tool}' registrada como '{nombre_registrado}' "
             f"(canales: {', '.join(canales) if canales else 'solo escritorio'})"

@@ -56,6 +56,17 @@ CAPACIDADES: Dict[str, Dict[str, str]] = {
             "confirmación cada vez. Con esto apagado, tu bandeja queda intacta."
         ),
     },
+    # REQ-049 — no es escritura sobre el buzón, pero es la misma clase de decisión: una
+    # capacidad que existe solo si el usuario la enciende, y que por defecto no está.
+    "commands": {
+        "label": "Atender órdenes por correo",
+        "description": (
+            "Un correo tuyo (remitente de la lista, verificado por tu servidor de correo) "
+            "con el asunto «ORION: …» se resuelve y se responde por correo. Solo puede usar "
+            "las herramientas MCP de solo lectura que habilitaste para correo; nada más. "
+            "Con esto apagado, ningún correo ejecuta nada."
+        ),
+    },
 }
 
 

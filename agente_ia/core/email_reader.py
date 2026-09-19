@@ -32,8 +32,14 @@ Configuración en config.json::
       "password": "${ORION_EMAIL_PASSWORD}",
       "mailbox": "INBOX",
       "allowed_senders": ["jefe@empresa.com", "@empresa.com"],
-      "max_body_chars": 4000
+      "max_body_chars": 4000,
+      "sender_auth": {"min": "verified", "trusted_authserv_ids": ["mx.google.com"]},
+      "command_senders": ["vos@gmail.com"],
+      "command_prefix": "ORION:"
     }
+
+`command_senders` y `command_prefix` son de REQ-049 (órdenes por correo,
+`core/email_commands.py`): solo con el interruptor «Atender órdenes por correo» encendido.
 
 La contraseña se lee del entorno con `${VAR}`: nunca literal en el archivo. Con Gmail hay
 que usar una "contraseña de aplicación", no la del usuario.

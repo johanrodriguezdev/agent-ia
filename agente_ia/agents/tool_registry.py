@@ -14,8 +14,9 @@ import re
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Optional
 
-from core.security_manager import (ActionDenied, ChannelType, DESKTOP_ONLY_ACTIONS,
-                                   RiskLevel, format_details, security_manager)
+from core.security_manager import (ActionDenied, CHANNEL_ACTION_EXCEPTIONS, ChannelType,
+                                   DESKTOP_ONLY_ACTIONS, RiskLevel, format_details,
+                                   security_manager)
 from core.address import vocative, vocative_start
 
 logger = logging.getLogger(__name__)
@@ -108,6 +109,15 @@ def catalogo_para_modelo(channel=None) -> list:
     if channel is not None and security_manager.resolve_channel(channel) is not ChannelType.DESKTOP:
         solo_escritorio = frozenset(DESKTOP_ONLY_ACTIONS)
 
+    # REQ-049 — lo que el canal tiene habilitado por excepción (REQ-018) también se ofrece:
+    # una herramienta MCP amarilla habilitada para Telegram o para correo no está en los
+    # niveles del canal y, sin esto, el modelo nunca la veía ahí aunque el gate la dejara
+    # pasar. Sigue sin ser un control de seguridad: el gate es `execute_tool()`.
+    canal_resuelto = security_manager.resolve_channel(channel) if channel is not None else None
+    excepciones = {
+        accion for canal_exc, accion in CHANNEL_ACTION_EXCEPTIONS if canal_exc is canal_resuelto
+    } if canal_resuelto is not None else set()
+
     catalogo = []
     for name in list_tool_names():
         spec = get_tool(name)
@@ -115,7 +125,7 @@ def catalogo_para_modelo(channel=None) -> list:
             continue
         if name in solo_escritorio:
             continue
-        if permitidos is not None and spec.risk_level not in permitidos:
+        if permitidos is not None and spec.risk_level not in permitidos and name not in excepciones:
             continue
         catalogo.append({
             "name": spec.name,
@@ -2986,7 +2996,8 @@ register_tool(ToolSpec(
         "Habilita qué herramientas de un servidor MCP puede usar el agente (las que no se "
         "nombran quedan bloqueadas) y desde qué canales. 'herramientas' son nombres tal como "
         "los publica el servidor o patrones ('search', 'read_*'); reemplaza la lista anterior. "
-        "'canales' por defecto es solo escritorio; se puede sumar telegram, discord o voice. "
+        "'canales' por defecto es solo escritorio; se puede sumar telegram, discord, voice o "
+        "email (por correo solo entran las herramientas de solo lectura). "
         "Usala después de mcp_add_server, cuando el usuario haya dicho cuáles quiere."
     ),
     parameters_schema={
@@ -2996,7 +3007,7 @@ register_tool(ToolSpec(
             "herramientas": {"type": "array", "items": {"type": "string"},
                              "description": "Nombres o patrones de herramientas a permitir."},
             "canales": {"type": "array", "items": {"type": "string"},
-                        "description": ("Canales: desktop, telegram, discord, voice. "
+                        "description": ("Canales: desktop, telegram, discord, voice, email. "
                                         "Vacío = solo escritorio.")},
         },
         "required": ["name", "herramientas"],

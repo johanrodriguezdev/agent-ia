@@ -226,8 +226,7 @@ def test_con_otra_confirmacion_en_curso_se_procesa_sin_contexto(adaptador_del_bo
 
 # ── canales MCP ─────────────────────────────────────────────────────
 
-def test_discord_es_habilitable_para_mcp_y_correo_no():
+def test_discord_es_habilitable_para_mcp():
     from core.mcp_config import CANALES_HABILITABLES
 
     assert "discord" in CANALES_HABILITABLES
-    assert "email" not in CANALES_HABILITABLES

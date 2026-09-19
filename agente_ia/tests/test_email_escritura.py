@@ -66,7 +66,7 @@ def test_encender_el_interruptor_no_cambia_el_nivel():
 # ── El interruptor ──────────────────────────────────────────────────
 
 def test_de_fabrica_todo_viene_apagado():
-    assert email_capabilities.cargar() == {"send": False, "mark_read": False}
+    assert email_capabilities.cargar() == {"send": False, "mark_read": False, "commands": False}
     assert not email_capabilities.esta_activa("send")
 
 
@@ -89,7 +89,7 @@ def test_un_archivo_corrupto_apaga_todo():
     with open(email_capabilities.CAPABILITIES_FILE, "w", encoding="utf-8") as f:
         f.write("{roto")
 
-    assert email_capabilities.cargar() == {"send": False, "mark_read": False}
+    assert email_capabilities.cargar() == {"send": False, "mark_read": False, "commands": False}
 
 
 def test_un_json_que_no_es_objeto_apaga_todo():
@@ -104,7 +104,7 @@ def test_un_valor_que_no_es_booleano_no_enciende_nada():
     with open(email_capabilities.CAPABILITIES_FILE, "w", encoding="utf-8") as f:
         json.dump({"send": "true", "mark_read": 1}, f)
 
-    assert email_capabilities.cargar() == {"send": False, "mark_read": False}
+    assert email_capabilities.cargar() == {"send": False, "mark_read": False, "commands": False}
 
 
 def test_no_se_pueden_inventar_capacidades():

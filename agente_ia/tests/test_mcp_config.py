@@ -202,11 +202,14 @@ def test_permitir_para_un_servidor_no_declarado_se_rechaza(entorno):
         mcp_config.permitir_herramientas("fantasma", ["search"])
 
 
-def test_el_canal_de_correo_nunca_es_habilitable(entorno):
+def test_el_canal_de_correo_se_acepta_pero_solo_vale_para_solo_lectura(entorno):
+    """La allow-list guarda `email`; es `mcp_manager._habilitar_canales` quien lo aplica
+    únicamente a herramientas anotadas `readOnlyHint` (REQ-049)."""
     mcp_config.agregar_servidor("notion", command="npx x")
 
-    with pytest.raises(MCPConfigRechazada):
-        mcp_config.permitir_herramientas("notion", ["search"], ["desktop", "email"])
+    escrito = mcp_config.permitir_herramientas("notion", ["search"], ["desktop", "email"])
+
+    assert escrito["canales"] == ["desktop", "email"]
 
 
 def test_desktop_se_agrega_siempre_a_los_canales(entorno):
@@ -224,7 +227,7 @@ def test_solo_los_canales_con_adaptador_de_confirmacion_son_habilitables(entorno
     Discord o voz sería una casilla que no hace nada."""
     mcp_config.agregar_servidor("notion", command="npx x")
 
-    for canal in ("email", "api", "unknown"):
+    for canal in ("api", "unknown"):
         with pytest.raises(MCPConfigRechazada):
             mcp_config.permitir_herramientas("notion", ["search"], [canal])
 

@@ -174,6 +174,32 @@ Configuración → Conexiones, con estas reglas:
   se parte por el primer `__`, y un nombre que lo contenga haría que las herramientas de un
   servidor se atribuyan —y se desregistren— como de otro.
 
+## Órdenes por correo — la única puerta del canal EMAIL, y es de solo lectura (REQ-049)
+
+El canal `EMAIL` sigue con política **vacía**: ningún correo puede disparar una acción del
+sistema, ni verde. Lo único que existe es este camino estrecho (`core/email_commands.py`):
+
+- **Interruptor propio** («Atender órdenes por correo», `email_capabilities`, apagado por
+  defecto). Apagado, ningún correo ejecuta nada y el poller ni arranca.
+- **Quién**: solo remitentes de `command_senders` (direcciones exactas) **y** verificados —
+  `sender_auth` con nivel mínimo `verified` (DKIM o SPF `pass` de un servidor de
+  `trusted_authserv_ids`), aunque la cuenta tenga `none` para los resúmenes. Sin
+  `trusted_authserv_ids` no se atiende ninguna orden: el `From` lo escribe quien manda.
+- **Qué**: solo correos cuyo asunto empieza por el prefijo (`ORION:`). La orden corre con
+  `reasoning_loop.run()` en EMAIL, sin turnos previos, con el presupuesto de 5.
+- **Con qué**: las únicas herramientas que ese canal alcanza son las remotas de **solo
+  lectura** (`readOnlyHint: true`) que el usuario habilitó para correo desde el escritorio
+  (`mcp_allow_tools` con `canales=email`, con confirmación). `mcp_manager._habilitar_canales`
+  no da la excepción EMAIL a ninguna otra. El "adaptador de confirmación" de EMAIL
+  (`email_commands.confirmar_por_correo`) aprueba exactamente esas y deniega todo lo demás;
+  queda auditado como cualquier confirmación.
+- **Respuesta**: vuelve al remitente en el mismo hilo por `email_sender.enviar()`, auditada
+  como `email_command_reply`. No pasa por `send_email_as_user` (🔴): no es el agente
+  escribiéndole a quien quiera, es la respuesta a una orden verificada, y el interruptor es
+  la decisión explícita del usuario.
+- Órdenes que escriban algo quedan fuera: nadie delante para confirmar. Si algún día se
+  quieren, el camino es un segundo factor, no bajar el nivel.
+
 ## Verificación en QA
 - [ ] Toda acción destructiva tiene su nivel clasificado
 - [ ] Las acciones Amarillo piden confirmación antes de ejecutar

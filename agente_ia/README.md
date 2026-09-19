@@ -113,6 +113,13 @@ editas qué herramientas acepta y desde qué canales, y pegas los tokens que nec
 nunca pasan por el chat: el agente solo acepta referencias `${VARIABLE}` y el valor se pone en esa
 pantalla o como variable de entorno.
 
+### Órdenes por correo
+
+Con el interruptor «Atender órdenes por correo» encendido (Configuración → Seguridad), un correo
+**tuyo** —remitente de la lista `command_senders`, verificado por tu servidor de correo— con el
+asunto `ORION: …` se resuelve y se responde por correo. Solo puede usar las herramientas MCP de
+solo lectura que habilitaste para correo; nada más. El correo sigue sin poder tocar la máquina.
+
 ### Un modelo distinto para cada tipo de trabajo
 
 No todo lo que hace el agente necesita el mismo modelo. Resumir un correo o compactar el

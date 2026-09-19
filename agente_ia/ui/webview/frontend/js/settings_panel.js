@@ -998,6 +998,7 @@ function buildMcpAllowedEditor(servidor, canalesPosibles) {
     const texto = document.createElement("span");
     texto.textContent = {
       desktop: "escritorio", telegram: "Telegram", discord: "Discord", voice: "voz (confirmo)",
+      email: "correo (solo lectura)",
     }[canal] || canal;
     item.append(check, texto);
     canales.appendChild(item);

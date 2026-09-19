@@ -234,16 +234,33 @@ def test_los_canales_de_siempre_siguen_permitiendo_verde():
         assert security_manager.require_confirmation("otra_accion_verde_de_prueba", canal), canal
 
 
-def test_el_canal_email_no_tiene_como_confirmar():
-    """Sin adaptador registrado, todo YELLOW muere por fail-closed. La restricción no está
-    escrita: es que no hay a quién preguntarle."""
-    assert get_confirmation_adapter(ChannelType.EMAIL) is None
+def test_el_canal_email_no_tiene_a_quien_preguntar_salvo_lo_preautorizado():
+    """Hasta REQ-049 no había adaptador y todo YELLOW moría por fail-closed. Ahora hay uno
+    (`core/email_commands.confirmar_por_correo`) que aprueba ÚNICAMENTE herramientas remotas
+    con excepción de canal para EMAIL, o sea las de solo lectura que el usuario habilitó
+    para correo. Para cualquier otra acción amarilla la respuesta sigue siendo no, haya o
+    no adaptador registrado."""
+    from core.confirmation import register_confirmation_adapter
+    from core.email_commands import confirmar_por_correo
 
     security_manager.register_action("accion_amarilla_de_prueba", RiskLevel.YELLOW)
 
-    assert not security_manager.require_confirmation(
-        "accion_amarilla_de_prueba", ChannelType.EMAIL
-    )
+    # Sin adaptador (proceso recién arrancado sin main.py): fail-closed.
+    if get_confirmation_adapter(ChannelType.EMAIL) is None:
+        assert not security_manager.require_confirmation(
+            "accion_amarilla_de_prueba", ChannelType.EMAIL
+        )
+
+    # Con el adaptador real: sigue siendo no, aunque tuviera excepción de canal, porque
+    # no es una herramienta remota.
+    register_confirmation_adapter(ChannelType.EMAIL, confirmar_por_correo)
+    CHANNEL_ACTION_EXCEPTIONS.add((ChannelType.EMAIL, "accion_amarilla_de_prueba"))
+    try:
+        assert not security_manager.require_confirmation(
+            "accion_amarilla_de_prueba", ChannelType.EMAIL
+        )
+    finally:
+        CHANNEL_ACTION_EXCEPTIONS.discard((ChannelType.EMAIL, "accion_amarilla_de_prueba"))
 
 
 def test_la_denegacion_de_email_se_explica_en_castellano():

@@ -95,7 +95,7 @@ def test_el_payload_lista_servidores_y_variables_sin_valores(entorno):
     assert "ntn_super_secreto" not in crudo
     assert payload["servidores"][0]["nombre"] == "notion"
     assert payload["variables"] == [{"nombre": "NOTION_TOKEN", "origen": "archivo", "servidores": ["notion"]}]
-    assert payload["canales"] == ["desktop", "telegram", "discord", "voice"]
+    assert payload["canales"] == ["desktop", "telegram", "discord", "voice", "email"]
 
 
 def test_request_emite_el_payload(bridge, qtbot):
@@ -177,14 +177,14 @@ def test_permitir_denegado_no_escribe_la_allowlist(bridge, entorno, confirmacion
     assert politica.load_allowlist() == {}
 
 
-def test_permitir_con_canal_de_correo_se_rechaza_en_palabras(bridge, qtbot, entorno, confirmacion):
+def test_permitir_con_canal_desconocido_se_rechaza_en_palabras(bridge, qtbot, entorno, confirmacion):
     _con_notion()
 
     with qtbot.waitSignal(bridge.notice_shown, timeout=1000) as blocker:
-        bridge.save_mcp_allowed_tools("notion", "search", "email")
+        bridge.save_mcp_allowed_tools("notion", "search", "api")
 
     assert blocker.args[0] == "error"
-    assert "email" in blocker.args[1]
+    assert "api" in blocker.args[1]
     assert politica.load_allowlist() == {}
 
 
