@@ -1955,3 +1955,35 @@ def test_los_turnos_se_arman_fuera_del_hilo_de_la_gui(bridge, monkeypatch, fake_
     monkeypatch.setattr(memory, "get_conversation_turns", lambda *a, **k: [])
     bridge.select_conversation("conv-1")
     assert getattr(fake_run_async[-1]["fn"], "__name__", "") == "_cargar_turnos"
+
+
+def test_los_turnos_de_una_conversacion_que_ya_no_esta_abierta_se_descartan(bridge, monkeypatch):
+    """Dos clics rápidos: la carga lenta de A (muchas imágenes) llega con B ya abierta y
+    no puede pintarse encima."""
+    recibidos = []
+    bridge.turns_loaded.connect(recibidos.append)
+    bridge._conversation_id = "B"
+
+    bridge._on_turns_loaded(("A", [{"id": 1, "role": "user", "html": "<p>de A</p>", "timestamp": "t"}]))
+    assert recibidos == []
+
+    bridge._on_turns_loaded(("B", [{"id": 2, "role": "user", "html": "<p>de B</p>", "timestamp": "t"}]))
+    assert len(recibidos) == 1
+
+
+def test_editar_reserva_el_turno_mientras_borra_y_lo_libera_al_volver(bridge, monkeypatch, fake_run_async):
+    from ai.memory_manager import memory
+
+    vistos = []
+
+    def _borra(conversation_id, user_id="default"):
+        vistos.append(bridge._resolution_in_flight)     # True mientras el borrado corre
+        return SimpleNamespace(id=1, role="user", text="hola", timestamp="t")
+
+    monkeypatch.setattr(memory, "delete_last_turn", _borra)
+    bridge._conversation_id = "conv-1"
+
+    bridge.edit_last()
+
+    assert vistos == [True]
+    assert bridge._resolution_in_flight is False

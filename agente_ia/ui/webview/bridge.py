@@ -522,12 +522,16 @@ class Bridge(QObject):
             return
         from ai.memory_manager import memory
 
+        # Igual que en Regenerar: el turno se reserva mientras el borrado está en el pool,
+        # o un mensaje que entre en ese hueco correría en paralelo.
+        self._resolution_in_flight = True
         conversation_id = self._conversation_id
         run_async(memory.delete_last_turn,
                   lambda usuario: self._tras_borrar_para_editar(usuario, conversation_id),
                   self._on_error_borrando_turno, conversation_id, user_id=OWNER_USER_ID)
 
     def _tras_borrar_para_editar(self, usuario, conversation_id: str) -> None:
+        self._resolution_in_flight = False
         if usuario is None:
             self.notice_shown.emit("info", "No hay un mensaje que editar.")
             return
@@ -978,13 +982,20 @@ class Bridge(QObject):
         run_async(self._cargar_turnos, self._on_turns_loaded, self._on_turns_error,
                   conversation_id)
 
-    def _cargar_turnos(self, conversation_id: str) -> list:
+    def _cargar_turnos(self, conversation_id: str) -> tuple:
         from ai.memory_manager import memory
 
         turns = memory.get_conversation_turns(conversation_id, user_id=OWNER_USER_ID)
-        return self._payload_de_turnos(turns)
+        return conversation_id, self._payload_de_turnos(turns)
 
-    def _on_turns_loaded(self, payload) -> None:
+    def _on_turns_loaded(self, resultado) -> None:
+        conversation_id, payload = resultado
+        if conversation_id != self._conversation_id:
+            # Dos clics rápidos en la barra: la carga de la primera conversación (lenta si
+            # tiene muchas imágenes) llegó después de abrir la segunda. Se descarta, o se
+            # pintarían los turnos de A sobre B.
+            logger.debug(f"turnos de {conversation_id} descartados: ya se abrió otra conversación")
+            return
         self.turns_loaded.emit(json.dumps(payload))
 
     def _payload_de_turnos(self, turns) -> list:

@@ -227,8 +227,11 @@ def test_rechaza_fuera_de_las_raices_y_en_carpetas_de_configuracion(raices_de_pr
         imagenes.resolver_para_mirar(afuera)
     (home / ".ssh").mkdir()
     secreta = _png(home / ".ssh" / "clave.png")
-    with pytest.raises(imagenes.ImagenRechazada, match="configuración"):
+    with pytest.raises(imagenes.ImagenRechazada, match="Solo miro"):
         imagenes.resolver_para_mirar(secreta)
+    # Fuera de las raíces el mensaje es el mismo exista o no el archivo: no se sondea el disco.
+    with pytest.raises(imagenes.ImagenRechazada, match="Solo miro"):
+        imagenes.resolver_para_mirar(str(tmp_path / "no-existe-tampoco.png"))
     # Un espacio de trabajo habilitado sí.
     en_repo = _png(repo / "docs" / "diagrama.png") if (repo / "docs").mkdir() is None else None
     assert imagenes.resolver_para_mirar(en_repo) == os.path.realpath(en_repo)

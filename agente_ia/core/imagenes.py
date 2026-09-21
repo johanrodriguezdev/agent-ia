@@ -276,13 +276,11 @@ def resolver_para_mirar(ruta: Optional[str]) -> str:
 
         candidata = os.path.join(str(_escritorio()), candidata)
     real = os.path.realpath(candidata)
-    if not os.path.isfile(real):
-        raise ImagenRechazada(f"No encuentro ninguna imagen en «{texto}».")
-    if not es_imagen(real):
-        raise ImagenRechazada(f"«{os.path.basename(real)}» no es una imagen (png, jpg, gif o webp).")
-    if _tipo_por_firma(real) is None:
-        raise ImagenRechazada(f"«{os.path.basename(real)}» tiene extensión de imagen pero no lo es.")
 
+    # Primero el confinamiento, SIN tocar el disco (mismo orden que
+    # `core/workspace_files.resolver`): una ruta fuera de las raíces o en una carpeta de
+    # configuración se rechaza con el mismo mensaje exista o no, así el modelo no puede
+    # sondear qué hay en el resto del disco a base de mensajes distintos.
     real_bajo = real.lower()
     for base in _raices_para_mirar():
         base_real = os.path.realpath(base).lower()
@@ -297,7 +295,16 @@ def resolver_para_mirar(ruta: Optional[str]) -> str:
         )
     partes = {p.lower() for p in real.split(os.sep)}
     if partes & CARPETAS_VEDADAS:
-        raise ImagenRechazada("Esa carpeta es de configuración, no de imágenes.")
+        raise ImagenRechazada(
+            "Solo miro imágenes de tu carpeta personal o de un espacio de trabajo habilitado."
+        )
+
+    if not os.path.isfile(real):
+        raise ImagenRechazada(f"No encuentro ninguna imagen en «{texto}».")
+    if not es_imagen(real):
+        raise ImagenRechazada(f"«{os.path.basename(real)}» no es una imagen (png, jpg, gif o webp).")
+    if _tipo_por_firma(real) is None:
+        raise ImagenRechazada(f"«{os.path.basename(real)}» tiene extensión de imagen pero no lo es.")
     return real
 
 
