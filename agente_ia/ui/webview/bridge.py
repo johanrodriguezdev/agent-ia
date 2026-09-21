@@ -261,6 +261,12 @@ class Bridge(QObject):
         #: REQ-057 — cuándo arrancó el turno en curso (`time.monotonic()`), para avisar
         #: solo si la respuesta tardó.
         self._turno_inicio: Optional[float] = None
+        #: REQ-055 (revisión) — el último par que se ve en pantalla, ¿está en la base?
+        #: Un turno que terminó en error se muestra pero no se guarda: Regenerar/Editar
+        #: sobre él no pueden borrar "el último par" de la base (sería el anterior, el
+        #: bueno). Con `False`, trabajan sobre `_ultimo_texto_usuario` sin tocar la base.
+        self._ultimo_par_persistido: bool = True
+        self._ultimo_texto_usuario: str = ""
         # (conversation_id, texto del usuario, respuesta) del primer turno, a la espera de
         # que el turno esté guardado para pedirle un título (REQ-053).
         self._titulo_pendiente: Optional[tuple] = None
@@ -393,6 +399,8 @@ class Bridge(QObject):
         mensaje.
         """
         self._pending_user_text = text
+        self._ultimo_texto_usuario = text
+        self._ultimo_par_persistido = False
         self._resolution_in_flight = True
         self._turno_inicio = time.monotonic()   # REQ-057
         self._turno_id = nuevo_turno()
@@ -454,17 +462,38 @@ class Bridge(QObject):
             # borrara ahora "el último par", sería el anterior. Se espera a que termine.
             self._accion_tras_guardar = self.regenerate_last
             return
+        if not self._ultimo_par_persistido:
+            # El último par en pantalla terminó en error y no está en la base: no hay nada
+            # que borrar allá; se reenvía lo que se ve.
+            self.last_turn_removed.emit()
+            self._reenviar(self._ultimo_texto_usuario)
+            return
         from ai.memory_manager import memory
 
-        run_async(memory.delete_last_turn, self._tras_borrar_para_regenerar,
-                  self._on_error_borrando_turno, self._conversation_id, user_id=OWNER_USER_ID)
+        # El turno se reserva ANTES del borrado asíncrono: si el pool tarda (embeddings en
+        # cola) y mientras tanto entra otro mensaje, habría dos resoluciones a la vez.
+        self._resolution_in_flight = True
+        conversation_id = self._conversation_id
+        run_async(memory.delete_last_turn,
+                  lambda usuario: self._tras_borrar_para_regenerar(usuario, conversation_id),
+                  self._on_error_borrando_turno, conversation_id, user_id=OWNER_USER_ID)
 
-    def _tras_borrar_para_regenerar(self, usuario) -> None:
+    def _tras_borrar_para_regenerar(self, usuario, conversation_id: str) -> None:
+        self._resolution_in_flight = False
         if usuario is None:
             self.notice_shown.emit("info", "No hay una respuesta que regenerar.")
             return
+        if conversation_id != self._conversation_id:
+            # El usuario cambió de conversación mientras se borraba: el par ya no está en
+            # la base, pero reenviarlo iría a parar al chat equivocado.
+            logger.warning("regenerar: la conversación cambió durante el borrado; no se reenvía")
+            return
         self.last_turn_removed.emit()
-        texto = usuario.text or ""
+        self._reenviar(usuario.text or "")
+
+    def _reenviar(self, texto: str) -> None:
+        """Vuelve a mandar `texto` (que ya trae su marcador de adjunto) con su imagen si
+        el archivo sigue existiendo."""
         _, ruta = imagenes.separar_adjunto(texto)
         imagen = ruta if (ruta and imagenes.es_imagen(ruta) and os.path.exists(ruta)) else None
         logger.info(f"regenerando la última respuesta de {self._conversation_id}")
@@ -487,17 +516,30 @@ class Bridge(QObject):
         if self._guardando_turno:
             self._accion_tras_guardar = self.edit_last
             return
+        if not self._ultimo_par_persistido:
+            self.last_turn_removed.emit()
+            self._devolver_al_cuadro(self._ultimo_texto_usuario)
+            return
         from ai.memory_manager import memory
 
-        run_async(memory.delete_last_turn, self._tras_borrar_para_editar,
-                  self._on_error_borrando_turno, self._conversation_id, user_id=OWNER_USER_ID)
+        conversation_id = self._conversation_id
+        run_async(memory.delete_last_turn,
+                  lambda usuario: self._tras_borrar_para_editar(usuario, conversation_id),
+                  self._on_error_borrando_turno, conversation_id, user_id=OWNER_USER_ID)
 
-    def _tras_borrar_para_editar(self, usuario) -> None:
+    def _tras_borrar_para_editar(self, usuario, conversation_id: str) -> None:
         if usuario is None:
             self.notice_shown.emit("info", "No hay un mensaje que editar.")
             return
+        if conversation_id != self._conversation_id:
+            logger.warning("editar: la conversación cambió durante el borrado; no se toca el cuadro")
+            return
         self.last_turn_removed.emit()
-        texto, ruta = imagenes.separar_adjunto(usuario.text or "")
+        self._devolver_al_cuadro(usuario.text or "")
+
+    def _devolver_al_cuadro(self, texto_guardado: str) -> None:
+        """Deja el texto (sin el marcador) en el cuadro y su adjunto de vuelta en el chip."""
+        texto, ruta = imagenes.separar_adjunto(texto_guardado)
         if ruta and os.path.exists(ruta):
             self.attach_file(ruta)
         logger.info(f"editando el último mensaje de {self._conversation_id}")
@@ -505,6 +547,7 @@ class Bridge(QObject):
 
     def _on_error_borrando_turno(self, message: str) -> None:
         logger.error(f"No se pudo borrar el último intercambio: {message}")
+        self._resolution_in_flight = False
         self.error_occurred.emit("No pude quitar la última respuesta de la conversación.")
 
     def _on_stream_chunk(self, pedazo: str) -> None:
@@ -665,7 +708,7 @@ class Bridge(QObject):
         conversation_id, texto_usuario, texto_asistente = pendiente
         run_async(
             titulos.titular_si_corresponde,
-            lambda puesto: self._load_conversations(offset=0) if puesto else None,
+            lambda puesto: self._refrescar_listados() if puesto else None,
             lambda mensaje: logger.info(f"Sin título automático: {mensaje}"),
             conversation_id, texto_usuario, texto_asistente, user_id=OWNER_USER_ID,
         )
@@ -689,6 +732,7 @@ class Bridge(QObject):
         self._titular_si_es_el_primer_turno()
         # REQ-055 — lo que el usuario pidió mientras se guardaba (regenerar/editar).
         self._guardando_turno = False
+        self._ultimo_par_persistido = True
         accion, self._accion_tras_guardar = self._accion_tras_guardar, None
         if accion is not None:
             accion()
@@ -729,7 +773,11 @@ class Bridge(QObject):
 
         conversation_id = self._ensure_conversation_id()
         if self._primer_turno:
-            self._titulo_pendiente = (conversation_id, self._pending_user_text, result_text)
+            # Sin el marcador «[Imagen adjunta: C:\\…]»: una ruta hace que cualquier mensaje
+            # pase el umbral y el modelo titularía a partir de un path.
+            self._titulo_pendiente = (
+                conversation_id, imagenes.separar_adjunto(self._pending_user_text)[0], result_text,
+            )
         self._primer_turno = False
         self._guardando_turno = True
         # REQ-059 — `pasos` solo si hay: los dobles de `store_turn` con la firma vieja no
@@ -921,13 +969,25 @@ class Bridge(QObject):
 
     @pyqtSlot(str)
     def select_conversation(self, conversation_id: str) -> None:
+        self._conversation_id = conversation_id
+        # Lo que está en pantalla es lo guardado: Regenerar/Editar pueden ir a la base.
+        self._ultimo_par_persistido = True
+        # Leer los turnos Y armar el payload fuera del hilo de la GUI: las miniaturas de
+        # las imágenes (REQ-054) se decodifican con Pillow, y una conversación con veinte
+        # capturas congelaría la ventana si se hiciera acá.
+        run_async(self._cargar_turnos, self._on_turns_loaded, self._on_turns_error,
+                  conversation_id)
+
+    def _cargar_turnos(self, conversation_id: str) -> list:
         from ai.memory_manager import memory
 
-        self._conversation_id = conversation_id
-        run_async(memory.get_conversation_turns, self._on_turns_loaded, self._on_turns_error,
-                  conversation_id, user_id=OWNER_USER_ID)
+        turns = memory.get_conversation_turns(conversation_id, user_id=OWNER_USER_ID)
+        return self._payload_de_turnos(turns)
 
-    def _on_turns_loaded(self, turns) -> None:
+    def _on_turns_loaded(self, payload) -> None:
+        self.turns_loaded.emit(json.dumps(payload))
+
+    def _payload_de_turnos(self, turns) -> list:
         payload = []
         for item in turns:
             if (item.role or "assistant") == "user":
@@ -943,7 +1003,7 @@ class Bridge(QObject):
             if pasos:
                 entrada["pasos"] = pasos
             payload.append(entrada)
-        self.turns_loaded.emit(json.dumps(payload))
+        return payload
 
     def _on_turns_error(self, message: str) -> None:
         logger.error(f"No se pudo cargar la conversación: {message}")
@@ -1507,9 +1567,18 @@ class Bridge(QObject):
         from ai.memory_manager import memory
 
         if memory.rename_conversation(conversation_id, title, user_id=OWNER_USER_ID):
-            self._load_conversations(offset=0)
+            self._refrescar_listados()
         else:
             self.notice_shown.emit("error", "No pude renombrar esa conversación.")
+
+    def _refrescar_listados(self) -> None:
+        """«Recientes» y los proyectos: un chat que vive en un proyecto no está en
+        «Recientes», y su título tiene que refrescarse donde sí está."""
+        self._load_conversations(offset=0)
+        try:
+            self._emit_projects_loaded()
+        except Exception as e:
+            logger.warning(f"no se pudo refrescar la lista de proyectos: {e}")
 
     @pyqtSlot(str)
     def search_conversations(self, query: str) -> None:

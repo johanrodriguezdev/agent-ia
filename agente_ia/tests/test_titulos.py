@@ -164,3 +164,16 @@ def test_el_bridge_titula_solo_el_primer_turno(qtbot, monkeypatch, db, modelo):
     bridge.send_message(LARGO + " y también las citas")
     assert len(llamadas) == 1
     assert memory.get_conversation_title(cid, user_id=OWNER_USER_ID) == "Bibliografía de la tesis"
+
+
+def test_un_error_del_proveedor_no_se_vuelve_titulo(modelo):
+    """Revisión de la noche del 2026-09-20: «Error: Ollama no está ejecutándose…» o el
+    texto de "sin proveedor" son strings, y `limpiar()` los recortaba a seis palabras como
+    título permanente — y como ya había título propio, no se volvía a intentar."""
+    from ai.llm_provider import SIN_PROVEEDOR
+
+    _, estado = modelo
+    estado["respuesta"] = "Error: Ollama no está ejecutándose. Inícialo con 'ollama serve'."
+    assert titulos.generar(LARGO, "…") == ""
+    estado["respuesta"] = SIN_PROVEEDOR
+    assert titulos.generar(LARGO, "…") == ""

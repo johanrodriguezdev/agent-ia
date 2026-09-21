@@ -64,7 +64,7 @@ def limpiar(crudo: Optional[str]) -> str:
 
 def generar(texto_usuario: str, texto_asistente: str) -> str:
     """Pide el título al modelo. Return "" si no se pudo (nunca lanza)."""
-    from ai.llm_provider import generate_response, tope_de_salida
+    from ai.llm_provider import es_respuesta_de_fallo, generate_response, tope_de_salida
 
     usuario = " ".join((texto_usuario or "").split())[:600]
     asistente = " ".join((texto_asistente or "").split())[:600]
@@ -81,6 +81,12 @@ def generar(texto_usuario: str, texto_asistente: str) -> str:
         logger.info(f"Sin título automático: {e}")
         return ""
     texto = respuesta if isinstance(respuesta, str) else getattr(respuesta, "text", "")
+    # Un «Error: Ollama no está ejecutándose…» o el texto de "sin proveedor" también son
+    # strings: sin esto quedaban recortados a seis palabras como título permanente, y
+    # como ya habría título propio no se volvería a intentar.
+    if not isinstance(texto, str) or es_respuesta_de_fallo(texto):
+        logger.info("Sin título automático: el modelo no contestó")
+        return ""
     return limpiar(texto)
 
 

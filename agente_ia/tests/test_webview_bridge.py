@@ -56,6 +56,23 @@ def no_real_threadpool(monkeypatch):
     return started
 
 
+@pytest.fixture(autouse=True)
+def resolve_falso(monkeypatch):
+    """`core.resolution.resolve` de mentira para TODO este archivo.
+
+    Con `fake_run_async` síncrono, cada `send_message()`/`regenerate_last()` de estos tests
+    llamaba al `resolve()` real —o sea, al modelo por red— salvo que el test lo stubeara a
+    mano: 32 llamadas y solo 9 stubs, entre 5 y 60 s cada una. Un test que necesite otra
+    respuesta sigue pudiendo `monkeypatch.setattr("core.resolution.resolve", ...)`: el suyo
+    corre después y gana. Se llama `resolve` porque varios tests buscan la llamada por
+    `fn.__name__`.
+    """
+    def resolve(*args, **kwargs):
+        return SimpleNamespace(text="respuesta de prueba", matched_by="stub")
+
+    monkeypatch.setattr("core.resolution.resolve", resolve)
+
+
 @pytest.fixture
 def bridge(qtbot, fake_run_async):
     main_window = MagicMock()
@@ -1810,3 +1827,131 @@ def test_export_conversation_muestra_el_rechazo_como_aviso(bridge, monkeypatch):
     bridge.export_conversation("conv-1")
 
     assert avisos == [("error", "Esa conversación no tiene mensajes guardados.")]
+
+
+# ---------------------------------------------------------------------------
+# Revisión de la noche del 2026-09-20 — regenerar/editar sobre un par que no se guardó
+# ---------------------------------------------------------------------------
+
+def test_regenerar_tras_un_error_no_toca_la_base_y_reenvia_lo_que_se_ve(bridge, monkeypatch, fake_run_async):
+    """Un turno que terminó en «Error: …» se muestra pero no se guarda. Regenerar sobre él
+    borraba el par ANTERIOR de la base y reenviaba ese texto viejo."""
+    from ai.memory_manager import memory
+
+    monkeypatch.setattr(memory, "delete_last_turn", lambda *a, **k: pytest.fail("no debe borrar nada"))
+    monkeypatch.setattr(memory, "get_conversation_turns", lambda *a, **k: [])
+    bridge._conversation_id = "conv-1"
+    bridge._ultimo_par_persistido = False
+    bridge._ultimo_texto_usuario = "la que falló"
+    quitados = []
+    bridge.last_turn_removed.connect(lambda: quitados.append(True))
+
+    bridge.regenerate_last()
+
+    assert quitados == [True]
+    llamada = [c for c in fake_run_async if getattr(c["fn"], "__name__", "") == "resolve"][-1]
+    assert llamada["args"][0] == "la que falló"
+
+
+def test_editar_tras_un_error_devuelve_al_cuadro_lo_que_se_ve(bridge, monkeypatch, fake_run_async):
+    from ai.memory_manager import memory
+
+    monkeypatch.setattr(memory, "delete_last_turn", lambda *a, **k: pytest.fail("no debe borrar nada"))
+    bridge._conversation_id = "conv-1"
+    bridge._ultimo_par_persistido = False
+    bridge._ultimo_texto_usuario = "la que falló"
+    textos = []
+    bridge.composer_text_requested.connect(textos.append)
+
+    bridge.edit_last()
+
+    assert textos == ["la que falló"]
+
+
+def test_un_turno_que_falla_deja_el_par_como_no_persistido_y_uno_guardado_lo_marca(bridge, monkeypatch, fake_run_async):
+    from ai.memory_manager import memory
+
+    monkeypatch.setattr(memory, "get_conversation_turns", lambda *a, **k: [])
+    monkeypatch.setattr(memory, "store_turn", lambda *a, **k: None)
+    monkeypatch.setattr(memory, "list_conversations", lambda **k: [])
+    monkeypatch.setattr(memory, "get_conversation_title", lambda *a, **k: "x")
+    monkeypatch.setattr(memory, "new_conversation_id", lambda: "conv-1")
+
+    def _falla(*a, **k):
+        raise RuntimeError("se cayó")
+
+    # `fake_run_async` es síncrono: el fallo llega a `_on_resolve_error` dentro del send.
+    monkeypatch.setattr("core.resolution.resolve", _falla)
+    bridge.send_message("hola")
+    assert bridge._ultimo_par_persistido is False
+    assert bridge._ultimo_texto_usuario == "hola"
+
+    monkeypatch.setattr("core.resolution.resolve",
+                        lambda *a, **k: SimpleNamespace(text="bien", matched_by="claude"))
+    bridge.send_message("otra")   # store_turn síncrono → _tras_guardar_turno
+    assert bridge._ultimo_par_persistido is True
+
+
+def test_regenerar_no_reenvia_si_la_conversacion_cambio_durante_el_borrado(bridge, monkeypatch, fake_run_async):
+    from ai.memory_manager import memory
+
+    def _borra_y_cambia(conversation_id, user_id="default"):
+        bridge._conversation_id = "otra"       # el usuario abrió otro chat mientras tanto
+        return SimpleNamespace(id=1, role="user", text="vieja", timestamp="t")
+
+    monkeypatch.setattr(memory, "delete_last_turn", _borra_y_cambia)
+    bridge._conversation_id = "conv-1"
+    quitados = []
+    bridge.last_turn_removed.connect(lambda: quitados.append(True))
+
+    bridge.regenerate_last()
+
+    assert quitados == []
+    assert not [c for c in fake_run_async if getattr(c["fn"], "__name__", "") == "resolve"]
+    assert bridge._resolution_in_flight is False
+
+
+def test_el_titulo_se_pide_sin_el_marcador_del_adjunto(bridge, monkeypatch, fake_run_async, tmp_path):
+    from ai.memory_manager import memory
+
+    ruta = _captura(tmp_path)
+    monkeypatch.setattr(memory, "get_conversation_turns", lambda *a, **k: [])
+    pedidos = []
+    monkeypatch.setattr(memory, "store_turn", lambda *a, **k: None)
+    monkeypatch.setattr(memory, "list_conversations", lambda **k: [])
+    monkeypatch.setattr(memory, "get_conversation_title", lambda *a, **k: "")
+    from core import titulos
+    monkeypatch.setattr(titulos, "titular_si_corresponde",
+                        lambda cid, u, a, user_id="default": pedidos.append(u) or False)
+    monkeypatch.setattr("core.resolution.resolve",
+                        lambda *a, **k: SimpleNamespace(text="Dice hola.", matched_by="claude"))
+    bridge._pending_attachment = ruta
+
+    bridge.send_message("¿qué dice esta captura tan larga que sí pasa el umbral?")
+
+    assert pedidos == ["¿qué dice esta captura tan larga que sí pasa el umbral?"]
+
+
+def test_renombrar_refresca_recientes_y_proyectos(bridge, monkeypatch):
+    from ai.memory_manager import memory
+
+    monkeypatch.setattr(memory, "rename_conversation", lambda *a, **k: True)
+    monkeypatch.setattr(memory, "list_conversations", lambda **k: [])
+    monkeypatch.setattr(memory, "list_projects", lambda **k: [])
+    listas, proyectos = [], []
+    bridge.conversation_list_updated.connect(listas.append)
+    bridge.projects_loaded.connect(proyectos.append)
+
+    bridge.rename_conversation("conv-1", "Tesis")
+
+    assert len(listas) == 1 and len(proyectos) == 1
+
+
+def test_los_turnos_se_arman_fuera_del_hilo_de_la_gui(bridge, monkeypatch, fake_run_async):
+    """Las miniaturas se decodifican con Pillow: el payload entero se arma en el worker y
+    la GUI solo emite."""
+    from ai.memory_manager import memory
+
+    monkeypatch.setattr(memory, "get_conversation_turns", lambda *a, **k: [])
+    bridge.select_conversation("conv-1")
+    assert getattr(fake_run_async[-1]["fn"], "__name__", "") == "_cargar_turnos"
