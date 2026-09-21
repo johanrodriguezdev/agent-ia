@@ -51,6 +51,7 @@ import { initToasts, mostrarAviso } from "./toasts.js";
 import { initShortcuts } from "./shortcuts.js";
 import { openFlowsPanel, renderFlows } from "./flows_panel.js";
 import { openMapPanel, renderConnectionMap } from "./map_panel.js";
+import { initSugerencias, sortearSugerencias } from "./sugerencias.js";
 import {
   openProjectsPanel, renderProjects, renderProjectConversations, handleProjectRemoved,
   renderProjectItems, renderAssignableItems,
@@ -123,6 +124,7 @@ async function bootstrap() {
   initSidebar();
   initChat();
   initComposer();
+  initSugerencias();
   initShortcuts({ alternarTerminal: toggleTerminalPanel, chatNuevo: () => newConversation() });
 
   await connectBridge();
@@ -148,6 +150,7 @@ async function bootstrap() {
     clearActiveConversation();
     clearMessages();
     resetActiveMode();   // REQ-026: el modo no sobrevive a una conversación nueva/limpiada
+    sortearSugerencias();   // REQ-053: otras frases de ejemplo en cada chat nuevo
   });
   onConversationRemoved((conversationId) => removeConversationFromList(conversationId));
 

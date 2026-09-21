@@ -235,6 +235,14 @@ class Bridge(QObject):
 
         self._conversation_id: Optional[str] = None
         self._pending_user_text: str = ""
+        # REQ-053 — los pasos del turno en curso (qué herramientas usó), para mostrarlos
+        # plegados debajo de la respuesta. Se llenan desde `_on_progress`, en el hilo que
+        # trabaja; `list.append` es atómico en CPython y acá no hace falta más.
+        self._pasos_del_turno: List[str] = []
+        self._primer_turno: bool = False
+        # (conversation_id, texto del usuario, respuesta) del primer turno, a la espera de
+        # que el turno esté guardado para pedirle un título (REQ-053).
+        self._titulo_pendiente: Optional[tuple] = None
         self._resolution_in_flight: bool = False
         self._pending_conversation_offset: int = 0
         # REQ-051 — «Nuevo chat aquí» dentro de un proyecto: el chat todavía no existe (se
@@ -352,6 +360,7 @@ class Bridge(QObject):
         self._pending_user_text = text
         self._resolution_in_flight = True
         self._turno_id = nuevo_turno()
+        self._pasos_del_turno = []
         # El reportero se registra por turno y se retira al acabar: fuera de una resolución
         # no hay nada que contar, y así ningún proceso de fondo puede escribir en la línea
         # de estado de un turno que ya terminó.
@@ -378,9 +387,12 @@ class Bridge(QObject):
         self.typing_started.emit()
 
         from core.resolution import resolve
+        historial = self._historial_de_la_conversacion()
+        # REQ-053 — si es el primer intercambio, al guardarlo se le pide un título corto.
+        self._primer_turno = not historial
         run_async(resolve, self._on_resolve_done, self._on_resolve_error, text,
                    ChannelType.DESKTOP, user_id=OWNER_USER_ID, modo=(modo or None),
-                   historial=self._historial_de_la_conversacion())
+                   historial=historial)
 
     def _on_stream_chunk(self, pedazo: str) -> None:
         """Recibe un pedazo de respuesta DESDE EL HILO que habla con el modelo.
@@ -422,8 +434,38 @@ class Bridge(QObject):
 
         `progress_updated` es un `pyqtSignal`, así que Qt encola la entrega en el hilo de la
         GUI por su cuenta: este método puede llamarse desde cualquier hilo sin cuidados.
+
+        Además de mostrarlo en la línea de estado, el aviso se guarda como un paso del
+        turno (REQ-053): cuando llega la respuesta, la interfaz muestra plegado qué hizo el
+        agente para llegar a ella. Solo cuentan las herramientas: «Pensando» y
+        «Entendiendo lo que me pides» son el ritmo del bucle, no algo que se hizo.
         """
         self.progress_updated.emit(mensaje)
+        self._registrar_paso(mensaje)
+
+    #: Avisos que no son un paso: el bucle avisando que sigue vivo.
+    _AVISOS_QUE_NO_SON_PASOS = ("Pensando", "Entendiendo lo que me pides")
+    #: Techo de pasos que se guardan por turno. Un turno con más que esto ya se corta
+    #: por presupuesto; el techo es para que un reportero desbocado no llene memoria.
+    _MAX_PASOS_POR_TURNO = 40
+
+    def _registrar_paso(self, mensaje: str) -> None:
+        texto = (mensaje or "").strip()
+        if not texto or texto.startswith(self._AVISOS_QUE_NO_SON_PASOS):
+            return
+        pasos = getattr(self, "_pasos_del_turno", None)
+        if pasos is None:
+            return
+        if pasos and pasos[-1] == texto:      # la misma herramienta dos veces seguidas
+            return
+        if len(pasos) < self._MAX_PASOS_POR_TURNO:
+            pasos.append(texto)
+
+    def _tomar_pasos(self) -> List[str]:
+        """Return los pasos del turno y deja la lista vacía para el siguiente."""
+        pasos = list(getattr(self, "_pasos_del_turno", None) or [])
+        self._pasos_del_turno = []
+        return pasos
 
     def _stop_progress(self) -> None:
         """Retira el reportero y limpia la línea de estado.
@@ -447,6 +489,26 @@ class Bridge(QObject):
         except Exception as e:
             logger.warning(f"No se pudo limpiar la línea de progreso: {e}")
 
+    def _titular_si_es_el_primer_turno(self) -> None:
+        """REQ-053 — con el primer turno ya guardado, le pide al modelo un título corto.
+
+        Va en su propio `run_async`, después de refrescar la barra: la conversación
+        aparece enseguida con el título derivado y, un par de segundos después, con el
+        corto. Un modelo caído no cambia nada: `titular_si_corresponde` nunca lanza.
+        """
+        pendiente, self._titulo_pendiente = self._titulo_pendiente, None
+        if not pendiente:
+            return
+        from core import titulos
+
+        conversation_id, texto_usuario, texto_asistente = pendiente
+        run_async(
+            titulos.titular_si_corresponde,
+            lambda puesto: self._load_conversations(offset=0) if puesto else None,
+            lambda mensaje: logger.info(f"Sin título automático: {mensaje}"),
+            conversation_id, texto_usuario, texto_asistente, user_id=OWNER_USER_ID,
+        )
+
     def _tras_guardar_turno(self, _resultado=None) -> None:
         """Con el turno ya en la base: la barra lateral se refresca y, si una herramienta
         pidió guardar «este chat» en un proyecto cuando todavía no tenía turnos
@@ -463,6 +525,7 @@ class Bridge(QObject):
                 logger.error(f"No se pudo guardar el chat en el proyecto {project_id}: {e}")
         self._load_conversations(offset=0)
         self._emit_projects_loaded()   # REQ-051: un tool del turno pudo mover este chat
+        self._titular_si_es_el_primer_turno()
 
     def _on_resolve_done(self, resolution) -> None:
         from ai.memory_manager import memory
@@ -485,10 +548,14 @@ class Bridge(QObject):
         result_text = resolution.text
         self.message_appended.emit(json.dumps({
             "role": "assistant", "html": render_markdown(result_text), "timestamp": _now_iso(),
+            "pasos": self._tomar_pasos(),
         }))
         self.typing_stopped.emit()
 
         conversation_id = self._ensure_conversation_id()
+        if self._primer_turno:
+            self._titulo_pendiente = (conversation_id, self._pending_user_text, result_text)
+        self._primer_turno = False
         run_async(
             memory.store_turn, self._tras_guardar_turno, None,
             self._pending_user_text, result_text, conversation_id,
@@ -577,6 +644,7 @@ class Bridge(QObject):
         self.message_appended.emit(json.dumps({
             "role": "assistant", "html": render_markdown(f"Error: {message}"),
             "timestamp": _now_iso(),
+            "pasos": self._tomar_pasos(),   # lo que alcanzó a hacer antes de fallar
         }))
         self.typing_stopped.emit()
         self._pending_user_text = ""

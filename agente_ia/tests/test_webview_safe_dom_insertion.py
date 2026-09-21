@@ -37,7 +37,7 @@ _MUST_NOT_USE_INNERHTML = [
     "toasts.js", "terminal_panel.js",
     # REQ-052: el Mapa pinta nombres de servidores MCP y de flujos (configuración y
     # comandos dictados); la marca se arma con createElementNS.
-    "map_panel.js", "sidebar_projects.js",
+    "map_panel.js", "sidebar_projects.js", "sugerencias.js",
 ]
 
 _UNSAFE_PATTERN = re.compile(r"\.innerHTML\s*=|insertAdjacentHTML\s*\(")

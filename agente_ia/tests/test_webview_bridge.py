@@ -1353,3 +1353,64 @@ def test_encender_la_autonomia_no_es_una_herramienta_del_agente():
     assert not [n for n in nombres if "autonom" in n.lower()], (
         "no puede existir una tool que encienda el modo autonomía"
     )
+
+
+# ---------------------------------------------------------------------------
+# REQ-053: los pasos del turno viajan con la respuesta
+# ---------------------------------------------------------------------------
+
+def test_los_pasos_del_turno_llegan_con_la_respuesta_y_no_se_arrastran(bridge, monkeypatch):
+    """Lo que el reportero de progreso cuenta durante el turno (las herramientas) va en
+    `pasos` del mensaje del agente; «Pensando» y «Entendiendo…» no son pasos; dos avisos
+    iguales seguidos cuentan una vez; y el turno siguiente arranca en cero."""
+    from ai.memory_manager import memory
+    from core import progress
+
+    def resolve_falso(*a, **k):
+        progress.report("Entendiendo lo que me pides")
+        progress.report("Pensando")
+        progress.report("Buscando en internet: clima Bogotá")
+        progress.report("Buscando en internet: clima Bogotá")
+        progress.report("Pensando (2)")
+        progress.report("Leyendo la página: https://ejemplo.com")
+        return SimpleNamespace(text="18 grados", matched_by="llm")
+
+    monkeypatch.setattr("core.resolution.resolve", resolve_falso)
+    monkeypatch.setattr(memory, "store_turn", lambda *a, **k: None)
+    monkeypatch.setattr(memory, "new_conversation_id", lambda: "c-1")
+    monkeypatch.setattr(memory, "list_conversations", lambda **k: [])
+
+    messages = []
+    bridge.message_appended.connect(lambda j: messages.append(json.loads(j)))
+
+    bridge.send_message("qué clima hace")
+    respuesta = messages[-1]
+    assert respuesta["role"] == "assistant"
+    assert respuesta["pasos"] == [
+        "Buscando en internet: clima Bogotá",
+        "Leyendo la página: https://ejemplo.com",
+    ]
+    assert "pasos" not in messages[0]          # el eco del usuario no lleva pasos
+
+    monkeypatch.setattr("core.resolution.resolve",
+                        lambda *a, **k: SimpleNamespace(text="hola", matched_by="llm"))
+    bridge.send_message("hola")
+    assert messages[-1]["pasos"] == []
+
+
+def test_un_turno_que_falla_entrega_los_pasos_que_alcanzo(bridge, monkeypatch):
+    from core import progress
+
+    def resolve_que_explota(*a, **k):
+        progress.report("Buscando en internet: algo")
+        raise RuntimeError("sin red")
+
+    monkeypatch.setattr("core.resolution.resolve", resolve_que_explota)
+    messages = []
+    bridge.message_appended.connect(lambda j: messages.append(json.loads(j)))
+
+    bridge.send_message("buscá algo")
+
+    assert "Error" in messages[-1]["html"]
+    assert messages[-1]["pasos"] == ["Buscando en internet: algo"]
+    assert bridge._pasos_del_turno == []

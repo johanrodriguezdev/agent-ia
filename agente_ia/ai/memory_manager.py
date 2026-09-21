@@ -905,6 +905,23 @@ class UnifiedMemory:
             logger.error(f"Error renombrando conversación: {e}")
             return False
 
+    def get_conversation_title(self, conversation_id: str, user_id: str = "default") -> str:
+        """Return el título PROPIO de una conversación (puesto a mano o por
+        `core/titulos.py`), o "" si solo tiene el derivado del primer mensaje."""
+        if not conversation_id:
+            return ""
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                row = conn.execute(
+                    """SELECT title FROM conversation_titles
+                       WHERE conversation_id = ? AND user_id = ?""",
+                    (conversation_id, user_id),
+                ).fetchone()
+            return row[0] if row and row[0] else ""
+        except Exception as e:
+            logger.error(f"Error consultando el título de la conversación: {e}")
+            return ""
+
     def search_conversations(self, query: str, user_id: str = "default",
                              limit: int = 30) -> List[Dict[str, Any]]:
         """Busca DENTRO de lo que se dijo, no solo en los títulos.

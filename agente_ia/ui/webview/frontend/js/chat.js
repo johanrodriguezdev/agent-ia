@@ -53,6 +53,12 @@ function buildMessageNode(item) {
   const wrapper = document.createElement("div");
   wrapper.className = `message msg-${item.role || "assistant"}`;
 
+  // REQ-053 — qué hizo el agente para responder (las herramientas que usó), plegado
+  // encima de la respuesta. Solo llega en el turno en vivo; el historial no lo guarda.
+  if ((item.role || "assistant") === "assistant" && Array.isArray(item.pasos) && item.pasos.length) {
+    wrapper.appendChild(buildPasos(item.pasos));
+  }
+
   const bubble = document.createElement("div");
   bubble.className = "bubble";
   // CA-13, §5.2: único campo insertado vía innerHTML — ya sanitizado server-side.
@@ -104,6 +110,37 @@ async function copiarAlPortapapeles(texto) {
       return false;
     }
   }
+}
+
+/** Los pasos del turno: «Buscando en internet: clima Bogotá», «Leyendo la página: …».
+ *  Cada línea la compuso Python con datos del usuario (su consulta, una URL): va por
+ *  textContent, nunca innerHTML (§10.1). */
+function buildPasos(pasos) {
+  const detalles = document.createElement("details");
+  detalles.className = "msg-pasos";
+
+  const resumen = document.createElement("summary");
+  resumen.className = "msg-pasos-resumen";
+  resumen.appendChild(icon("chevron", "ic-sm msg-pasos-chevron"));
+  const texto = document.createElement("span");
+  texto.textContent = pasos.length === 1 ? "1 paso" : `${pasos.length} pasos`;
+  resumen.appendChild(texto);
+  const vistazo = document.createElement("span");
+  vistazo.className = "msg-pasos-vistazo";
+  vistazo.textContent = pasos.map((p) => p.split(":")[0]).slice(0, 3).join(" · ")
+                      + (pasos.length > 3 ? " · …" : "");
+  resumen.appendChild(vistazo);
+  detalles.appendChild(resumen);
+
+  const lista = document.createElement("ol");
+  lista.className = "msg-pasos-lista";
+  for (const paso of pasos) {
+    const li = document.createElement("li");
+    li.textContent = paso;
+    lista.appendChild(li);
+  }
+  detalles.appendChild(lista);
+  return detalles;
 }
 
 function botonDeAccion(nombreIcono, etiqueta, alHacerClick) {

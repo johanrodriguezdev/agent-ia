@@ -219,6 +219,10 @@ def _bridge_con_worker(worker=None):
     # sin `__init__`, leer uno que no existe lanza RuntimeError, no AttributeError).
     bridge._turno_id = None
     bridge._turno_cancelado_id = None
+    # REQ-053 — los pasos del turno y la marca de primer turno, por lo mismo.
+    bridge._pasos_del_turno = []
+    bridge._primer_turno = False
+    bridge._titulo_pendiente = None
     return bridge
 
 

@@ -1082,6 +1082,67 @@ def test_la_marca_reemplaza_a_la_inicial_en_la_barra_y_en_la_pantalla_vacia(vent
     assert _run_js(page, "document.getElementById('empty-state-avatar').textContent.trim()") == ""
 
 
+# ---------------------------------------------------------------------------
+# REQ-053: los pasos del turno, plegados encima de la respuesta
+# ---------------------------------------------------------------------------
+
+def test_la_respuesta_muestra_sus_pasos_plegados_y_como_texto(ventana, qtbot):
+    window, page, _ = ventana
+
+    # Un paso trae texto que vino del usuario (su consulta): tiene que verse como texto,
+    # nunca interpretarse como HTML (§10.1).
+    window.bridge.message_appended.emit(json.dumps({
+        "role": "assistant", "html": "<p>Listo.</p>", "timestamp": "2026-09-19T17:00:00",
+        "pasos": ["Buscando en internet: <b>clima</b>", "Leyendo la página: ejemplo.com"],
+    }))
+    _esperar(qtbot, 300)
+
+    assert _run_js(page, "document.querySelector('.msg-pasos').open") is False
+    assert _run_js(page, "document.querySelector('.msg-pasos-resumen span').textContent") == "2 pasos"
+    assert _run_js(page, "document.querySelectorAll('.msg-pasos-lista li').length") == 2
+    assert _run_js(page, "document.querySelector('.msg-pasos-lista li').textContent") == "Buscando en internet: <b>clima</b>"
+    assert _run_js(page, "document.querySelector('.msg-pasos-lista b') === null") is True
+
+    # Sin pasos (respuesta directa, o un turno del historial) no aparece nada.
+    window.bridge.message_appended.emit(json.dumps({
+        "role": "assistant", "html": "<p>Hola.</p>", "timestamp": "2026-09-19T17:00:01", "pasos": [],
+    }))
+    _esperar(qtbot, 300)
+    assert _run_js(page, "document.querySelectorAll('.msg-pasos').length") == 1
+    _sin_errores(page)
+
+
+# ---------------------------------------------------------------------------
+# REQ-053: sugerencias de arranque
+# ---------------------------------------------------------------------------
+
+def test_las_sugerencias_llenan_el_cuadro_sin_enviar_y_se_van_con_el_primer_mensaje(ventana, qtbot):
+    window, page, registro = ventana
+
+    assert _run_js(page, "document.querySelectorAll('#sugerencias .sugerencia').length") == 4
+    assert _run_js(page, "getComputedStyle(document.getElementById('sugerencias')).display") == "flex"
+    frase = _run_js(page, "document.querySelector('#sugerencias .sugerencia').title")
+    assert frase
+
+    _click(page, "document.querySelector('#sugerencias .sugerencia')")
+    _esperar(qtbot, 200)
+    assert _run_js(page, "document.getElementById('composer-input').value") == frase
+    assert registro["mensajes"] == []          # se escribe, no se manda
+
+    # Con un mensaje en pantalla las sugerencias desaparecen; en un chat nuevo vuelven.
+    window.bridge.message_appended.emit(json.dumps({
+        "role": "user", "html": "<p>hola</p>", "timestamp": "2026-09-19T17:00:00",
+    }))
+    _esperar(qtbot, 300)
+    assert _run_js(page, "getComputedStyle(document.getElementById('sugerencias')).display") == "none"
+
+    window.bridge.conversation_cleared.emit()
+    _esperar(qtbot, 300)
+    assert _run_js(page, "getComputedStyle(document.getElementById('sugerencias')).display") == "flex"
+    assert _run_js(page, "document.querySelectorAll('#sugerencias .sugerencia').length") == 4
+    _sin_errores(page)
+
+
 # --------------------------------------------------------------------------- cobertura
 
 def test_todo_boton_con_id_del_html_tiene_su_manejador(ventana):

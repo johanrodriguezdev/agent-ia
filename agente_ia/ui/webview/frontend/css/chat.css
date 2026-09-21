@@ -401,3 +401,67 @@ body.chat-empty #empty-state {
   .msg-viva .bubble::after { animation: none; }
 }
 
+/* -------------------------------------------------------------- pasos del turno (REQ-053) */
+
+/* Plegado por defecto: una línea discreta encima de la respuesta que dice cuántas cosas
+   hizo y cuáles, sin que haya que abrirla para enterarse de lo básico. */
+.msg-pasos {
+  align-self: flex-start;
+  max-width: 100%;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.msg-pasos-resumen {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  list-style: none;
+  cursor: pointer;
+  padding: 3px 8px 3px 4px;
+  border-radius: var(--radius-pill);
+  user-select: none;
+  transition: background-color 140ms, color 140ms;
+}
+
+.msg-pasos-resumen::-webkit-details-marker { display: none; }
+
+.msg-pasos-resumen:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.msg-pasos-chevron {
+  transform: rotate(-90deg);
+  transition: transform 140ms;
+}
+
+.msg-pasos[open] .msg-pasos-chevron {
+  transform: none;
+}
+
+.msg-pasos-vistazo {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.8;
+}
+
+.msg-pasos[open] .msg-pasos-vistazo { display: none; }
+
+.msg-pasos-lista {
+  margin: 4px 0 6px 12px;
+  padding-left: 18px;
+  list-style: decimal;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border-left: 2px solid var(--border);
+}
+
+.msg-pasos-lista li {
+  padding-left: 2px;
+  overflow-wrap: anywhere;
+}

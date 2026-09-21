@@ -172,3 +172,29 @@ def test_una_herramienta_denegada_no_anuncia_que_la_esta_haciendo(monkeypatch):
         execute_tool("tool_denegada", {}, ChannelType.DESKTOP, "owner")
 
     assert recibidos == []
+
+
+def test_una_herramienta_remota_se_anuncia_con_su_servidor():
+    """REQ-053 — `mcp__notion__search` no le dice nada a nadie; «Consultando notion» sí."""
+    recibidos = []
+    progress.register_reporter(recibidos.append)
+
+    progress.report_tool("mcp__notion__search")
+    progress.report_tool("mcp__docs__read_page", "Cierre Q3")
+
+    assert recibidos == ["Consultando notion: search", "Consultando docs: read_page: Cierre Q3"]
+
+
+def test_las_herramientas_de_archivos_y_terminal_tienen_texto_propio():
+    recibidos = []
+    progress.register_reporter(recibidos.append)
+
+    progress.report_tool("file_read", "C:/proyecto/main.py")
+    progress.report_tool("terminal_run_command", "git status")
+    progress.report_tool("connection_map")
+
+    assert recibidos == [
+        "Leyendo el archivo: C:/proyecto/main.py",
+        "Ejecutando en la terminal: git status",
+        "Mirando qué hay conectado",
+    ]
