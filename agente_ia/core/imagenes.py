@@ -77,19 +77,15 @@ def es_imagen(ruta: Optional[str]) -> bool:
     return os.path.splitext(ruta)[1].lower() in EXTENSIONES_DE_IMAGEN
 
 
-def media_type(ruta: str) -> str:
-    """Return el tipo MIME real de la imagen, por sus primeros bytes.
-
-    Si no se reconoce la firma se cae a la extensión, y si tampoco, a `image/jpeg`, que es
-    lo que se asumía siempre antes de este módulo.
-    """
+def _tipo_por_firma(ruta: str) -> Optional[str]:
+    """Return el tipo MIME según los primeros bytes del archivo, o None si no es una de
+    las cuatro firmas conocidas (o no se puede leer)."""
     try:
         with open(ruta, "rb") as f:
             cabecera = f.read(12)
     except OSError as e:
         logger.warning(f"no se pudo leer la cabecera de la imagen '{ruta}': {e}")
-        cabecera = b""
-
+        return None
     if cabecera.startswith(b"\x89PNG\r\n\x1a\n"):
         return "image/png"
     if cabecera.startswith(b"\xff\xd8\xff"):
@@ -98,7 +94,17 @@ def media_type(ruta: str) -> str:
         return "image/gif"
     if cabecera[:4] == b"RIFF" and cabecera[8:12] == b"WEBP":
         return "image/webp"
-    return _MEDIA_TYPE_POR_EXTENSION.get(os.path.splitext(ruta)[1].lower(), "image/jpeg")
+    return None
+
+
+def media_type(ruta: str) -> str:
+    """Return el tipo MIME real de la imagen, por sus primeros bytes.
+
+    Si no se reconoce la firma se cae a la extensión, y si tampoco, a `image/jpeg`, que es
+    lo que se asumía siempre antes de este módulo.
+    """
+    return (_tipo_por_firma(ruta)
+            or _MEDIA_TYPE_POR_EXTENSION.get(os.path.splitext(ruta)[1].lower(), "image/jpeg"))
 
 
 def _abrir(ruta: str):
@@ -227,6 +233,72 @@ def ruta_para_imagen_pegada(user_id: str = "owner", extension: str = ".png") -> 
         ruta = os.path.join(carpeta, f"{base}_{contador}{extension}")
         contador += 1
     return ruta
+
+
+class ImagenRechazada(Exception):
+    """La ruta no es una imagen que el agente pueda mirar; el motivo se le puede decir al
+    modelo tal cual."""
+
+
+def _raices_para_mirar() -> list:
+    """Return dónde puede haber imágenes que el agente mire por instrucción: la carpeta
+    personal del usuario, los espacios de trabajo habilitados y las imágenes pegadas."""
+    raices = [os.path.expanduser("~")]
+    try:
+        from core.workspace_config import cargar_raices
+
+        raices += list(cargar_raices())
+    except Exception as e:
+        logger.debug(f"no se pudieron leer los espacios de trabajo: {e}")
+    raiz_app = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    raices.append(os.path.join(raiz_app, "users_data"))
+    return raices
+
+
+def resolver_para_mirar(ruta: Optional[str]) -> str:
+    """Return la ruta real de una imagen que el agente puede mirar (REQ-062).
+
+    Levanta `ImagenRechazada` si no hay ruta, el archivo no existe, no es una imagen (por
+    extensión Y por firma), o está fuera de la carpeta personal, de los espacios de
+    trabajo habilitados y de las imágenes pegadas; y siempre si cae en una carpeta de
+    configuración (`.ssh`, `AppData`, …). Es el mismo criterio que `core/documentos.py`
+    para escribir, aplicado a leer: mirar una imagen es mandársela al proveedor del modelo.
+    """
+    from core.documentos import CARPETAS_VEDADAS
+
+    texto = str(ruta or "").strip().strip('"')
+    if not texto:
+        raise ImagenRechazada("Necesito la ruta de la imagen.")
+    candidata = os.path.expanduser(texto)
+    if not os.path.isabs(candidata):
+        # Relativa: al Escritorio, que es donde suele estar lo que se acaba de guardar.
+        from core.documentos import _escritorio
+
+        candidata = os.path.join(str(_escritorio()), candidata)
+    real = os.path.realpath(candidata)
+    if not os.path.isfile(real):
+        raise ImagenRechazada(f"No encuentro ninguna imagen en «{texto}».")
+    if not es_imagen(real):
+        raise ImagenRechazada(f"«{os.path.basename(real)}» no es una imagen (png, jpg, gif o webp).")
+    if _tipo_por_firma(real) is None:
+        raise ImagenRechazada(f"«{os.path.basename(real)}» tiene extensión de imagen pero no lo es.")
+
+    real_bajo = real.lower()
+    for base in _raices_para_mirar():
+        base_real = os.path.realpath(base).lower()
+        try:
+            if os.path.commonpath([real_bajo, base_real]) == base_real:
+                break
+        except ValueError:
+            continue
+    else:
+        raise ImagenRechazada(
+            "Solo miro imágenes de tu carpeta personal o de un espacio de trabajo habilitado."
+        )
+    partes = {p.lower() for p in real.split(os.sep)}
+    if partes & CARPETAS_VEDADAS:
+        raise ImagenRechazada("Esa carpeta es de configuración, no de imágenes.")
+    return real
 
 
 def marcar_adjunto(texto: str, ruta: str) -> str:

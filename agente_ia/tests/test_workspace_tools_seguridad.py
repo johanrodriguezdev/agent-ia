@@ -112,11 +112,16 @@ NIVELES_REQ056 = {
     "chat_export_current": RiskLevel.YELLOW,
 }
 
+#: REQ-062 — mirar una imagen del disco. Verde (lectura) y solo escritorio, como `file_read`.
+NIVELES_REQ062 = {
+    "image_look": RiskLevel.GREEN,
+}
+
 #: Todas juntas. Las pruebas de canal recorren todas; las que fijan el alcance de REQ-029
 #: (el modo "codigo") siguen usando solo las 8 de v1.
 TODAS = {**NIVELES_ESPERADOS, **NIVELES_REQ030, **NIVELES_REQ032, **NIVELES_REQ034,
          **NIVELES_REQ035, **NIVELES_REQ036, **NIVELES_REQ040, **NIVELES_REQ043,
-         **NIVELES_REQ051, **NIVELES_REQ052, **NIVELES_REQ056}
+         **NIVELES_REQ051, **NIVELES_REQ052, **NIVELES_REQ056, **NIVELES_REQ062}
 
 TODOS_LOS_CANALES = [
     ChannelType.DESKTOP, ChannelType.TELEGRAM, ChannelType.DISCORD, ChannelType.VOICE,

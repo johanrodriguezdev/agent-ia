@@ -174,3 +174,61 @@ def test_separar_adjunto_deja_en_paz_un_texto_sin_marcador_o_con_uno_en_medio():
 
 def test_separar_adjunto_con_solo_el_marcador_deja_texto_vacio():
     assert imagenes.separar_adjunto("[Imagen adjunta: C:\\x.png]") == ("", "C:\\x.png")
+
+
+# --------------------------------------------------------------------------- resolver_para_mirar (REQ-062)
+
+@pytest.fixture
+def raices_de_prueba(tmp_path, monkeypatch):
+    """La «carpeta personal» es `tmp_path/home`; los espacios de trabajo, `tmp_path/repo`."""
+    home = tmp_path / "home"
+    repo = tmp_path / "repo"
+    home.mkdir()
+    repo.mkdir()
+    monkeypatch.setattr(imagenes, "_raices_para_mirar", lambda: [str(home), str(repo)])
+    import core.documentos as documentos
+    monkeypatch.setattr(documentos, "_escritorio", lambda: home / "Desktop")
+    # `tmp_path` vive bajo AppData: se deja solo `.ssh` como carpeta vedada para la prueba.
+    monkeypatch.setattr(documentos, "CARPETAS_VEDADAS", frozenset({".ssh"}))
+    (home / "Desktop").mkdir()
+    return home, repo
+
+
+def test_resuelve_una_imagen_real_dentro_de_la_carpeta_personal(raices_de_prueba):
+    home, _ = raices_de_prueba
+    ruta = _png(home / "Desktop" / "captura.png")
+    assert imagenes.resolver_para_mirar(ruta) == os.path.realpath(ruta)
+    # Relativa: al Escritorio.
+    assert imagenes.resolver_para_mirar("captura.png") == os.path.realpath(ruta)
+    # Con comillas alrededor, como las pega el modelo a veces.
+    assert imagenes.resolver_para_mirar(f'"{ruta}"') == os.path.realpath(ruta)
+
+
+def test_rechaza_lo_que_no_es_imagen_o_no_existe(raices_de_prueba):
+    home, _ = raices_de_prueba
+    with pytest.raises(imagenes.ImagenRechazada, match="No encuentro"):
+        imagenes.resolver_para_mirar(str(home / "nada.png"))
+    texto = home / "notas.txt"
+    texto.write_text("hola", encoding="utf-8")
+    with pytest.raises(imagenes.ImagenRechazada, match="no es una imagen"):
+        imagenes.resolver_para_mirar(str(texto))
+    disfrazado = home / "virus.png"
+    disfrazado.write_bytes(b"MZ no soy png")
+    with pytest.raises(imagenes.ImagenRechazada, match="no lo es"):
+        imagenes.resolver_para_mirar(str(disfrazado))
+    with pytest.raises(imagenes.ImagenRechazada, match="Necesito la ruta"):
+        imagenes.resolver_para_mirar("")
+
+
+def test_rechaza_fuera_de_las_raices_y_en_carpetas_de_configuracion(raices_de_prueba, tmp_path):
+    home, repo = raices_de_prueba
+    afuera = _png(tmp_path / "afuera.png")
+    with pytest.raises(imagenes.ImagenRechazada, match="Solo miro"):
+        imagenes.resolver_para_mirar(afuera)
+    (home / ".ssh").mkdir()
+    secreta = _png(home / ".ssh" / "clave.png")
+    with pytest.raises(imagenes.ImagenRechazada, match="configuración"):
+        imagenes.resolver_para_mirar(secreta)
+    # Un espacio de trabajo habilitado sí.
+    en_repo = _png(repo / "docs" / "diagrama.png") if (repo / "docs").mkdir() is None else None
+    assert imagenes.resolver_para_mirar(en_repo) == os.path.realpath(en_repo)

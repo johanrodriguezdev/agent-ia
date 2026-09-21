@@ -10,6 +10,7 @@ directo sin pasar antes por acá.
 """
 
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Optional
@@ -282,6 +283,7 @@ _PARAM_DE_DETALLE = {
     # ver pasar por pantalla mientras el agente trabaja sobre un repo.
     "file_list": "path",
     "file_read": "path",
+    "image_look": "path",   # REQ-062
     "file_search": "query",
     "file_write": "path",
     "file_edit": "path",
@@ -3235,6 +3237,72 @@ register_tool(ToolSpec(
     },
     risk_level=RiskLevel.GREEN,
     invoke=_chat_project_assign_invoke,
+))
+
+
+# ── REQ-062 — «mirá esta imagen» ──────────────────────────────────────────────────────────
+#
+# Con REQ-054 el agente ve lo que se pega en el chat; esto es lo mismo por instrucción:
+# «mirá la captura que está en el Escritorio y decime qué error es», «describí
+# fotos/gato.jpg». La imagen va al modelo de visión (Configuración → Modelos → «Ver
+# imágenes», REQ-061) en una llamada propia, fuera del streaming del turno, igual que el
+# análisis de pantalla. GREEN y solo escritorio, por lo mismo que `file_read`: leer un
+# archivo es mandárselo al proveedor, y verde no puede significar "alcanzable desde
+# Telegram" (por Telegram las fotos se mandan al chat y ya).
+
+_IMAGE_LOOK_SYSTEM = (
+    "Sos los ojos de un asistente: describís lo que hay en la imagen con precisión y "
+    "transcribís el texto que se lea (mensajes de error, carteles, cifras) tal cual. "
+    "Si te hacen una pregunta concreta, respondés eso primero. Sin inventar lo que no se ve."
+)
+
+
+def _image_look_invoke(params: dict) -> str:
+    from ai.llm_provider import es_respuesta_de_fallo, generate_response
+    from core.imagenes import ImagenRechazada, resolver_para_mirar
+
+    try:
+        ruta = resolver_para_mirar(params.get("path"))
+    except ImagenRechazada as e:
+        return str(e)
+    pregunta = " ".join(str(params.get("question") or "").split()) or "¿Qué hay en esta imagen?"
+    try:
+        respuesta = generate_response(
+            [{"role": "user", "content": pregunta}], _IMAGE_LOOK_SYSTEM,
+            image_path=ruta, tarea="razonamiento",
+        )
+    except Exception as e:
+        logger.error(f"'image_look' falló: {type(e).__name__}: {e}")
+        return "No pude mirar la imagen: el modelo de visión no respondió."
+    texto = respuesta if isinstance(respuesta, str) else getattr(respuesta, "text", "")
+    if not texto or es_respuesta_de_fallo(texto):
+        return ("No pude mirar la imagen: no hay un modelo que vea imágenes disponible. "
+                "Se elige en Configuración → Modelos → «Ver imágenes».")
+    return f"Imagen «{os.path.basename(ruta)}»:\n{texto.strip()}"
+
+
+register_tool(ToolSpec(
+    name="image_look",
+    description=(
+        "Mira una imagen que está en el equipo (png, jpg, gif, webp) y describe lo que hay "
+        "o responde una pregunta sobre ella: una captura de pantalla con un error, una foto, "
+        "un cartel. Usala cuando el usuario nombre un archivo de imagen o diga «mirá la "
+        "captura del Escritorio». Solo dentro de su carpeta personal o de un espacio de "
+        "trabajo habilitado. Para una imagen que el usuario pegó en el chat no hace falta: "
+        "esa ya la ves."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "path": {"type": "string",
+                     "description": "Ruta de la imagen, absoluta o relativa al Escritorio."},
+            "question": {"type": "string",
+                         "description": "Qué mirar o qué responder sobre la imagen (opcional)."},
+        },
+        "required": ["path"],
+    },
+    risk_level=RiskLevel.GREEN,
+    invoke=_image_look_invoke,
 ))
 
 

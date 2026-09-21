@@ -83,6 +83,7 @@ _TEXTOS_POR_HERRAMIENTA = {
     # REQ-053 — el resto de lo que el agente hace seguido. Antes todo esto salía como
     # "Usando file_read", que en la lista de pasos de la respuesta no le dice nada a nadie.
     "file_read": "Leyendo el archivo",
+    "image_look": "Mirando la imagen",   # REQ-062
     "file_list": "Mirando la carpeta",
     "file_search": "Buscando archivos",
     "file_write": "Escribiendo el archivo",

@@ -189,6 +189,8 @@ DESKTOP_ONLY_ACTIONS: set[str] = {
     "chat_project_assign_current",
     # REQ-056 — exportar «este chat» a un archivo: misma razón, y escribe en el equipo.
     "chat_export_current",
+    # REQ-062 — mirar una imagen del disco es mandársela al proveedor: como `file_read`.
+    "image_look",
     # REQ-052 — el Mapa de conexiones en texto. Lectura sin secretos, pero cuenta qué hay
     # conectado y con qué: mismo criterio que `mcp_list_servers`.
     "connection_map",

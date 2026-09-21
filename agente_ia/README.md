@@ -178,6 +178,10 @@ Si tu modelo principal no ve imágenes, elige uno que sí en **Configuración �
 imágenes** (Gemini, Claude, GPT-4o…): con una imagen de por medio el turno va a ese modelo.
 Sin nada elegido ahí, vale `vision_provider` de `config.json` (por ejemplo `gemini`).
 
+También por instrucción, sin pegar nada: «mirá la captura que está en el Escritorio y
+decime qué error es», «describí fotos/gato.jpg». Solo mira imágenes de tu carpeta
+personal o de un espacio de trabajo habilitado, y nunca de carpetas de configuración.
+
 ### Guardar una conversación como archivo
 
 «Guardá esta conversación en un archivo» (o «exportá este chat») deja la conversación
