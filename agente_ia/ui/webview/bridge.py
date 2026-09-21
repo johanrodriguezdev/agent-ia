@@ -719,9 +719,10 @@ class Bridge(QObject):
             return
 
         result_text = resolution.text
+        pasos = self._tomar_pasos()
         self.message_appended.emit(json.dumps({
             "role": "assistant", "html": render_markdown(result_text), "timestamp": _now_iso(),
-            "pasos": self._tomar_pasos(),
+            "pasos": pasos,
         }))
         self.typing_stopped.emit()
         self._avisar_si_no_esta_mirando(result_text)
@@ -731,10 +732,14 @@ class Bridge(QObject):
             self._titulo_pendiente = (conversation_id, self._pending_user_text, result_text)
         self._primer_turno = False
         self._guardando_turno = True
+        # REQ-059 — `pasos` solo si hay: los dobles de `store_turn` con la firma vieja no
+        # conocen el kwarg.
+        extra_turno = {"pasos": pasos} if pasos else {}
         run_async(
             memory.store_turn, self._tras_guardar_turno, self._on_error_guardando_turno,
             self._pending_user_text, result_text, conversation_id,
             user_id=OWNER_USER_ID, matched_by=getattr(resolution, "matched_by", ""),
+            **extra_turno,
         )
         self._pending_user_text = ""
         self._resolution_in_flight = False
@@ -929,10 +934,15 @@ class Bridge(QObject):
                 # REQ-054 — la miniatura o el chip del adjunto también al reabrir el chat.
                 payload.append(self._payload_de_usuario(item.text, item.timestamp, id=item.id))
                 continue
-            payload.append({
+            entrada = {
                 "id": item.id, "role": item.role or "assistant",
                 "html": render_markdown(item.text), "timestamp": item.timestamp,
-            })
+            }
+            # REQ-059 — los pasos guardados con la respuesta, si los hubo.
+            pasos = list(getattr(item, "pasos", None) or [])
+            if pasos:
+                entrada["pasos"] = pasos
+            payload.append(entrada)
         self.turns_loaded.emit(json.dumps(payload))
 
     def _on_turns_error(self, message: str) -> None:

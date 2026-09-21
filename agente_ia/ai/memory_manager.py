@@ -22,7 +22,7 @@ DB_PATH = os.path.join(DB_DIR, "unified_memory.db")
 # desempaquetado posicional de las filas.
 _MEMORY_COLUMNS = (
     "id, user_id, text, importance, category, timestamp, archived, source, "
-    "conversation_id, role"
+    "conversation_id, role, pasos_json"
 )
 
 
@@ -41,6 +41,9 @@ class MemoryItem:
     # que escribe `main.py` (canal CLI/voz) - ver arquitectura-013.md 3.2/3.4.
     conversation_id: Optional[str] = None
     role: Optional[str] = None
+    # REQ-059: los pasos del turno (qué herramientas usó el agente para responder), solo
+    # en filas `assistant` del escritorio. Lista vacía en todo lo demás.
+    pasos: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -69,8 +72,19 @@ def _row_to_item(row) -> MemoryItem:
     return MemoryItem(
         id=row[0], user_id=row[1], text=row[2], importance=row[3], category=row[4],
         timestamp=row[5], archived=bool(row[6]), source=row[7],
-        conversation_id=row[8], role=row[9],
+        conversation_id=row[8], role=row[9], pasos=_pasos_de(row[10]),
     )
+
+
+def _pasos_de(crudo) -> List[str]:
+    """Return la lista de pasos guardada como JSON, o [] si no hay o no se entiende."""
+    if not crudo:
+        return []
+    try:
+        datos = json.loads(crudo)
+    except (TypeError, ValueError):
+        return []
+    return [str(p) for p in datos if isinstance(p, str)] if isinstance(datos, list) else []
 
 class UnifiedMemory:
     _instance = None
@@ -207,7 +221,8 @@ class UnifiedMemory:
         """
         try:
             existing = {row[1] for row in conn.execute("PRAGMA table_info(memories)")}
-            for column in ("conversation_id", "role"):
+            # `pasos_json` (REQ-059): mismo criterio, aditiva y sin reescribir la tabla.
+            for column in ("conversation_id", "role", "pasos_json"):
                 if column not in existing:
                     conn.execute(f"ALTER TABLE memories ADD COLUMN {column} TEXT")
                     logger.info(f"Esquema de memorias migrado: columna '{column}' agregada")
@@ -294,7 +309,7 @@ class UnifiedMemory:
 
     def store_turn(self, user_text: str, assistant_text: str, conversation_id: str,
                    user_id: str = "default", matched_by: str = "",
-                   importance: float = 0.5) -> None:
+                   importance: float = 0.5, pasos: Optional[List[str]] = None) -> None:
         """Persiste un turno completo del canal DESKTOP (REQ-013/CA-09).
 
         Escribe DOS filas `category="interaction"` con el mismo `conversation_id`: el
@@ -318,11 +333,28 @@ class UnifiedMemory:
             logger.warning(f"store_turn(): texto de usuario vacio (conv={conversation_id})")
 
         if assistant_text:
-            self.store(assistant_text, user_id=user_id, category="interaction",
-                       importance=importance, source=f"desktop:{matched_by}",
-                       conversation_id=conversation_id, role="assistant")
+            mem_id = self.store(assistant_text, user_id=user_id, category="interaction",
+                                importance=importance, source=f"desktop:{matched_by}",
+                                conversation_id=conversation_id, role="assistant")
+            # REQ-059 — los pasos del turno viajan con la respuesta: al reabrir el chat se
+            # vuelve a ver qué hizo el agente para contestar. Fuera de `store()` para no
+            # tocar su firma (la usan main.py y los canales).
+            if mem_id is not None and pasos:
+                self._guardar_pasos(mem_id, pasos)
         else:
             logger.warning(f"store_turn(): respuesta vacia (conv={conversation_id})")
+
+    def _guardar_pasos(self, mem_id: int, pasos: List[str]) -> None:
+        """Escribe `pasos` como JSON en la fila `mem_id`. Un fallo se registra y no tumba
+        el guardado del turno, que ya está hecho."""
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute(
+                    "UPDATE memories SET pasos_json = ? WHERE id = ?",
+                    (json.dumps([str(p) for p in pasos][:40], ensure_ascii=False), mem_id),
+                )
+        except Exception as e:
+            logger.error(f"No se pudieron guardar los pasos del turno {mem_id}: {e}")
 
     def list_conversations(self, user_id: str = "default", limit: int = 30,
                            offset: int = 0, sin_proyecto: bool = False) -> List[ConversationSummary]:

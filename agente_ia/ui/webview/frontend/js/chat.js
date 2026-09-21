@@ -56,7 +56,8 @@ function buildMessageNode(item) {
   wrapper.className = `message msg-${item.role || "assistant"}`;
 
   // REQ-053 — qué hizo el agente para responder (las herramientas que usó), plegado
-  // encima de la respuesta. Solo llega en el turno en vivo; el historial no lo guarda.
+  // encima de la respuesta. Llega con el turno en vivo y, desde REQ-059, también con el
+  // historial: se guardan junto a la respuesta.
   if ((item.role || "assistant") === "assistant" && Array.isArray(item.pasos) && item.pasos.length) {
     wrapper.appendChild(buildPasos(item.pasos));
   }

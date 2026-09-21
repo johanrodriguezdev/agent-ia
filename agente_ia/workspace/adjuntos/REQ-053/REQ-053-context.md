@@ -82,3 +82,6 @@ mejorando». Elegidas por criterio propio: lo que más se nota en el día a día
 
 ## Log de transiciones
 2026-09-19 | — → NUEVO → LISTO_PARA_COMMIT | conversación principal | Implementado y probado en la misma sesión.
+
+## Actualización 2026-09-20 — REQ-059
+Los pasos ahora sí sobreviven a recargar la conversación: se guardan con la respuesta (`pasos_json` en `memories`) y vuelven en `turns_loaded`. Ver `workspace/adjuntos/REQ-059/`.
