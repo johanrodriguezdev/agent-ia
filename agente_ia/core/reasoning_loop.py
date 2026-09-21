@@ -26,6 +26,7 @@ Más una llamada de cierre sin herramientas (`_llamada_de_cierre()`) que redacta
 respuesta con lo reunido cuando el presupuesto se agota o una acción se deniega.
 """
 import logging
+import os
 from typing import Optional
 
 from agents.tool_registry import execute_tool
@@ -484,7 +485,7 @@ _ejecutar_vuelta = ejecutar_vuelta
 
 def _llamada_de_cierre(
     task: str, prior_turns: list[dict], historial: list[dict], instruccion: str,
-    system_prompt: str, tarea: str, aviso: dict, canal=None,
+    system_prompt: str, tarea: str, aviso: dict, canal=None, image_path: Optional[str] = None,
 ) -> Optional[str]:
     """Una última llamada al modelo SIN herramientas para que redacte con lo que reunió.
 
@@ -494,7 +495,7 @@ def _llamada_de_cierre(
     """
     return cerrar_sin_herramientas(
         _mensajes_del_turno(task, prior_turns, historial), instruccion,
-        system_prompt, tarea, aviso, canal=canal,
+        system_prompt, tarea, aviso, canal=canal, image_path=image_path,
     )
 
 
@@ -546,7 +547,8 @@ def cerrar_sin_herramientas(
 
 def run(task: str, channel, user_id: str = "default", agent_name: str = "reasoning_loop",
         estado: Optional[dict] = None, modo: Optional[str] = None,
-        prior_turns: Optional[list[dict]] = None) -> str:
+        prior_turns: Optional[list[dict]] = None,
+        image_path: Optional[str] = None) -> str:
     """Punto de entrada del bucle de razonamiento.
 
     `estado`, si se pasa, es un dict que el bucle RELLENA: `{"denied": True}` cuando corto
@@ -567,6 +569,13 @@ def run(task: str, channel, user_id: str = "default", agent_name: str = "reasoni
     Se resuelve acá mismo con `get_mode()` (fail-safe: un id vacío o desconocido equivale
     a "sin modo") y de ahí salen tanto el catálogo priorizado como la `tarea` que rutea
     esta llamada.
+
+    `image_path` (REQ-054): la imagen que el usuario adjuntó o pegó en ESTE turno, o
+    `None`. Va en cada vuelta y en el cierre, igual que por Telegram (`ai/claude_brain.py`):
+    `generate_response` la pega al último mensaje de texto del usuario (CA-09 de REQ-027),
+    nunca al de resultados de herramientas, y con ella de por medio el enrutado va al
+    `vision_provider`. Solo el turno en que llega la ve; en los siguientes queda el
+    marcador «[Imagen adjunta: …]» en el texto.
     """
     modo_def = get_mode(modo)
     resolved_channel = security_manager.resolve_channel(channel)
@@ -599,6 +608,11 @@ def run(task: str, channel, user_id: str = "default", agent_name: str = "reasoni
     prior_turns = acotar_turnos(prior_turns) if prior_turns is not None \
         else _load_prior_turns(agent_name, user_id)
 
+    if image_path:
+        # REQ-054 — queda como paso del turno («1 paso · Mirando la imagen»): mirar una
+        # imagen es algo que el agente hizo para contestar, igual que leer una página.
+        progress_report(f"Mirando la imagen: {os.path.basename(image_path)}")
+
     for call_number in range(1, presupuesto + 1):
         # Punto de corte del boton de detener: antes de gastar otra llamada al modelo o
         # ejecutar otra herramienta. Es donde parar es seguro — no deja nada a medias.
@@ -617,6 +631,7 @@ def run(task: str, channel, user_id: str = "default", agent_name: str = "reasoni
         with streaming.permitido(), _tope_de_salida_del_canal(resolved_channel):
             response = generate_response(
                 _mensajes_del_turno(task, prior_turns, historial), system_prompt,
+                image_path=image_path,
                 tools=tools,
                 tarea=tarea,
                 aviso=aviso_cambio,   # REQ-022/CA-12
@@ -664,7 +679,7 @@ def run(task: str, channel, user_id: str = "default", agent_name: str = "reasoni
             task, prior_turns, historial,
             _INSTRUCCION_CIERRE_DENEGACION if denegacion is not None
             else _INSTRUCCION_CIERRE_PRESUPUESTO,
-            system_prompt, tarea, aviso_cierre, resolved_channel,
+            system_prompt, tarea, aviso_cierre, resolved_channel, image_path=image_path,
         )
         if cierre:
             final_text = cierre

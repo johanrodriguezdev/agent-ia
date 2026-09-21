@@ -286,3 +286,72 @@ def test_ca06_07_con_openrouter_api_key_configurada_se_intenta_antes_que_ollama(
         ("openrouter", "openrouter/free"),
         ("ollama", llm_provider._MODELO_POR_PROVEEDOR["ollama"]),
     ]
+
+
+# ─────────────────────────────────────────────
+#  REQ-054 — la imagen del turno: tipo real y copia reducida
+# ─────────────────────────────────────────────
+
+def _png_de_prueba(tmp_path, nombre="captura.png", lado=8):
+    import pytest as _pytest
+
+    _pytest.importorskip("PIL")
+    from PIL import Image
+
+    ruta = tmp_path / nombre
+    Image.new("RGB", (lado, lado), (255, 0, 0)).save(ruta, format="PNG")
+    return str(ruta)
+
+
+def test_anthropic_declara_el_media_type_real_de_la_imagen(tmp_path):
+    """Una captura pegada es PNG. Antes el bloque decía siempre `image/jpeg` y la API la
+    rechazaba por no coincidir con el contenido; las fotos de Telegram (JPEG) pasaban."""
+    ruta = _png_de_prueba(tmp_path)
+
+    salida = llm_provider._mensajes_para_anthropic(
+        [{"role": "user", "content": "¿qué dice?"}], ruta,
+    )
+
+    bloque = salida[0]["content"][0]
+    assert bloque["type"] == "image"
+    assert bloque["source"]["media_type"] == "image/png"
+    assert bloque["source"]["data"]
+
+
+def test_openai_declara_el_media_type_real_en_el_data_url(tmp_path):
+    ruta = _png_de_prueba(tmp_path)
+
+    mensaje = llm_provider._ultimo_mensaje_openai(
+        {"role": "user", "content": "¿qué dice?"}, ruta, imagen_como_bloque=True,
+        aviso_sin_vision="",
+    )
+
+    assert mensaje["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+
+
+def test_generate_response_reduce_la_imagen_antes_de_elegir_destino(monkeypatch, tmp_path):
+    """Una imagen de 4K supera lo que aceptan los proveedores: `generate_response` la pasa
+    por `preparar_para_el_modelo` y el adaptador recibe la copia reducida."""
+    from core import imagenes
+
+    ruta = _png_de_prueba(tmp_path, "4k.png", lado=8)
+    monkeypatch.setattr(imagenes, "preparar_para_el_modelo",
+                        lambda r: str(tmp_path / "reducida.png") if r == ruta else r)
+    monkeypatch.setattr(llm_provider, "get_provider_config",
+                        lambda: ("anthropic", "", "", "modelo-x"))
+    monkeypatch.setattr(llm_provider, "destinos_de_tarea", lambda tarea: [])
+    recibidas = []
+
+    def _uncached(prov, messages, system_prompt, image_path, model_name, tools=None):
+        recibidas.append(image_path)
+        return "ok"
+
+    monkeypatch.setattr(llm_provider, "_uncached_call", _uncached)
+    monkeypatch.setattr(llm_provider, "_debe_cachear", lambda tools, messages: False)
+    monkeypatch.setattr(llm_provider.provider_health, "ordenar_por_disponibilidad", lambda c: c)
+    monkeypatch.setattr(llm_provider.provider_health, "registrar_exito", lambda *a, **k: None)
+
+    respuesta = generate_response([{"role": "user", "content": "hola"}], "sys", image_path=ruta)
+
+    assert respuesta == "ok"
+    assert recibidas == [str(tmp_path / "reducida.png")]

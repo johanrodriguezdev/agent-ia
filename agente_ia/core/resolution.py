@@ -658,6 +658,7 @@ def _try_claude(
     claude_fn: Optional[Callable[[str], str]] = None,
     modo: Optional[str] = None,
     historial: Optional[list] = None,
+    image_path: Optional[str] = None,
 ) -> ResolutionResult:
     """Último recurso — siempre responde algo, nunca retorna `None`.
 
@@ -696,11 +697,15 @@ def _try_claude(
     # lo que no es la funcionalidad nueva, sin perder el hilo real de REQ-026.
     # `historial` son los turnos de la conversación ABIERTA (escritorio). Igual que `modo`,
     # solo se pasa si viene: los dobles de test con la firma vieja no lo esperan.
+    # `image_path` (REQ-054): la imagen pegada o adjuntada en este turno de escritorio.
+    # Mismo criterio: solo viaja si hay una.
     extra = {}
     if modo is not None:
         extra["modo"] = modo
     if historial is not None:
         extra["prior_turns"] = historial
+    if image_path:
+        extra["image_path"] = image_path
     result = reasoning_run(text, channel, user_id, estado=estado, **extra)
 
     if estado.get("sin_modelo"):
@@ -850,6 +855,7 @@ def resolve(
     claude_fn: Optional[Callable[[str], str]] = None,
     modo: Optional[str] = None,
     historial: Optional[list] = None,
+    image_path: Optional[str] = None,
 ) -> ResolutionResult:
     """Punto único de resolución de O.R.I.O.N. (CA-01).
 
@@ -865,6 +871,10 @@ def resolve(
     `modo` (REQ-026): id del modo estratégico activo del composer de escritorio, o `None`
     si no hay ninguno. Solo lo lee `_try_claude` — se pasa acá y no más abajo porque
     `resolve()` es el único punto que conoce a todos los resolvers y decide cuál invocar.
+
+    `image_path` (REQ-054): la imagen que el usuario pegó o adjuntó en este turno de
+    escritorio, o `None`. Igual que `modo`, solo la lee `_try_claude`: los demás resolvers
+    trabajan sobre el texto.
     """
     resolved_channel = security_manager.resolve_channel(channel)
     logger.info(f"resolve() canal={resolved_channel.value} user={user_id}: {text[:80]}")
@@ -878,7 +888,7 @@ def resolve(
         try:
             if name == "claude":
                 result = fn(text, resolved_channel, user_id, claude_fn=claude_fn, modo=modo,
-                            historial=historial)
+                            historial=historial, image_path=image_path)
             else:
                 result = fn(text, resolved_channel, user_id)
         except ActionDenied as e:

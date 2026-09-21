@@ -11,6 +11,7 @@
 import { icon } from "./icons.js";
 import { runCommandInTerminal } from "./bridge_client.js";
 import { mostrarAviso } from "./toasts.js";
+import { abrirVisor } from "./visor_imagen.js";
 
 const CLAMP_THRESHOLD = 500; // CA-18
 
@@ -61,8 +62,18 @@ function buildMessageNode(item) {
 
   const bubble = document.createElement("div");
   bubble.className = "bubble";
+  // REQ-054 — el adjunto del mensaje del usuario: la miniatura de la imagen o un chip con
+  // el nombre del archivo. Python ya sacó el marcador «[Imagen adjunta: …]» del `html`.
+  if (item.adjunto && typeof item.adjunto === "object") {
+    bubble.appendChild(buildAdjunto(item.adjunto));
+  }
   // CA-13, §5.2: único campo insertado vía innerHTML — ya sanitizado server-side.
-  bubble.innerHTML = item.html || "";
+  if (item.html) {
+    const cuerpo = document.createElement("div");
+    cuerpo.className = "bubble-texto";
+    cuerpo.innerHTML = item.html;
+    bubble.appendChild(cuerpo);
+  }
   wrapper.appendChild(bubble);
 
   if ((item.role || "assistant") === "assistant") {
@@ -110,6 +121,41 @@ async function copiarAlPortapapeles(texto) {
       return false;
     }
   }
+}
+
+/** REQ-054 — lo que el usuario adjuntó a su mensaje.
+ *
+ *  Con imagen: la miniatura (`data:` URL que armó `core/imagenes.py`), que se abre a tamaño
+ *  completo al hacer click. Sin imagen (un PDF, un .py): un chip con el clip y el nombre.
+ *  Todo por propiedades y textContent; el nombre del archivo lo eligió el usuario, no es
+ *  marcado (§10.1). */
+function buildAdjunto(adjunto) {
+  const nombre = String(adjunto.nombre || "");
+  const miniatura = String(adjunto.miniatura || "");
+  const ruta = String(adjunto.ruta || "");
+
+  if (miniatura.startsWith("data:image/")) {
+    const boton = document.createElement("button");
+    boton.type = "button";
+    boton.className = "bubble-imagen";
+    boton.title = nombre ? `${nombre} — ver a tamaño completo` : "Ver a tamaño completo";
+    boton.setAttribute("aria-label", boton.title);
+    const img = document.createElement("img");
+    img.src = miniatura;
+    img.alt = nombre;
+    img.loading = "lazy";
+    boton.appendChild(img);
+    boton.addEventListener("click", () => abrirVisor(miniatura, nombre, ruta));
+    return boton;
+  }
+
+  const chip = document.createElement("span");
+  chip.className = "bubble-adjunto";
+  chip.appendChild(icon("paperclip", "ic-sm"));
+  const texto = document.createElement("span");
+  texto.textContent = nombre || "archivo adjunto";
+  chip.appendChild(texto);
+  return chip;
 }
 
 /** Los pasos del turno: «Buscando en internet: clima Bogotá», «Leyendo la página: …».

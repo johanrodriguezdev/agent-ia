@@ -84,6 +84,11 @@ export function onWakeStateChanged(cb) { _bridge.wake_state_changed.connect(cb);
 export function onThemeChanged(cb) { _bridge.theme_changed.connect(cb); }
 export function onConfirmationRequested(cb) { _bridge.confirmation_requested.connect(cb); }
 export function onFileAttached(cb) { _bridge.file_attached.connect(cb); }
+// REQ-054 — Ctrl+V con una imagen o un archivo: Python lee el portapapeles del sistema.
+export function pasteFromClipboard() { _bridge.paste_from_clipboard(); }
+export function onAttachmentPreview(cb) { _bridge.attachment_preview.connect(cb); }
+export function requestImage(ruta) { _bridge.request_image(ruta); }
+export function onImageLoaded(cb) { _bridge.image_loaded.connect(cb); }
 export function onChipsLoaded(cb) { _bridge.chips_loaded.connect(cb); }
 export function onErrorOccurred(cb) { _bridge.error_occurred.connect(cb); }
 export function onWindowMaximizedChanged(cb) { _bridge.window_maximized_changed.connect(cb); }

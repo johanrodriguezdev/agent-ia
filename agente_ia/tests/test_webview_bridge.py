@@ -146,6 +146,188 @@ def test_send_message_le_pasa_la_conversacion_a_resolve(bridge, monkeypatch, fak
 
 
 # ---------------------------------------------------------------------------
+# REQ-054: imágenes en el chat de escritorio
+# ---------------------------------------------------------------------------
+
+def _captura(tmp_path, nombre="captura.png"):
+    PIL = pytest.importorskip("PIL")
+    from PIL import Image
+
+    ruta = tmp_path / nombre
+    Image.new("RGB", (12, 8), (10, 200, 10)).save(ruta)
+    return str(ruta)
+
+
+def test_send_message_con_imagen_adjunta_se_la_pasa_a_resolve_y_muestra_la_miniatura(
+    bridge, qtbot, fake_run_async, tmp_path,
+):
+    """El modelo tiene que VER la imagen (`image_path`), y la burbuja del usuario tiene
+    que mostrarla como miniatura en vez de la ruta cruda entre corchetes."""
+    ruta = _captura(tmp_path)
+    bridge._pending_attachment = ruta
+    recibidos = []
+    bridge.message_appended.connect(lambda payload: recibidos.append(json.loads(payload)))
+
+    bridge.send_message("¿qué error es este?")
+
+    llamada = [c for c in fake_run_async if getattr(c["fn"], "__name__", "") == "resolve"][0]
+    assert llamada["kwargs"]["image_path"] == ruta
+    assert llamada["args"][0] == f"¿qué error es este?\n\n[Imagen adjunta: {ruta}]"
+
+    usuario = [m for m in recibidos if m["role"] == "user"][0]
+    assert "Imagen adjunta" not in usuario["html"]
+    assert "¿qué error es este?" in usuario["html"]
+    assert usuario["adjunto"]["nombre"] == "captura.png"
+    assert usuario["adjunto"]["miniatura"].startswith("data:image/")
+
+
+def test_send_message_con_un_archivo_que_no_es_imagen_no_manda_image_path(
+    bridge, fake_run_async, tmp_path,
+):
+    """Los dobles de `resolve` con la firma vieja no conocen el kwarg: solo viaja si hay
+    una imagen. El chip del adjunto sí llega, sin miniatura."""
+    archivo = tmp_path / "informe.pdf"
+    archivo.write_bytes(b"%PDF-1.4")
+    bridge._pending_attachment = str(archivo)
+    recibidos = []
+    bridge.message_appended.connect(lambda payload: recibidos.append(json.loads(payload)))
+
+    bridge.send_message("resumime esto")
+
+    llamada = [c for c in fake_run_async if getattr(c["fn"], "__name__", "") == "resolve"][0]
+    assert "image_path" not in llamada["kwargs"]
+    usuario = [m for m in recibidos if m["role"] == "user"][0]
+    assert usuario["adjunto"] == {"nombre": "informe.pdf", "miniatura": "", "ruta": ""}
+
+
+def test_send_message_sin_adjunto_no_lleva_el_campo_adjunto(bridge, fake_run_async):
+    recibidos = []
+    bridge.message_appended.connect(lambda payload: recibidos.append(json.loads(payload)))
+
+    bridge.send_message("hola")
+
+    usuario = [m for m in recibidos if m["role"] == "user"][0]
+    assert "adjunto" not in usuario
+    llamada = [c for c in fake_run_async if getattr(c["fn"], "__name__", "") == "resolve"][0]
+    assert "image_path" not in llamada["kwargs"]
+
+
+def test_al_reabrir_la_conversacion_el_turno_del_usuario_trae_su_miniatura(bridge, monkeypatch, tmp_path):
+    """La imagen se guardó en la carpeta del usuario, así que al volver al chat la burbuja
+    la vuelve a mostrar. Un turno cuya imagen ya no está muestra el chip con el nombre."""
+    from ai.memory_manager import memory
+
+    ruta = _captura(tmp_path)
+    turnos = [
+        SimpleNamespace(id=1, role="user", text=f"mirá esto\n\n[Imagen adjunta: {ruta}]", timestamp="t1"),
+        SimpleNamespace(id=2, role="assistant", text="Es un error de red.", timestamp="t2"),
+        SimpleNamespace(id=3, role="user", text="y esto\n\n[Imagen adjunta: C:\\ya\\no\\esta.png]", timestamp="t3"),
+    ]
+    monkeypatch.setattr(memory, "get_conversation_turns", lambda *a, **k: turnos)
+    recibidos = []
+    bridge.turns_loaded.connect(lambda payload: recibidos.append(json.loads(payload)))
+
+    bridge.select_conversation("conv-1")
+
+    cargados = recibidos[0]
+    assert cargados[0]["id"] == 1
+    assert cargados[0]["adjunto"]["miniatura"].startswith("data:image/")
+    assert "Imagen adjunta" not in cargados[0]["html"]
+    assert "adjunto" not in cargados[1]
+    assert cargados[2]["adjunto"]["nombre"] == "esta.png"
+    assert cargados[2]["adjunto"]["miniatura"] == ""
+    # Y la que sí está queda habilitada para el visor a tamaño completo.
+    assert cargados[0]["adjunto"]["ruta"] == ruta
+    assert ruta in bridge._imagenes_mostradas
+
+
+def test_request_image_sirve_la_imagen_entera_solo_si_ya_se_mostro(bridge, fake_run_async, tmp_path):
+    """El slot lo puede invocar cualquier script de la página (§10.2): solo devuelve las
+    imágenes que esta sesión ya puso en una burbuja, nunca un archivo cualquiera."""
+    ruta = _captura(tmp_path)
+    otra = _captura(tmp_path, "privada.png")
+    cargadas = []
+    bridge.image_loaded.connect(lambda r, url: cargadas.append((r, url)))
+
+    bridge.request_image(otra)          # nunca mostrada: se ignora
+    assert cargadas == []
+
+    bridge._pending_attachment = ruta
+    bridge.send_message("mirá")
+    bridge.request_image(ruta)
+
+    assert len(cargadas) == 1
+    assert cargadas[0][0] == ruta
+    assert cargadas[0][1].startswith("data:image/")
+
+
+class _PortapapelesFalso:
+    def __init__(self, imagen=None, urls=()):
+        from PyQt6.QtCore import QMimeData, QUrl
+        from PyQt6.QtGui import QImage
+
+        self._imagen = imagen if imagen is not None else QImage()
+        self._mime = QMimeData()
+        if urls:
+            self._mime.setUrls([QUrl.fromLocalFile(u) for u in urls])
+
+    def image(self):
+        return self._imagen
+
+    def mimeData(self):
+        return self._mime
+
+
+def test_pegar_una_imagen_del_portapapeles_la_guarda_y_la_adjunta(bridge, monkeypatch, tmp_path):
+    """Ctrl+V con una captura: se guarda como PNG en la carpeta del usuario y queda como
+    adjunto pendiente, con su miniatura en el chip."""
+    from PyQt6.QtGui import QColor, QImage
+    from PyQt6.QtWidgets import QApplication
+
+    from core import imagenes
+
+    imagen = QImage(16, 10, QImage.Format.Format_RGB32)
+    imagen.fill(QColor(200, 100, 0))
+    monkeypatch.setattr(QApplication, "clipboard", staticmethod(lambda: _PortapapelesFalso(imagen)))
+    monkeypatch.setattr(imagenes, "carpeta_de_imagenes_pegadas", lambda user_id="owner": str(tmp_path))
+    miniaturas = []
+    bridge.attachment_preview.connect(miniaturas.append)
+
+    bridge.paste_from_clipboard()
+
+    pendiente = bridge._pending_attachment
+    assert pendiente and pendiente.startswith(str(tmp_path)) and pendiente.endswith(".png")
+    assert imagenes.media_type(pendiente) == "image/png"
+    assert miniaturas and miniaturas[-1].startswith("data:image/")
+
+
+def test_pegar_un_archivo_copiado_del_explorador_lo_adjunta_por_su_ruta(bridge, monkeypatch, tmp_path):
+    from PyQt6.QtWidgets import QApplication
+
+    archivo = tmp_path / "notas.md"
+    archivo.write_text("# notas", encoding="utf-8")
+    monkeypatch.setattr(QApplication, "clipboard",
+                        staticmethod(lambda: _PortapapelesFalso(urls=[str(archivo)])))
+
+    bridge.paste_from_clipboard()
+
+    assert bridge._pending_attachment == str(archivo)
+
+
+def test_pegar_sin_imagen_ni_archivo_solo_avisa(bridge, monkeypatch):
+    from PyQt6.QtWidgets import QApplication
+
+    monkeypatch.setattr(QApplication, "clipboard", staticmethod(lambda: _PortapapelesFalso()))
+    avisos = []
+    bridge.notice_shown.connect(lambda tipo, texto: avisos.append((tipo, texto)))
+
+    bridge.paste_from_clipboard()
+
+    assert bridge._pending_attachment is None
+    assert avisos == [("info", "No hay una imagen ni un archivo en el portapapeles.")]
+
+
+# ---------------------------------------------------------------------------
 # CA-11: paginación "Ver más"
 # ---------------------------------------------------------------------------
 
@@ -1226,6 +1408,7 @@ _EXPECTED_SIGNALS = [
     "turns_loaded", "message_appended", "typing_started", "typing_stopped",
     "gui_state_changed", "wake_state_changed", "theme_changed",
     "confirmation_requested", "file_attached", "chips_loaded", "error_occurred",
+    "attachment_preview",   # REQ-054
     # REQ-016
     "tasks_loaded", "projects_loaded", "project_conversations_loaded", "project_removed",
     # REQ-019

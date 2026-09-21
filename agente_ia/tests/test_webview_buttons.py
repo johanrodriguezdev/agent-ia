@@ -1143,6 +1143,124 @@ def test_las_sugerencias_llenan_el_cuadro_sin_enviar_y_se_van_con_el_primer_mens
     _sin_errores(page)
 
 
+# ---------------------------------------------------------------------------
+# REQ-054: imágenes en el chat
+# ---------------------------------------------------------------------------
+
+#: Un PNG de 1x1 rojo, para no depender de Pillow en los tests del frontend.
+_PNG_1x1 = (
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIA"
+    "X8jx0gAAAABJRU5ErkJggg=="
+)
+
+
+def test_la_imagen_adjunta_se_ve_como_miniatura_y_se_abre_a_tamano_completo(ventana, qtbot):
+    window, page, _ = ventana
+
+    window.bridge.message_appended.emit(json.dumps({
+        "role": "user", "html": "<p>¿qué error es este?</p>", "timestamp": "2026-09-20T01:00:00",
+        "adjunto": {"nombre": "captura <b>x</b>.png", "miniatura": _PNG_1x1},
+    }))
+    _esperar(qtbot, 300)
+
+    # La miniatura va ANTES del texto, por la propiedad src (nunca innerHTML), y el nombre
+    # del archivo se trata como texto.
+    assert _run_js(page, "document.querySelector('.msg-user .bubble').firstElementChild.className") == "bubble-imagen"
+    assert _run_js(page, "document.querySelector('.bubble-imagen img').getAttribute('src')") == _PNG_1x1
+    assert _run_js(page, "document.querySelector('.bubble-imagen img').alt") == "captura <b>x</b>.png"
+    assert _run_js(page, "document.querySelector('.bubble-imagen b') === null") is True
+    assert _run_js(page, "document.querySelector('.bubble-texto').textContent") == "¿qué error es este?"
+
+    # Click: se abre el visor con la misma imagen; Escape lo cierra.
+    _click(page, "document.querySelector('.bubble-imagen')")
+    _esperar(qtbot, 300)
+    assert _run_js(page, "document.querySelector('.visor-imagen').hidden") is False
+    assert _run_js(page, "document.querySelector('.visor-imagen-img').getAttribute('src')") == _PNG_1x1
+    assert _run_js(page, "document.querySelector('.visor-imagen-pie').textContent") == "captura <b>x</b>.png"
+
+    _run_js(page, "document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true})); true;")
+    _esperar(qtbot, 200)
+    assert _run_js(page, "document.querySelector('.visor-imagen').hidden") is True
+    _sin_errores(page)
+
+
+def test_un_adjunto_que_no_es_imagen_se_ve_como_chip_con_su_nombre(ventana, qtbot):
+    window, page, _ = ventana
+
+    window.bridge.message_appended.emit(json.dumps({
+        "role": "user", "html": "<p>resumime esto</p>", "timestamp": "2026-09-20T01:00:00",
+        "adjunto": {"nombre": "informe.pdf", "miniatura": ""},
+    }))
+    _esperar(qtbot, 300)
+
+    assert _run_js(page, "document.querySelectorAll('.bubble-imagen').length") == 0
+    assert _run_js(page, "document.querySelector('.bubble-adjunto span').textContent") == "informe.pdf"
+    assert _run_js(page, "document.querySelector('.bubble-adjunto use').getAttribute('href')") == "#ic-paperclip"
+    _sin_errores(page)
+
+
+def test_pegar_una_imagen_en_el_cuadro_la_adjunta_y_pegar_texto_sigue_pegando(ventana, qtbot, monkeypatch, tmp_path):
+    """Ctrl+V con una captura: la página avisa al bridge, que lee el portapapeles del
+    sistema y deja la imagen como adjunto pendiente con su miniatura en el chip. Con texto
+    en el portapapeles el pegado es el de siempre."""
+    from PyQt6.QtGui import QColor, QImage
+    from PyQt6.QtWidgets import QApplication
+
+    from core import imagenes
+
+    imagen = QImage(6, 6, QImage.Format.Format_RGB32)
+    imagen.fill(QColor(0, 120, 255))
+
+    class _Portapapeles:
+        def image(self):
+            return imagen
+
+        def mimeData(self):
+            return None
+
+    monkeypatch.setattr(QApplication, "clipboard", staticmethod(lambda: _Portapapeles()))
+    monkeypatch.setattr(imagenes, "carpeta_de_imagenes_pegadas", lambda user_id="owner": str(tmp_path))
+
+    window, page, _ = ventana
+    _run_js(page, """
+      (() => {
+        const dt = new DataTransfer();
+        dt.items.add(new File([new Uint8Array([137, 80, 78, 71])], 'captura.png', {type: 'image/png'}));
+        const evt = new ClipboardEvent('paste', {clipboardData: dt, bubbles: true, cancelable: true});
+        window.__pasteImagenCancelado = !document.getElementById('composer-input').dispatchEvent(evt);
+      })(); true;
+    """)
+    _esperar(qtbot, 600)
+
+    assert _run_js(page, "window.__pasteImagenCancelado") is True   # el pegado nativo se frenó
+    pendiente = window.bridge._pending_attachment
+    assert pendiente and pendiente.startswith(str(tmp_path)) and pendiente.endswith(".png")
+    assert _run_js(page, "document.getElementById('attachment-chip').hidden") is False
+    assert _run_js(page, "document.getElementById('attachment-chip-thumb').hidden") is False
+    assert _run_js(page, "document.getElementById('attachment-chip-thumb').getAttribute('src').startsWith('data:image/')") is True
+
+    # Con texto, gana el texto: no se toca el portapapeles del sistema.
+    window.bridge._pending_attachment = None
+    _run_js(page, """
+      (() => {
+        const dt = new DataTransfer();
+        dt.setData('text/plain', 'un párrafo');
+        dt.items.add(new File([new Uint8Array([1])], 'x.png', {type: 'image/png'}));
+        const evt = new ClipboardEvent('paste', {clipboardData: dt, bubbles: true, cancelable: true});
+        window.__pasteTextoCancelado = !document.getElementById('composer-input').dispatchEvent(evt);
+      })(); true;
+    """)
+    _esperar(qtbot, 300)
+    assert _run_js(page, "window.__pasteTextoCancelado") is False
+    assert window.bridge._pending_attachment is None
+
+    # Quitar el chip también esconde la miniatura.
+    _click(page, "document.getElementById('attachment-chip-remove')")
+    _esperar(qtbot, 200)
+    assert _run_js(page, "document.getElementById('attachment-chip-thumb').hidden") is True
+    _sin_errores(page)
+
+
 # --------------------------------------------------------------------------- cobertura
 
 def test_todo_boton_con_id_del_html_tiene_su_manejador(ventana):

@@ -163,6 +163,19 @@ destino suelto como una lista:
 }
 ```
 
+### Imágenes en el chat
+
+El agente ve las imágenes que le mandas, en el escritorio igual que por Telegram y Discord.
+Pega una captura con **Ctrl+V** (la de Win+Shift+S, o «Copiar imagen» en el navegador),
+arrástrala a la ventana o adjúntala con el clip, y pregunta: «¿qué error es este?», «¿qué
+dice este cartel?». La imagen aparece como miniatura en tu mensaje —también al reabrir la
+conversación— y un click la muestra a tamaño completo.
+
+Las imágenes pegadas se guardan en `users_data/<usuario>/imagenes/`. Las que superan lo que
+los proveedores aceptan (1568 px de lado o 4 MB) viajan al modelo como una copia reducida.
+Si tu modelo principal no ve imágenes, pon en `vision_provider` (`config.json`) uno que sí
+(por ejemplo `gemini` o `anthropic`): con una imagen de por medio el turno va a ese proveedor.
+
 ---
 
 ## Cómo está organizado

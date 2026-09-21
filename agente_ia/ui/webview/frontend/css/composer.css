@@ -246,6 +246,35 @@
   display: none;
 }
 
+/* REQ-054 — la miniatura del adjunto dentro del chip, si es una imagen. */
+#attachment-chip-thumb {
+  display: block;
+  width: 36px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  flex: none;
+}
+
+#attachment-chip-thumb[hidden] {
+  display: none;
+}
+
+/* Con miniatura no hace falta el clip: la imagen ya dice qué es. */
+#attachment-chip:has(#attachment-chip-thumb:not([hidden])) .attachment-chip-icon {
+  display: none;
+}
+
+.attachment-chip-icon {
+  color: var(--text-secondary);
+  flex: none;
+}
+
+#attachment-chip.rechazado {
+  color: var(--text-secondary);
+  border-style: dashed;
+}
+
 #attachment-chip-remove {
   border: none;
   background: transparent;

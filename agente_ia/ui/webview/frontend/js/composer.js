@@ -11,6 +11,7 @@
 import {
   sendMessage, runChipAction, toggleWakeWord,
   openAttachDialog, clearAttachment, stopResolution, requestModels, setModel, setActiveMode,
+  pasteFromClipboard,
 } from "./bridge_client.js";
 import { icon } from "./icons.js";
 
@@ -66,6 +67,21 @@ export function initComposer() {
     }
   });
 
+  // REQ-054 — Ctrl+V con una captura (o un archivo copiado del Explorador). La pagina no
+  // puede leer la ruta ni conviene mandarle los bytes a Python por el canal: solo se avisa
+  // y el bridge lee el portapapeles del sistema. Si ademas hay texto, gana el texto: pegar
+  // un parrafo copiado de una web con su imagen tiene que seguir pegando el parrafo.
+  input.addEventListener("paste", (evt) => {
+    const datos = evt.clipboardData;
+    if (!datos) return;
+    const hayArchivo = Array.from(datos.items || []).some((item) => item.kind === "file");
+    const hayTexto = (datos.getData("text/plain") || "").trim() !== "";
+    if (hayArchivo && !hayTexto) {
+      evt.preventDefault();
+      pasteFromClipboard();
+    }
+  });
+
   $("send-btn").addEventListener("click", doSend);
 
   $("wake-toggle-btn").addEventListener("click", () => {
@@ -76,6 +92,7 @@ export function initComposer() {
 
   $("attachment-chip-remove").addEventListener("click", () => {
     $("attachment-chip").hidden = true;
+    showAttachmentPreview("");
     // Y del lado de Python tambien: si no, el archivo seguiria viajando con el proximo
     // mensaje aunque el chip ya no este en pantalla.
     clearAttachment();
@@ -130,7 +147,22 @@ export function showAttachment(path, name, accepted, reason) {
   const nameEl = $("attachment-chip-name");
   // §10.1 — nunca innerHTML: `name` puede no ser texto del propio usuario.
   nameEl.textContent = accepted ? name : `Rechazado: ${name} (${reason})`;
+  chip.classList.toggle("rechazado", !accepted);
   chip.hidden = false;
+}
+
+/** REQ-054 — la miniatura del adjunto en el chip (un `data:` URL que armo Python), o
+ *  nada si no es una imagen. Va por la propiedad `src`, nunca por innerHTML. */
+export function showAttachmentPreview(dataUrl) {
+  const img = $("attachment-chip-thumb");
+  if (!img) return;
+  if (dataUrl && dataUrl.startsWith("data:image/")) {
+    img.src = dataUrl;
+    img.hidden = false;
+  } else {
+    img.removeAttribute("src");
+    img.hidden = true;
+  }
 }
 
 // --------------------------------------------------------------------------- modos (REQ-026)

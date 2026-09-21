@@ -12,7 +12,8 @@ import {
   onGuiStateChanged, onWakeStateChanged, onThemeChanged, onChipsLoaded,
   onConversationListUpdated, onConversationCleared, onConversationRemoved,
   onTurnsLoaded, onMessageAppended, onTypingStarted, onTypingStopped, onProgressUpdated,
-  onConfirmationRequested, onFileAttached, onErrorOccurred, onWindowMaximizedChanged,
+  onConfirmationRequested, onFileAttached, onAttachmentPreview, onImageLoaded, onErrorOccurred,
+  onWindowMaximizedChanged,
   onAutonomyChanged,
   onTasksLoaded, onProjectsLoaded, onProjectConversationsLoaded, onProjectRemoved,
   onSecurityOverridesLoaded, onSecurityOverrideSaved, onSecurityOverrideSaveRejected,
@@ -34,7 +35,7 @@ import {
   appendChunk, clearChunks,
 } from "./chat.js";
 import {
-  initComposer, setComposerEnabled, setWakeState, showAttachment,
+  initComposer, setComposerEnabled, setWakeState, showAttachment, showAttachmentPreview,
   renderModes, renderQuickActions, resetActiveMode, renderModels,
 } from "./composer.js";
 import { initTheme, applyTheme } from "./theme.js";
@@ -52,6 +53,7 @@ import { initShortcuts } from "./shortcuts.js";
 import { openFlowsPanel, renderFlows } from "./flows_panel.js";
 import { openMapPanel, renderConnectionMap } from "./map_panel.js";
 import { initSugerencias, sortearSugerencias } from "./sugerencias.js";
+import { ponerImagenCompleta } from "./visor_imagen.js";   // REQ-054
 import {
   openProjectsPanel, renderProjects, renderProjectConversations, handleProjectRemoved,
   renderProjectItems, renderAssignableItems,
@@ -180,6 +182,8 @@ async function bootstrap() {
   onFileAttached((path, name, accepted, reason) => {
     showAttachment(path, name, accepted, reason);
   });
+  onAttachmentPreview((dataUrl) => showAttachmentPreview(dataUrl));   // REQ-054
+  onImageLoaded((ruta, dataUrl) => ponerImagenCompleta(ruta, dataUrl));  // REQ-054
   // Los errores del bridge terminaban en un console.error que nadie mira: si fallaba
   // borrar una conversacion o guardar la configuracion, la pantalla no decia nada.
   onErrorOccurred((message) => {

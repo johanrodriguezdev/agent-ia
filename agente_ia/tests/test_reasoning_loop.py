@@ -71,6 +71,41 @@ def test_run_usa_los_turnos_de_la_conversacion_abierta_si_se_los_dan():
     assert "el mensaje entero" in prompt
 
 
+def test_run_le_pasa_la_imagen_del_turno_al_modelo_en_cada_vuelta_y_en_el_cierre(tmp_path):
+    """REQ-054: en el escritorio la imagen adjunta no llegaba al modelo (solo su ruta en el
+    texto). `image_path` viaja en cada `generate_response` de la vuelta y también en la
+    llamada de cierre —es el mismo turno—, igual que por Telegram."""
+    from unittest.mock import ANY
+
+    from ai.llm_provider import ToolCallRequest
+
+    ruta = str(tmp_path / "captura.png")
+    pide_tool = LLMToolResponse(text="", tool_calls=[
+        ToolCallRequest(id="c1", name="get_time", arguments={}),
+    ])
+
+    with patch("core.reasoning_loop.generate_response", return_value=pide_tool) as mock_gen, \
+         patch("core.reasoning_loop.execute_tool", return_value="12:00"), \
+         patch("core.reasoning_loop.cerrar_sin_herramientas", return_value="redactado") as mock_cierre, \
+         patch("core.reasoning_loop.agent_context_manager"):
+        resultado = reasoning_loop.run("¿qué hora marca la captura?", "desktop", "u1",
+                                       image_path=ruta)
+
+    assert resultado == "redactado"
+    assert mock_gen.call_count >= 1
+    for llamada in mock_gen.call_args_list:
+        assert llamada.kwargs["image_path"] == ruta
+    assert mock_cierre.call_args.kwargs["image_path"] == ruta
+
+
+def test_run_sin_imagen_manda_image_path_none():
+    final = LLMToolResponse(text="listo", tool_calls=[])
+    with patch("core.reasoning_loop.generate_response", return_value=final) as mock_gen, \
+         patch("core.reasoning_loop.agent_context_manager"):
+        reasoning_loop.run("hola", "desktop", "u1")
+    assert mock_gen.call_args.kwargs["image_path"] is None
+
+
 def test_sin_turnos_de_fuera_run_cae_al_contexto_por_usuario():
     """Voz y CLI no tienen conversación propia: siguen con `agent_context`."""
     final_response = LLMToolResponse(text="listo", tool_calls=[])
@@ -646,10 +681,11 @@ def test_ca17_la_firma_de_run_no_cambio():
     import inspect
 
     parametros = list(inspect.signature(reasoning_loop.run).parameters)
-    # `prior_turns` se sumó igual que `modo`: `resolve()` solo lo pasa cuando viene, así que
-    # un doble con la firma vieja sigue sin recibir kwargs que no espera.
+    # `prior_turns` e `image_path` (REQ-054) se sumaron igual que `modo`: `resolve()` solo
+    # los pasa cuando vienen, así que un doble con la firma vieja sigue sin recibir kwargs
+    # que no espera.
     assert parametros == ["task", "channel", "user_id", "agent_name", "estado", "modo",
-                          "prior_turns"]
+                          "prior_turns", "image_path"]
 
 
 def test_ca18_una_vuelta_es_una_llamada_aunque_el_presupuesto_sea_40():

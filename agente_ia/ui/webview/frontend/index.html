@@ -303,6 +303,9 @@
           </div>
 
           <div id="attachment-chip" hidden>
+            <!-- REQ-054: miniatura si el adjunto es una imagen (src la pone composer.js) -->
+            <img id="attachment-chip-thumb" alt="" hidden>
+            <svg class="ic ic-sm attachment-chip-icon" aria-hidden="true"><use href="#ic-paperclip"/></svg>
             <span id="attachment-chip-name"></span>
             <button type="button" id="attachment-chip-remove" aria-label="Quitar adjunto">
               <svg class="ic ic-sm" aria-hidden="true"><use href="#ic-close"/></svg>

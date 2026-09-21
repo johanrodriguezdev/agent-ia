@@ -286,6 +286,29 @@ def test_resolve_con_modo_lo_threadea_hasta_reasoning_loop(monkeypatch):
     assert result.text == "respuesta del loop"
 
 
+def test_resolve_con_imagen_la_threadea_hasta_reasoning_loop(monkeypatch):
+    """REQ-054: `resolve(..., image_path=...)` llega como kwarg a `reasoning_loop.run()`;
+    sin imagen el kwarg no se manda (dobles con la firma vieja)."""
+    from unittest.mock import patch
+
+    from intent import classifier as classifier_module
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(classifier_module.ai_system, "predict", lambda text: "UNKNOWN")
+
+        with patch("core.reasoning_loop.run", return_value="veo un error 404") as mock_run:
+            result = resolve(
+                "¿qué dice esta captura xyz789?", ChannelType.DESKTOP, user_id="u1",
+                image_path=r"C:\\capturas\\error.png",
+            )
+
+    mock_run.assert_called_once_with(
+        "¿qué dice esta captura xyz789?", ChannelType.DESKTOP, "u1", estado={},
+        image_path=r"C:\\capturas\\error.png",
+    )
+    assert result.text == "veo un error 404"
+
+
 def test_resolve_sin_modo_no_manda_el_kwarg_modo(monkeypatch):
     """Regresión explícita del hallazgo de `desarrollo-log-026.md`: sin `modo` (o
     `modo=None`), `_try_claude()` NO agrega el kwarg — preserva la firma exacta de antes

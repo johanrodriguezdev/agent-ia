@@ -119,6 +119,163 @@ body.chat-empty #empty-state {
   padding: 10px 14px;
 }
 
+/* -------------------------------------------------------------- adjuntos del usuario (REQ-054) */
+
+/* La miniatura va dentro de la burbuja, arriba del texto. Es un botón: abre el visor. El
+   borde degradado con los tokens de la marca aparece al pasar el mouse — el mismo brillo
+   discreto de los nodos del Mapa, no un marco permanente. */
+.bubble-imagen {
+  display: block;
+  position: relative;
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  cursor: zoom-in;
+  max-width: 100%;
+  line-height: 0;
+  outline: none;
+}
+
+.bubble-imagen img {
+  display: block;
+  max-width: 320px;
+  max-height: 260px;
+  width: auto;
+  height: auto;
+  border-radius: var(--radius-md);
+  transition: transform 220ms ease, filter 220ms ease;
+}
+
+.bubble-imagen::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-md);
+  padding: 1px;
+  background: linear-gradient(135deg, var(--marca-1), var(--marca-2) 55%, var(--marca-3));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity 220ms ease;
+  pointer-events: none;
+}
+
+.bubble-imagen:hover img,
+.bubble-imagen:focus-visible img {
+  transform: scale(1.015);
+}
+
+.bubble-imagen:hover::after,
+.bubble-imagen:focus-visible::after {
+  opacity: 0.9;
+}
+
+.bubble-imagen + .bubble-texto {
+  margin-top: 8px;
+}
+
+/* Un adjunto que no es imagen: chip con el clip y el nombre, en la misma burbuja. */
+.bubble-adjunto {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 10px 4px 8px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-hover) 70%, transparent);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.bubble-adjunto > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bubble-adjunto + .bubble-texto {
+  margin-top: 8px;
+}
+
+/* Visor a tamaño completo: fondo oscurecido con un leve desenfoque del chat, la imagen
+   centrada y sin recortar. Por encima de los menús del composer (900) y debajo de los
+   modales de confirmación (1000): una confirmación siempre tiene que verse. */
+.visor-imagen {
+  position: fixed;
+  inset: 0;
+  z-index: 950;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 40px;
+  background: var(--overlay);
+  backdrop-filter: blur(6px);
+  cursor: zoom-out;
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+
+.visor-imagen[hidden] {
+  display: none;
+}
+
+.visor-imagen.abierto {
+  opacity: 1;
+}
+
+.visor-imagen-img {
+  max-width: 100%;
+  max-height: calc(100% - 40px);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-pop);
+  cursor: default;
+  transform: scale(0.97);
+  transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.visor-imagen.abierto .visor-imagen-img {
+  transform: scale(1);
+}
+
+.visor-imagen-pie {
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  max-width: 80%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.visor-imagen-cerrar {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bubble-imagen img,
+  .bubble-imagen::after,
+  .visor-imagen,
+  .visor-imagen-img { transition: none; }
+}
+
 /* Respuesta del agente: sin fondo, sin padding lateral, ancho completo de la columna. */
 .msg-assistant .bubble {
   background: transparent;

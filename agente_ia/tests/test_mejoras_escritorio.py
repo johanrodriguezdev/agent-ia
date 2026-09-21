@@ -580,6 +580,7 @@ def bridge_minimo(monkeypatch):
     bridge._turno_cancelado_id = None
     bridge._conversation_id = "c1"
     bridge.file_attached = MagicMock()
+    bridge.attachment_preview = MagicMock()
     bridge.notice_shown = MagicMock()
     return bridge
 
@@ -616,11 +617,12 @@ def test_el_mensaje_lleva_la_ruta_completa_del_adjunto(bridge_minimo, tmp_path):
     archivo.write_text("contenido", encoding="utf-8")
     bridge_minimo._pending_attachment = str(archivo)
 
-    texto = Bridge._con_adjunto(bridge_minimo, "resumime esto")
+    texto, imagen = Bridge._con_adjunto(bridge_minimo, "resumime esto")
 
     assert "resumime esto" in texto
     assert str(archivo) in texto
     assert "[Archivo adjunto:" in texto
+    assert imagen is None          # un .txt no es una imagen: el modelo no recibe nada que ver
 
 
 def test_el_adjunto_viaja_una_sola_vez(bridge_minimo, tmp_path):
@@ -632,8 +634,8 @@ def test_el_adjunto_viaja_una_sola_vez(bridge_minimo, tmp_path):
     archivo.write_text("contenido", encoding="utf-8")
     bridge_minimo._pending_attachment = str(archivo)
 
-    primero = Bridge._con_adjunto(bridge_minimo, "uno")
-    segundo = Bridge._con_adjunto(bridge_minimo, "dos")
+    primero, _ = Bridge._con_adjunto(bridge_minimo, "uno")
+    segundo, _ = Bridge._con_adjunto(bridge_minimo, "dos")
 
     assert str(archivo) in primero
     assert str(archivo) not in segundo
@@ -647,11 +649,52 @@ def test_un_adjunto_que_ya_no_existe_avisa_y_no_ensucia_el_mensaje(bridge_minimo
 
     bridge_minimo._pending_attachment = str(tmp_path / "no-esta.txt")
 
-    texto = Bridge._con_adjunto(bridge_minimo, "resumime esto")
+    texto, imagen = Bridge._con_adjunto(bridge_minimo, "resumime esto")
 
     assert texto == "resumime esto"
+    assert imagen is None
     bridge_minimo.notice_shown.emit.assert_called_once()
     assert bridge_minimo._pending_attachment is None
+
+
+def test_una_imagen_adjunta_va_marcada_en_el_texto_y_vuelve_como_imagen_del_turno(bridge_minimo, tmp_path):
+    """REQ-054: por Telegram el modelo VE la foto (`image_path`); en el escritorio solo le
+    llegaba la ruta escrita. Ahora la imagen vuelve aparte para que `resolve()` la lleve
+    hasta el modelo, y el texto la marca como «Imagen adjunta»."""
+    from ui.webview.bridge import Bridge
+
+    PIL = pytest.importorskip("PIL")
+    from PIL import Image
+
+    captura = tmp_path / "captura.png"
+    Image.new("RGB", (8, 8), (255, 0, 0)).save(captura)
+    bridge_minimo._pending_attachment = str(captura)
+
+    texto, imagen = Bridge._con_adjunto(bridge_minimo, "¿qué dice esto?")
+
+    assert imagen == str(captura)
+    assert texto == f"¿qué dice esto?\n\n[Imagen adjunta: {captura}]"
+
+
+def test_adjuntar_una_imagen_emite_su_miniatura_y_un_archivo_no(bridge_minimo, tmp_path):
+    """REQ-054: el chip muestra la imagen que va a viajar; para un .txt no hay nada que
+    mostrar y la señal va vacía (la página esconde el `<img>`)."""
+    from ui.webview.bridge import Bridge
+
+    PIL = pytest.importorskip("PIL")
+    from PIL import Image
+
+    captura = tmp_path / "captura.png"
+    Image.new("RGB", (8, 8), (0, 0, 255)).save(captura)
+    assert Bridge.attach_file(bridge_minimo, str(captura)) is True
+    miniatura = bridge_minimo.attachment_preview.emit.call_args[0][0]
+    assert miniatura.startswith("data:image/")
+
+    bridge_minimo.attachment_preview.reset_mock()
+    archivo = tmp_path / "notas.txt"
+    archivo.write_text("hola", encoding="utf-8")
+    assert Bridge.attach_file(bridge_minimo, str(archivo)) is True
+    bridge_minimo.attachment_preview.emit.assert_called_once_with("")
 
 
 def test_sacar_el_chip_descarta_el_adjunto(bridge_minimo, tmp_path):

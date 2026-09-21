@@ -318,6 +318,13 @@ def generate_response(messages, system_prompt, image_path=None, tools=None, tare
     `proveedor_hacia`, `modelo_hacia`. Dict vacío == no hubo cambio.
     """
     provider, vision_provider, fallback_provider, model_name = get_provider_config()
+    if image_path:
+        # REQ-054: una captura de pantalla 4K o una foto de cámara superan lo que los
+        # proveedores aceptan por imagen; se manda una copia reducida (misma imagen, menos
+        # píxeles) en vez de fallar la subida. Si entra en los límites, va la original.
+        from core.imagenes import preparar_para_el_modelo
+
+        image_path = preparar_para_el_modelo(image_path)
     destinos = _destinos_iniciales(tarea, provider, model_name, vision_provider, image_path)
 
     if len(destinos) == 1:
@@ -671,11 +678,16 @@ def _mensajes_para_anthropic(messages, image_path):
     if (image_path and os.path.exists(image_path) and indice_plano is not None
             and salida[indice_plano]["role"] == "user"):
         import base64
+        from core.imagenes import media_type
+
         with open(image_path, "rb") as f:
             image_data = base64.standard_b64encode(f.read()).decode("utf-8")
+        # REQ-054: el tipo REAL del archivo. Antes decía siempre `image/jpeg`, y la API
+        # rechaza una imagen cuyo contenido no coincide con lo declarado: las fotos de
+        # Telegram son JPEG y pasaban, una captura pegada en el escritorio es PNG y no.
         salida[indice_plano]["content"].insert(0, {
             "type": "image",
-            "source": {"type": "base64", "media_type": "image/jpeg", "data": image_data},
+            "source": {"type": "base64", "media_type": media_type(image_path), "data": image_data},
         })
 
     return salida
@@ -763,11 +775,13 @@ def _ultimo_mensaje_openai(mensaje, image_path, imagen_como_bloque, aviso_sin_vi
     contenido = [{"type": "text", "text": texto}]
     if tiene_imagen:
         import base64
+        from core.imagenes import media_type
+
         with open(image_path, "rb") as f:
             image_data = base64.standard_b64encode(f.read()).decode("utf-8")
         contenido.append({
             "type": "image_url",
-            "image_url": {"url": f"data:image/jpeg;base64,{image_data}"},
+            "image_url": {"url": f"data:{media_type(image_path)};base64,{image_data}"},
         })
     return {"role": "user", "content": contenido}
 
