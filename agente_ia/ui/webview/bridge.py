@@ -169,9 +169,12 @@ class Bridge(QObject):
     theme_changed = pyqtSignal(str)
     confirmation_requested = pyqtSignal(str, str, str)   # request_id, action_name, message
     file_attached = pyqtSignal(str, str, bool, str)      # path, name, accepted, reason
-    #: REQ-054 — miniatura (`data:` URL) del adjunto que espera, o "" si no es una imagen.
+    #: REQ-054/063 — (ruta, miniatura `data:` URL o "") del adjunto que acaba de entrar.
     #: Va aparte de `file_attached` para no cambiarle la firma a lo que ya la escucha.
-    attachment_preview = pyqtSignal(str)
+    attachment_preview = pyqtSignal(str, str)
+    #: REQ-063 — los adjuntos pendientes se consumieron (se mandó el mensaje) o se vaciaron:
+    #: la página quita todos los chips.
+    attachments_cleared = pyqtSignal()
     #: REQ-054 — la imagen a tamaño completo para el visor: (ruta, `data:` URL).
     image_loaded = pyqtSignal(str, str)
     #: REQ-055 — el último intercambio salió de la conversación (regenerar/editar): la
@@ -295,7 +298,9 @@ class Bridge(QObject):
         # Archivo adjunto esperando al proximo mensaje. Antes la ruta se emitia hacia JS y
         # ahi moria: se veia el nombre en un chip y el agente nunca se enteraba de que
         # habia un archivo. Se guarda de este lado porque es quien arma el turno.
-        self._pending_attachment: Optional[str] = None
+        #: REQ-063 — varios adjuntos por mensaje, en el orden en que entraron; tope
+        #: `imagenes.MAX_ADJUNTOS`.
+        self._pending_attachments: List[str] = []
         #: REQ-054 — rutas de imágenes que esta sesión ya mostró en una burbuja. Son las
         #: únicas que `request_image()` sirve a tamaño completo: el slot es alcanzable desde
         #: cualquier script de la página (§10.2), y no tiene por qué leer cualquier archivo.
@@ -384,13 +389,15 @@ class Bridge(QObject):
         if self._resolution_in_flight:
             logger.warning("send_message() ignorado: ya hay una resolución en curso")
             return
-        if not text:
+        if not text and not self._pending_attachments:
             return
 
-        text, imagen = self._con_adjunto(text)
-        self._iniciar_turno(text, modo, imagen)
+        # REQ-063 — una imagen sola, sin texto, también es un mensaje («¿qué es esto?»
+        # implícito): el modelo la recibe con el marcador y nada más.
+        text, imagenes_del_turno = self._con_adjunto(text)
+        self._iniciar_turno(text, modo, imagenes_del_turno)
 
-    def _iniciar_turno(self, text: str, modo: str, imagen: Optional[str]) -> None:
+    def _iniciar_turno(self, text: str, modo: str, imagen) -> None:
         """Arranca la resolución de `text` (ya con su marcador de adjunto, si lo hay).
 
         Es el cuerpo de `send_message()`, separado para que «Regenerar» (REQ-055) pueda
@@ -433,7 +440,8 @@ class Bridge(QObject):
         # REQ-053 — si es el primer intercambio, al guardarlo se le pide un título corto.
         self._primer_turno = not historial
         # REQ-054 — la imagen del turno solo viaja si la hay: los dobles de `resolve` con
-        # la firma vieja no conocen el kwarg.
+        # la firma vieja no conocen el kwarg. REQ-063: una sola va como string, varias como
+        # lista (`ai/llm_provider.rutas_de_imagen` acepta las dos formas).
         extra = {"image_path": imagen} if imagen else {}
         run_async(resolve, self._on_resolve_done, self._on_resolve_error, text,
                    ChannelType.DESKTOP, user_id=OWNER_USER_ID, modo=(modo or None),
@@ -494,8 +502,9 @@ class Bridge(QObject):
     def _reenviar(self, texto: str) -> None:
         """Vuelve a mandar `texto` (que ya trae su marcador de adjunto) con su imagen si
         el archivo sigue existiendo."""
-        _, ruta = imagenes.separar_adjunto(texto)
-        imagen = ruta if (ruta and imagenes.es_imagen(ruta) and os.path.exists(ruta)) else None
+        _, rutas = imagenes.separar_adjuntos(texto)
+        vivas = [r for r in rutas if imagenes.es_imagen(r) and os.path.exists(r)]
+        imagen = vivas[0] if len(vivas) == 1 else (vivas or None)
         logger.info(f"regenerando la última respuesta de {self._conversation_id}")
         self._iniciar_turno(texto, "", imagen)
 
@@ -543,9 +552,10 @@ class Bridge(QObject):
 
     def _devolver_al_cuadro(self, texto_guardado: str) -> None:
         """Deja el texto (sin el marcador) en el cuadro y su adjunto de vuelta en el chip."""
-        texto, ruta = imagenes.separar_adjunto(texto_guardado)
-        if ruta and os.path.exists(ruta):
-            self.attach_file(ruta)
+        texto, rutas = imagenes.separar_adjuntos(texto_guardado)
+        for ruta in rutas:
+            if os.path.exists(ruta):
+                self.attach_file(ruta)
         logger.info(f"editando el último mensaje de {self._conversation_id}")
         self.composer_text_requested.emit(texto)
 
@@ -565,58 +575,74 @@ class Bridge(QObject):
             return
         self.message_chunk.emit(pedazo)
 
-    def _con_adjunto(self, text: str) -> "tuple[str, Optional[str]]":
-        """Suma al mensaje la ruta del archivo adjunto, si hay uno esperando.
+    def _con_adjunto(self, text: str) -> "tuple[str, Any]":
+        """Suma al mensaje las rutas de los adjuntos que esperan, si hay.
 
-        Return `(texto, ruta de la imagen o None)`. La ruta va COMPLETA y en una linea
-        propia: es lo que necesita cualquiera de los dos caminos que pueden leer el
-        archivo — el intent `FILE_ANALYSIS` (`skills/file_analysis_skill.py`, que resuelve
-        rutas absolutas) y el modelo, que puede pedir la herramienta correspondiente. Antes
-        no llegaba por ninguno: adjuntar era decorativo.
+        Return `(texto, imagen del turno)`: la imagen es `None` si no hay, la ruta (str) si
+        hay una, o la lista de rutas si hay varias (REQ-063). Las rutas van COMPLETAS y una
+        por linea al final: es lo que necesita cualquiera de los dos caminos que pueden
+        leer el archivo — el intent `FILE_ANALYSIS` (`skills/file_analysis_skill.py`, que
+        resuelve rutas absolutas) y el modelo, que puede pedir la herramienta
+        correspondiente. Antes no llegaba por ninguno: adjuntar era decorativo.
 
-        REQ-054: si el adjunto es una imagen, ademas de ir marcada en el texto vuelve como
-        segundo valor para que el modelo la VEA en este turno (`resolve(image_path=...)`),
-        igual que ve las fotos que llegan por Telegram y Discord.
+        REQ-054: las imagenes ademas vuelven aparte para que el modelo las VEA en este
+        turno (`resolve(image_path=...)`), igual que ve las fotos de Telegram y Discord.
 
-        El adjunto se consume en el turno: si el usuario manda otro mensaje despues, ya no
-        viaja. Adjuntar una vez y que se pegue a los diez mensajes siguientes seria peor
+        Los adjuntos se consumen en el turno: si el usuario manda otro mensaje despues, ya
+        no viajan. Adjuntar una vez y que se pegue a los diez mensajes siguientes seria peor
         que no adjuntar.
         """
-        ruta, self._pending_attachment = self._pending_attachment, None
-        if not ruta:
+        rutas, self._pending_attachments = list(self._pending_attachments), []
+        if not rutas:
             return text, None
-        if not os.path.exists(ruta):
-            logger.warning(f"el adjunto ya no existe al enviar: {ruta}")
-            self.notice_shown.emit("error", "El archivo adjunto ya no está donde estaba.")
+        self.attachments_cleared.emit()
+        vivas = []
+        for ruta in rutas:
+            if os.path.exists(ruta):
+                vivas.append(ruta)
+            else:
+                logger.warning(f"el adjunto ya no existe al enviar: {ruta}")
+        if len(vivas) < len(rutas):
+            self.notice_shown.emit(
+                "error", "Un archivo adjunto ya no está donde estaba." if len(rutas) - len(vivas) == 1
+                else f"{len(rutas) - len(vivas)} archivos adjuntos ya no están donde estaban.",
+            )
+        if not vivas:
             return text, None
 
-        logger.info(f"mensaje enviado con adjunto: {ruta}")
-        return imagenes.marcar_adjunto(text, ruta), (ruta if imagenes.es_imagen(ruta) else None)
+        logger.info(f"mensaje enviado con {len(vivas)} adjunto(s): {vivas}")
+        imagenes_del_turno = [r for r in vivas if imagenes.es_imagen(r)]
+        imagen = (imagenes_del_turno[0] if len(imagenes_del_turno) == 1
+                  else (imagenes_del_turno or None))
+        return imagenes.marcar_adjuntos(text, vivas).lstrip(), imagen
 
     def _payload_de_usuario(self, texto: str, timestamp: str, **extra: Any) -> Dict[str, Any]:
         """Arma el mensaje del usuario para la pantalla (REQ-054).
 
-        El marcador «[Imagen adjunta: C:\\…\\captura.png]» no se muestra como texto: la
-        burbuja lleva la miniatura de la imagen (`adjunto.miniatura`, un `data:` URL que
-        `chat.js` pone en un `<img>` por propiedad, nunca por innerHTML) o, si el adjunto no
-        es una imagen, un chip con el nombre del archivo. La ruta completa sigue en el texto
-        guardado, que es lo que ve el modelo, y viaja en `adjunto.ruta` para que el visor
-        pueda pedir la imagen entera (`request_image`).
+        Los marcadores «[Imagen adjunta: C:\\…\\captura.png]» no se muestran como texto:
+        la burbuja lleva una miniatura por imagen (`adjuntos[].miniatura`, un `data:` URL
+        que `chat.js` pone en un `<img>` por propiedad, nunca por innerHTML) y un chip con
+        el nombre por cada adjunto que no es imagen. Las rutas completas siguen en el texto
+        guardado, que es lo que ve el modelo, y viajan en `adjuntos[].ruta` para que el
+        visor pueda pedir la imagen entera (`request_image`).
         """
-        texto_visible, ruta = imagenes.separar_adjunto(texto)
+        texto_visible, rutas = imagenes.separar_adjuntos(texto)
         payload: Dict[str, Any] = {
             "role": "user", "html": render_markdown(texto_visible), "timestamp": timestamp,
             **extra,
         }
-        if ruta:
-            es_imagen = imagenes.es_imagen(ruta)
-            payload["adjunto"] = {
-                "nombre": os.path.basename(ruta),
-                "miniatura": imagenes.miniatura_data_url(ruta) if es_imagen else "",
-                "ruta": ruta if es_imagen else "",
-            }
-            if es_imagen:
-                self._imagenes_mostradas.add(ruta)
+        if rutas:
+            adjuntos = []
+            for ruta in rutas:
+                es_imagen = imagenes.es_imagen(ruta)
+                adjuntos.append({
+                    "nombre": os.path.basename(ruta),
+                    "miniatura": imagenes.miniatura_data_url(ruta) if es_imagen else "",
+                    "ruta": ruta if es_imagen else "",
+                })
+                if es_imagen:
+                    self._imagenes_mostradas.add(ruta)
+            payload["adjuntos"] = adjuntos
         return payload
 
     @pyqtSlot(str)
@@ -1510,11 +1536,20 @@ class Bridge(QObject):
         se perdia en los dos casos — el chip mostraba el nombre y nada mas.
         """
         aceptado, motivo = validate_dropped_file(path)
-        self._pending_attachment = path if aceptado else None
+        if aceptado and path in self._pending_attachments:
+            self.notice_shown.emit("info", f"«{os.path.basename(path)}» ya está adjunto.")
+            return True
+        if aceptado and len(self._pending_attachments) >= imagenes.MAX_ADJUNTOS:
+            self.notice_shown.emit(
+                "info", f"Hasta {imagenes.MAX_ADJUNTOS} adjuntos por mensaje. Mandá estos y después seguís.",
+            )
+            return False
+        if aceptado:
+            self._pending_attachments.append(path)
         self.file_attached.emit(path, os.path.basename(path), aceptado, motivo)
         # REQ-054 — el chip muestra la imagen que va a viajar, no solo su nombre.
         self.attachment_preview.emit(
-            imagenes.miniatura_data_url(path, lado=96) if aceptado and imagenes.es_imagen(path) else ""
+            path, imagenes.miniatura_data_url(path, lado=96) if aceptado and imagenes.es_imagen(path) else "",
         )
         if aceptado:
             logger.info(f"adjunto listo para el proximo mensaje: {path}")
@@ -1560,16 +1595,23 @@ class Bridge(QObject):
             # texto del mensaje, así que va con las del sistema.
             locales = [os.path.normpath(u.toLocalFile()) for u in datos.urls() if u.isLocalFile()]
             if locales:
-                if len(locales) > 1:
-                    self.notice_shown.emit("info", "Se adjunta solo el primer archivo.")
-                self.attach_file(locales[0])
+                # REQ-063 — varios archivos copiados: todos, hasta el tope (el que sobra
+                # avisa por su cuenta).
+                for local in locales:
+                    if not self.attach_file(local) and len(self._pending_attachments) >= imagenes.MAX_ADJUNTOS:
+                        break
                 return
         self.notice_shown.emit("info", "No hay una imagen ni un archivo en el portapapeles.")
 
-    @pyqtSlot()
-    def clear_attachment(self) -> None:
-        """El usuario saco el chip: el archivo ya no viaja con el proximo mensaje."""
-        self._pending_attachment = None
+    @pyqtSlot(str)
+    def clear_attachment(self, path: str = "") -> None:
+        """El usuario saco un chip: ese archivo ya no viaja con el proximo mensaje. Con la
+        ruta vacia se sacan todos."""
+        if not path:
+            self._pending_attachments = []
+            self.attachments_cleared.emit()
+            return
+        self._pending_attachments = [r for r in self._pending_attachments if r != path]
 
     # ------------------------------------------------------------ conversaciones
     @pyqtSlot(str, str)

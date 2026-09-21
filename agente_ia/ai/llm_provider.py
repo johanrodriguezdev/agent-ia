@@ -70,6 +70,19 @@ class LLMToolResponse:
     tool_calls: list
 
 
+def rutas_de_imagen(image_path) -> list:
+    """Return las rutas de imagen que EXISTEN, como lista, venga `image_path` como una ruta
+    sola, una lista de rutas o nada (REQ-063: varias imágenes por mensaje).
+
+    Todos los adaptadores pasan por acá: así ninguno tiene que saber si le llegó una o
+    varias, y una ruta que ya no está en disco simplemente no viaja.
+    """
+    if not image_path:
+        return []
+    crudas = image_path if isinstance(image_path, (list, tuple)) else [image_path]
+    return [str(r) for r in crudas if r and os.path.exists(str(r))]
+
+
 def _cache_key(messages, system_prompt, image_path, provider):
     raw = json.dumps({"m": messages, "s": system_prompt, "i": image_path, "p": provider}, sort_keys=True)
     return hashlib.md5(raw.encode()).hexdigest()
@@ -291,7 +304,7 @@ def _destinos_iniciales(tarea, provider, model_name, vision_provider, image_path
     # REQ-061: la tarea "vision" de `task_providers` (Configuracion -> Modelos -> «Ver
     # imagenes») manda, con su lista de rotacion como cualquier otra tarea. Sin ella, el
     # `vision_provider` de siempre (un proveedor solo, con su modelo por defecto).
-    if image_path and os.path.exists(image_path):
+    if rutas_de_imagen(image_path):
         destinos_vision = [
             (prov, modelo or _MODELO_POR_PROVEEDOR.get(prov, ""))
             for prov, modelo in destinos_de_tarea("vision")
@@ -334,9 +347,11 @@ def generate_response(messages, system_prompt, image_path=None, tools=None, tare
         # REQ-054: una captura de pantalla 4K o una foto de cámara superan lo que los
         # proveedores aceptan por imagen; se manda una copia reducida (misma imagen, menos
         # píxeles) en vez de fallar la subida. Si entra en los límites, va la original.
+        # REQ-063: pueden ser varias; una sola sigue viajando como string, como siempre.
         from core.imagenes import preparar_para_el_modelo
 
-        image_path = preparar_para_el_modelo(image_path)
+        preparadas = [preparar_para_el_modelo(r) for r in rutas_de_imagen(image_path)]
+        image_path = preparadas[0] if len(preparadas) == 1 else (preparadas or None)
     destinos = _destinos_iniciales(tarea, provider, model_name, vision_provider, image_path)
 
     if len(destinos) == 1:
@@ -686,21 +701,25 @@ def _mensajes_para_anthropic(messages, image_path):
         salida.append({"role": mensaje["role"], "content": bloques})
 
     # CA-09: la imagen va al último mensaje de TEXTO del usuario, nunca a uno que
-    # transporta resultados de herramientas.
-    if (image_path and os.path.exists(image_path) and indice_plano is not None
-            and salida[indice_plano]["role"] == "user"):
+    # transporta resultados de herramientas. REQ-063: varias, en el orden en que se
+    # adjuntaron, todas antes del texto.
+    rutas = rutas_de_imagen(image_path)
+    if rutas and indice_plano is not None and salida[indice_plano]["role"] == "user":
         import base64
         from core.imagenes import media_type
 
-        with open(image_path, "rb") as f:
-            image_data = base64.standard_b64encode(f.read()).decode("utf-8")
-        # REQ-054: el tipo REAL del archivo. Antes decía siempre `image/jpeg`, y la API
-        # rechaza una imagen cuyo contenido no coincide con lo declarado: las fotos de
-        # Telegram son JPEG y pasaban, una captura pegada en el escritorio es PNG y no.
-        salida[indice_plano]["content"].insert(0, {
-            "type": "image",
-            "source": {"type": "base64", "media_type": media_type(image_path), "data": image_data},
-        })
+        bloques_imagen = []
+        for ruta in rutas:
+            with open(ruta, "rb") as f:
+                image_data = base64.standard_b64encode(f.read()).decode("utf-8")
+            # REQ-054: el tipo REAL del archivo. Antes decía siempre `image/jpeg`, y la API
+            # rechaza una imagen cuyo contenido no coincide con lo declarado: las fotos de
+            # Telegram son JPEG y pasaban, una captura pegada en el escritorio es PNG y no.
+            bloques_imagen.append({
+                "type": "image",
+                "source": {"type": "base64", "media_type": media_type(ruta), "data": image_data},
+            })
+        salida[indice_plano]["content"][0:0] = bloques_imagen
 
     return salida
 
@@ -776,25 +795,26 @@ def _agregar_estructurado_openai(salida, mensaje):
 def _ultimo_mensaje_openai(mensaje, image_path, imagen_como_bloque, aviso_sin_vision):
     """El último mensaje de texto, con el trato de imagen que cada adaptador ya tenía."""
     texto = mensaje.get("content") or ""
-    tiene_imagen = bool(image_path and os.path.exists(image_path))
+    rutas = rutas_de_imagen(image_path)
 
     if not imagen_como_bloque:
         # DeepSeek: string plano y, si hay imagen, el aviso de que no la puede ver.
-        if tiene_imagen:
+        if rutas:
             texto += aviso_sin_vision
         return {"role": "user", "content": texto}
 
     contenido = [{"type": "text", "text": texto}]
-    if tiene_imagen:
+    if rutas:
         import base64
         from core.imagenes import media_type
 
-        with open(image_path, "rb") as f:
-            image_data = base64.standard_b64encode(f.read()).decode("utf-8")
-        contenido.append({
-            "type": "image_url",
-            "image_url": {"url": f"data:{media_type(image_path)};base64,{image_data}"},
-        })
+        for ruta in rutas:
+            with open(ruta, "rb") as f:
+                image_data = base64.standard_b64encode(f.read()).decode("utf-8")
+            contenido.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:{media_type(ruta)};base64,{image_data}"},
+            })
     return {"role": "user", "content": contenido}
 
 
@@ -868,10 +888,11 @@ def _ask_gemini(messages, system_prompt, image_path, model_name):
     chat = model.start_chat(history=gemini_msgs)
     
     last_msg_content = messages[-1]["content"] if messages else ""
-    if image_path and os.path.exists(image_path):
+    rutas = rutas_de_imagen(image_path)
+    if rutas:
         from PIL import Image
-        img = Image.open(image_path)
-        response = chat.send_message([img, last_msg_content])
+        imagenes_pil = [Image.open(ruta) for ruta in rutas]
+        response = chat.send_message([*imagenes_pil, last_msg_content])
     else:
         response = chat.send_message(last_msg_content)
         
@@ -890,10 +911,14 @@ def _ask_ollama(messages, system_prompt, image_path, model_name):
         ollama_msgs.append({"role": m["role"], "content": m["content"]})
         
     last_msg = {"role": "user", "content": messages[-1]["content"] if messages else ""}
-    if image_path and os.path.exists(image_path):
+    rutas = rutas_de_imagen(image_path)
+    if rutas:
         import base64
-        with open(image_path, "rb") as f:
-            last_msg["images"] = [base64.standard_b64encode(f.read()).decode("utf-8")]
+        codificadas = []
+        for ruta in rutas:
+            with open(ruta, "rb") as f:
+                codificadas.append(base64.standard_b64encode(f.read()).decode("utf-8"))
+        last_msg["images"] = codificadas
     ollama_msgs.append(last_msg)
     
     # Desactivar "thinking" para modelos qwen3 (causa 500 sin esto)

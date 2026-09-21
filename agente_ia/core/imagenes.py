@@ -28,7 +28,7 @@ import os
 import re
 import tempfile
 import time
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -59,10 +59,16 @@ BYTES_MAXIMOS_PARA_EL_MODELO = 4 * 1024 * 1024
 
 _MARCADOR_ARCHIVO = "[Archivo adjunto: {ruta}]"
 _MARCADOR_IMAGEN = "[Imagen adjunta: {ruta}]"
-#: El marcador va SIEMPRE al final del mensaje, en su propio párrafo (`Bridge._con_adjunto`).
-_RE_MARCADOR = re.compile(
-    r"(?:\n\n|^)\[(?:Archivo adjunto|Imagen adjunta): (?P<ruta>[^\]\n]+)\]\s*$"
+#: Cuántos adjuntos viajan con un mensaje (REQ-063). Cuatro capturas ya son una
+#: comparación; más es una galería, y cada una cuesta tokens.
+MAX_ADJUNTOS = 4
+#: Los marcadores van SIEMPRE al final del mensaje, en su propio párrafo, uno por línea
+#: (`Bridge._con_adjunto`). El bloque entero se reconoce de una vez.
+_RE_UN_MARCADOR = r"\[(?:Archivo adjunto|Imagen adjunta): [^\]\n]+\]"
+_RE_BLOQUE_MARCADORES = re.compile(
+    r"(?:\n\n|^)(?P<bloque>" + _RE_UN_MARCADOR + r"(?:\n" + _RE_UN_MARCADOR + r")*)\s*$"
 )
+_RE_RUTA_EN_MARCADOR = re.compile(r"\[(?:Archivo adjunto|Imagen adjunta): (?P<ruta>[^\]\n]+)\]")
 
 #: Copias reducidas ya hechas en este proceso: `(ruta, tamaño, mtime) -> ruta reducida`.
 #: El bucle de razonamiento llama a `generate_response` una vez por vuelta con la misma
@@ -308,28 +314,45 @@ def resolver_para_mirar(ruta: Optional[str]) -> str:
     return real
 
 
-def marcar_adjunto(texto: str, ruta: str) -> str:
-    """Return el texto con el marcador del adjunto al final.
+def marcar_adjuntos(texto: str, rutas: List[str]) -> str:
+    """Return el texto con un marcador por adjunto al final, uno por línea (REQ-063).
 
     Para una imagen dice «Imagen adjunta»: el modelo la recibe como imagen en ese mismo
     turno, y en los turnos siguientes —donde ya no viaja— el marcador le recuerda que la
     hubo y dónde está.
     """
-    plantilla = _MARCADOR_IMAGEN if es_imagen(ruta) else _MARCADOR_ARCHIVO
-    return f"{texto}\n\n{plantilla.format(ruta=ruta)}"
+    lineas = [
+        (_MARCADOR_IMAGEN if es_imagen(r) else _MARCADOR_ARCHIVO).format(ruta=r)
+        for r in rutas if r
+    ]
+    if not lineas:
+        return texto
+    return f"{texto}\n\n" + "\n".join(lineas)
+
+
+def marcar_adjunto(texto: str, ruta: str) -> str:
+    """Un solo adjunto: `marcar_adjuntos` con una lista de uno."""
+    return marcar_adjuntos(texto, [ruta])
+
+
+def separar_adjuntos(texto: Optional[str]) -> Tuple[str, List[str]]:
+    """Return `(texto sin los marcadores, rutas de los adjuntos en orden)`.
+
+    Es lo que usa la burbuja del usuario para mostrar miniaturas o chips en vez de las
+    rutas crudas entre corchetes. Solo reconoce el bloque de marcadores al final del
+    mensaje, que es donde `marcar_adjuntos` lo pone.
+    """
+    if not texto:
+        return "", []
+    coincidencia = _RE_BLOQUE_MARCADORES.search(texto)
+    if not coincidencia:
+        return texto, []
+    rutas = [m.group("ruta").strip() for m in _RE_RUTA_EN_MARCADOR.finditer(coincidencia.group("bloque"))]
+    return texto[:coincidencia.start()].rstrip(), [r for r in rutas if r]
 
 
 def separar_adjunto(texto: Optional[str]) -> Tuple[str, Optional[str]]:
-    """Return `(texto sin el marcador, ruta del adjunto o None)`.
-
-    Es lo que usa la burbuja del usuario para mostrar una miniatura o un chip con el nombre
-    en vez de la ruta cruda entre corchetes. Solo reconoce el marcador al final del mensaje,
-    que es donde `marcar_adjunto` lo pone.
-    """
-    if not texto:
-        return "", None
-    coincidencia = _RE_MARCADOR.search(texto)
-    if not coincidencia:
-        return texto, None
-    ruta = coincidencia.group("ruta").strip()
-    return texto[:coincidencia.start()].rstrip(), ruta or None
+    """Return `(texto sin los marcadores, primera ruta o None)`. Para quien solo necesita
+    saber si hubo un adjunto; con varios, `separar_adjuntos`."""
+    limpio, rutas = separar_adjuntos(texto)
+    return limpio, (rutas[0] if rutas else None)

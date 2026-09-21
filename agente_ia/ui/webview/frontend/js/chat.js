@@ -117,10 +117,18 @@ function buildMessageNode(item) {
 
   const bubble = document.createElement("div");
   bubble.className = "bubble";
-  // REQ-054 — el adjunto del mensaje del usuario: la miniatura de la imagen o un chip con
-  // el nombre del archivo. Python ya sacó el marcador «[Imagen adjunta: …]» del `html`.
-  if (item.adjunto && typeof item.adjunto === "object") {
-    bubble.appendChild(buildAdjunto(item.adjunto));
+  // REQ-054/063 — los adjuntos del mensaje del usuario: una miniatura por imagen (en
+  // fila) y un chip por archivo. Python ya sacó los marcadores «[Imagen adjunta: …]» del
+  // `html`.
+  const adjuntos = Array.isArray(item.adjuntos) ? item.adjuntos
+                 : (item.adjunto && typeof item.adjunto === "object" ? [item.adjunto] : []);
+  if (adjuntos.length) {
+    const fila = document.createElement("div");
+    fila.className = "bubble-adjuntos" + (adjuntos.length > 1 ? " varios" : "");
+    for (const adjunto of adjuntos) {
+      if (adjunto && typeof adjunto === "object") fila.appendChild(buildAdjunto(adjunto));
+    }
+    bubble.appendChild(fila);
   }
   // CA-13, §5.2: único campo insertado vía innerHTML — ya sanitizado server-side.
   if (item.html) {

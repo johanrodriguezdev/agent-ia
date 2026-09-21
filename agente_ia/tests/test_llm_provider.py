@@ -409,3 +409,59 @@ def test_sin_vision_provider_ni_tarea_la_imagen_va_al_modelo_general(monkeypatch
     destinos = llm_provider._destinos_iniciales("razonamiento", "deepseek", "deepseek-chat", "", ruta)
 
     assert destinos == [("deepseek", "deepseek-chat")]
+
+
+# ─────────────────────────────────────────────
+#  REQ-063 — varias imágenes en una misma llamada
+# ─────────────────────────────────────────────
+
+def test_rutas_de_imagen_acepta_una_ruta_una_lista_o_nada(tmp_path):
+    a = _png_de_prueba(tmp_path, "a.png")
+    b = _png_de_prueba(tmp_path, "b.png")
+    assert llm_provider.rutas_de_imagen(None) == []
+    assert llm_provider.rutas_de_imagen("") == []
+    assert llm_provider.rutas_de_imagen(a) == [a]
+    assert llm_provider.rutas_de_imagen([a, b]) == [a, b]
+    assert llm_provider.rutas_de_imagen([a, str(tmp_path / "no.png")]) == [a]   # la que no está no viaja
+
+
+def test_anthropic_manda_un_bloque_por_imagen_antes_del_texto(tmp_path):
+    a = _png_de_prueba(tmp_path, "a.png")
+    b = _png_de_prueba(tmp_path, "b.png")
+
+    salida = llm_provider._mensajes_para_anthropic([{"role": "user", "content": "¿cuál es mejor?"}], [a, b])
+
+    tipos = [bloque["type"] for bloque in salida[0]["content"]]
+    assert tipos == ["image", "image", "text"]
+
+
+def test_openai_manda_un_image_url_por_imagen(tmp_path):
+    a = _png_de_prueba(tmp_path, "a.png")
+    b = _png_de_prueba(tmp_path, "b.png")
+
+    mensaje = llm_provider._ultimo_mensaje_openai(
+        {"role": "user", "content": "¿cuál?"}, [a, b], imagen_como_bloque=True, aviso_sin_vision="",
+    )
+
+    assert [c["type"] for c in mensaje["content"]] == ["text", "image_url", "image_url"]
+
+
+def test_generate_response_prepara_cada_imagen_y_una_sola_sigue_siendo_string(monkeypatch, tmp_path):
+    from core import imagenes
+
+    a = _png_de_prueba(tmp_path, "a.png")
+    b = _png_de_prueba(tmp_path, "b.png")
+    monkeypatch.setattr(imagenes, "preparar_para_el_modelo", lambda r: r + ".mini")
+    monkeypatch.setattr(llm_provider, "get_provider_config", lambda: ("anthropic", "", "", "modelo-x"))
+    monkeypatch.setattr(llm_provider, "destinos_de_tarea", lambda tarea: [])
+    recibidas = []
+    monkeypatch.setattr(llm_provider, "_uncached_call",
+                        lambda prov, messages, sp, image_path, model, tools=None: recibidas.append(image_path) or "ok")
+    monkeypatch.setattr(llm_provider, "_debe_cachear", lambda tools, messages: False)
+    monkeypatch.setattr(llm_provider.provider_health, "ordenar_por_disponibilidad", lambda c: c)
+    monkeypatch.setattr(llm_provider.provider_health, "registrar_exito", lambda *a, **k: None)
+
+    generate_response([{"role": "user", "content": "hola"}], "sys", image_path=[a, b])
+    generate_response([{"role": "user", "content": "hola"}], "sys", image_path=a)
+
+    assert recibidas == [[a + ".mini", b + ".mini"], a + ".mini"]

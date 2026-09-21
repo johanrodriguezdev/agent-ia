@@ -178,7 +178,8 @@ export function requestAssignableItems() { _bridge.request_assignable_items(); }
 export function onProjectItemsLoaded(cb) { _bridge.project_items_loaded.connect(cb); }
 export function onAssignableItemsLoaded(cb) { _bridge.assignable_items_loaded.connect(cb); }
 export function onDragOverChanged(cb) { _bridge.drag_over_changed.connect(cb); }
-export function clearAttachment() { _bridge.clear_attachment(); }
+export function clearAttachment(path) { _bridge.clear_attachment(path || ""); }   // REQ-063: por ruta; "" = todos
+export function onAttachmentsCleared(cb) { _bridge.attachments_cleared.connect(cb); }
 
 // ------------------------------------------------------------ modelo por tarea
 export function requestTaskModels() { _bridge.request_task_models(); }

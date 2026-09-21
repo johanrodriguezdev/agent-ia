@@ -221,33 +221,41 @@
   color: var(--danger);
 }
 
-#attachment-chip {
+/* REQ-054/063 — los adjuntos del próximo mensaje, un chip por archivo, en fila. */
+#attachment-chips {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px;
   margin-top: 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 6px 10px;
-  font-size: 12.5px;
-  color: var(--text-primary);
-  width: fit-content;
 }
 
-/* Addendum REQ-016 (verificación visual pre-prueba-manual del orquestador) — mismo bug de
-   especificidad ya diagnosticado y corregido para `#typing-indicator` en REQ-015/CA-15 (ver
-   chat.css): la regla de arriba (`#attachment-chip { display: flex }`, un selector de ID) le
-   gana en especificidad a `[hidden] { display: none }` del user-agent stylesheet, así que el
-   chip quedaba SIEMPRE visible (vacío, sin nombre de archivo) aunque `index.html` lo declare
-   con el atributo `hidden` por defecto. Este selector (ID + atributo) tiene más especificidad
-   que el de arriba y restaura el comportamiento de `hidden` — el chip solo aparece cuando
-   `composer.js::showAttachment()` le saca el atributo al adjuntar un archivo real. */
-#attachment-chip[hidden] {
+/* ID + atributo para ganarle al `display: flex` de arriba (mismo bug de especificidad que
+   `#typing-indicator`, REQ-015/CA-15): sin chips no ocupa sitio. */
+#attachment-chips[hidden] {
   display: none;
 }
 
-/* REQ-054 — la miniatura del adjunto dentro del chip, si es una imagen. */
-#attachment-chip-thumb {
+.attachment-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 6px 8px 6px 10px;
+  font-size: 12.5px;
+  color: var(--text-primary);
+  max-width: 260px;
+  animation: fadeSlideIn 180ms ease;
+}
+
+.attachment-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* La miniatura del adjunto dentro del chip, si es una imagen. */
+.attachment-chip-thumb {
   display: block;
   width: 36px;
   height: 36px;
@@ -256,12 +264,12 @@
   flex: none;
 }
 
-#attachment-chip-thumb[hidden] {
+.attachment-chip-thumb[hidden] {
   display: none;
 }
 
 /* Con miniatura no hace falta el clip: la imagen ya dice qué es. */
-#attachment-chip:has(#attachment-chip-thumb:not([hidden])) .attachment-chip-icon {
+.attachment-chip.con-miniatura .attachment-chip-icon {
   display: none;
 }
 
@@ -270,24 +278,25 @@
   flex: none;
 }
 
-#attachment-chip.rechazado {
+.attachment-chip.rechazado {
   color: var(--text-secondary);
   border-style: dashed;
 }
 
-#attachment-chip-remove {
+.attachment-chip-remove {
   border: none;
   background: transparent;
   color: var(--text-secondary);
   border-radius: var(--radius-sm);
   width: 20px;
   height: 20px;
+  flex: none;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-#attachment-chip-remove:hover {
+.attachment-chip-remove:hover {
   color: var(--text-primary);
 }
 

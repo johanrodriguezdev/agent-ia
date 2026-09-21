@@ -147,7 +147,7 @@ def test_nombre_de_archivo_dropeado_xss_no_ejecuta_queda_como_texto_literal(read
     fired = _run_js_sync(page, "window.__xss_fired_file === true")
     assert fired is not True
 
-    text = _run_js_sync(page, "document.getElementById('attachment-chip-name').textContent")
+    text = _run_js_sync(page, "document.querySelector('#attachment-chips .attachment-chip-name').textContent")
     assert text == payload
 
 

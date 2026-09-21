@@ -1,0 +1,3 @@
+3359 passed, 44 warnings in 394.67s (0:06:34)
+La base real (ai/unified_memory.db) no recibió ninguna fila durante la suite (ORION_MEMORY_DB → temporal).
+Suite completa (python -m pytest tests/ -q) — 2026-09-21, antes del commit de REQ-063

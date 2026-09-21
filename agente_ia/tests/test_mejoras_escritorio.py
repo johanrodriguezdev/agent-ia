@@ -573,7 +573,7 @@ def bridge_minimo(monkeypatch):
     from ui.webview.bridge import Bridge
 
     bridge = Bridge.__new__(Bridge)
-    bridge._pending_attachment = None
+    bridge._pending_attachments = []
     bridge._pending_user_text = ""
     bridge._resolution_in_flight = False
     bridge._turno_id = None
@@ -581,6 +581,7 @@ def bridge_minimo(monkeypatch):
     bridge._conversation_id = "c1"
     bridge.file_attached = MagicMock()
     bridge.attachment_preview = MagicMock()
+    bridge.attachments_cleared = MagicMock()   # REQ-063
     bridge.notice_shown = MagicMock()
     return bridge
 
@@ -594,7 +595,7 @@ def test_adjuntar_un_archivo_lo_deja_listo_para_el_proximo_mensaje(bridge_minimo
     archivo.write_text("contenido", encoding="utf-8")
 
     assert Bridge.attach_file(bridge_minimo, str(archivo)) is True
-    assert bridge_minimo._pending_attachment == str(archivo)
+    assert bridge_minimo._pending_attachments == [str(archivo)]
     bridge_minimo.file_attached.emit.assert_called_once()
 
 
@@ -607,7 +608,7 @@ def test_un_archivo_rechazado_no_queda_pendiente(bridge_minimo, tmp_path):
     prohibido.write_bytes(b"MZ")
 
     assert Bridge.attach_file(bridge_minimo, str(prohibido)) is False
-    assert bridge_minimo._pending_attachment is None
+    assert bridge_minimo._pending_attachments == []
 
 
 def test_el_mensaje_lleva_la_ruta_completa_del_adjunto(bridge_minimo, tmp_path):
@@ -615,7 +616,7 @@ def test_el_mensaje_lleva_la_ruta_completa_del_adjunto(bridge_minimo, tmp_path):
 
     archivo = tmp_path / "informe.txt"
     archivo.write_text("contenido", encoding="utf-8")
-    bridge_minimo._pending_attachment = str(archivo)
+    bridge_minimo._pending_attachments = [str(archivo)]
 
     texto, imagen = Bridge._con_adjunto(bridge_minimo, "resumime esto")
 
@@ -632,7 +633,7 @@ def test_el_adjunto_viaja_una_sola_vez(bridge_minimo, tmp_path):
 
     archivo = tmp_path / "informe.txt"
     archivo.write_text("contenido", encoding="utf-8")
-    bridge_minimo._pending_attachment = str(archivo)
+    bridge_minimo._pending_attachments = [str(archivo)]
 
     primero, _ = Bridge._con_adjunto(bridge_minimo, "uno")
     segundo, _ = Bridge._con_adjunto(bridge_minimo, "dos")
@@ -647,14 +648,14 @@ def test_un_adjunto_que_ya_no_existe_avisa_y_no_ensucia_el_mensaje(bridge_minimo
     decirlo que mandarle al agente una ruta que no lleva a nada."""
     from ui.webview.bridge import Bridge
 
-    bridge_minimo._pending_attachment = str(tmp_path / "no-esta.txt")
+    bridge_minimo._pending_attachments = [str(tmp_path / "no-esta.txt")]
 
     texto, imagen = Bridge._con_adjunto(bridge_minimo, "resumime esto")
 
     assert texto == "resumime esto"
     assert imagen is None
     bridge_minimo.notice_shown.emit.assert_called_once()
-    assert bridge_minimo._pending_attachment is None
+    assert bridge_minimo._pending_attachments == []
 
 
 def test_una_imagen_adjunta_va_marcada_en_el_texto_y_vuelve_como_imagen_del_turno(bridge_minimo, tmp_path):
@@ -668,7 +669,7 @@ def test_una_imagen_adjunta_va_marcada_en_el_texto_y_vuelve_como_imagen_del_turn
 
     captura = tmp_path / "captura.png"
     Image.new("RGB", (8, 8), (255, 0, 0)).save(captura)
-    bridge_minimo._pending_attachment = str(captura)
+    bridge_minimo._pending_attachments = [str(captura)]
 
     texto, imagen = Bridge._con_adjunto(bridge_minimo, "¿qué dice esto?")
 
@@ -687,22 +688,22 @@ def test_adjuntar_una_imagen_emite_su_miniatura_y_un_archivo_no(bridge_minimo, t
     captura = tmp_path / "captura.png"
     Image.new("RGB", (8, 8), (0, 0, 255)).save(captura)
     assert Bridge.attach_file(bridge_minimo, str(captura)) is True
-    miniatura = bridge_minimo.attachment_preview.emit.call_args[0][0]
+    miniatura = bridge_minimo.attachment_preview.emit.call_args[0][1]
     assert miniatura.startswith("data:image/")
 
     bridge_minimo.attachment_preview.reset_mock()
     archivo = tmp_path / "notas.txt"
     archivo.write_text("hola", encoding="utf-8")
     assert Bridge.attach_file(bridge_minimo, str(archivo)) is True
-    bridge_minimo.attachment_preview.emit.assert_called_once_with("")
+    bridge_minimo.attachment_preview.emit.assert_called_once_with(str(archivo), "")
 
 
 def test_sacar_el_chip_descarta_el_adjunto(bridge_minimo, tmp_path):
     from ui.webview.bridge import Bridge
 
-    bridge_minimo._pending_attachment = str(tmp_path / "algo.txt")
+    bridge_minimo._pending_attachments = [str(tmp_path / "algo.txt")]
     Bridge.clear_attachment(bridge_minimo)
-    assert bridge_minimo._pending_attachment is None
+    assert bridge_minimo._pending_attachments == []
 
 
 def test_la_skill_de_archivos_entiende_una_ruta_absoluta():

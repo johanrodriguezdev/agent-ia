@@ -12,7 +12,8 @@ import {
   onGuiStateChanged, onWakeStateChanged, onThemeChanged, onChipsLoaded,
   onConversationListUpdated, onConversationCleared, onConversationRemoved,
   onTurnsLoaded, onMessageAppended, onTypingStarted, onTypingStopped, onProgressUpdated,
-  onConfirmationRequested, onFileAttached, onAttachmentPreview, onImageLoaded, onErrorOccurred,
+  onConfirmationRequested, onFileAttached, onAttachmentPreview, onAttachmentsCleared, onImageLoaded,
+  onErrorOccurred,
   onWindowMaximizedChanged, onLastTurnRemoved, onComposerTextRequested,
   onAutonomyChanged,
   onTasksLoaded, onProjectsLoaded, onProjectConversationsLoaded, onProjectRemoved,
@@ -37,6 +38,7 @@ import {
 } from "./chat.js";
 import {
   initComposer, setComposerEnabled, setWakeState, showAttachment, showAttachmentPreview,
+  clearAttachmentChips,
   setComposerText,
   renderModes, renderQuickActions, resetActiveMode, renderModels,
 } from "./composer.js";
@@ -187,7 +189,8 @@ async function bootstrap() {
   onFileAttached((path, name, accepted, reason) => {
     showAttachment(path, name, accepted, reason);
   });
-  onAttachmentPreview((dataUrl) => showAttachmentPreview(dataUrl));   // REQ-054
+  onAttachmentPreview((path, dataUrl) => showAttachmentPreview(path, dataUrl));   // REQ-054/063
+  onAttachmentsCleared(() => clearAttachmentChips());   // REQ-063
   onImageLoaded((ruta, dataUrl) => ponerImagenCompleta(ruta, dataUrl));  // REQ-054
   // REQ-055 — regenerar / editar: el bridge ya saco el ultimo par de la conversacion.
   onLastTurnRemoved(() => removeLastTurn());

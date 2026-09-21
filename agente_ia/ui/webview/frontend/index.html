@@ -330,15 +330,8 @@
             </div>
           </div>
 
-          <div id="attachment-chip" hidden>
-            <!-- REQ-054: miniatura si el adjunto es una imagen (src la pone composer.js) -->
-            <img id="attachment-chip-thumb" alt="" hidden>
-            <svg class="ic ic-sm attachment-chip-icon" aria-hidden="true"><use href="#ic-paperclip"/></svg>
-            <span id="attachment-chip-name"></span>
-            <button type="button" id="attachment-chip-remove" aria-label="Quitar adjunto">
-              <svg class="ic ic-sm" aria-hidden="true"><use href="#ic-close"/></svg>
-            </button>
-          </div>
+          <!-- REQ-054/063: un chip por adjunto (composer.js los arma; miniatura si es imagen) -->
+          <div id="attachment-chips" aria-label="Adjuntos del mensaje" hidden></div>
 
           <!-- REQ-053 — ejemplos de qué pedir; solo con la conversación vacía (chat.css) -->
           <div id="sugerencias" aria-label="Ejemplos de qué pedir"></div>

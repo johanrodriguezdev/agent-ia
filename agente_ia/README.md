@@ -169,8 +169,9 @@ destino suelto como una lista:
 El agente ve las imágenes que le mandas, en el escritorio igual que por Telegram y Discord.
 Pega una captura con **Ctrl+V** (la de Win+Shift+S, o «Copiar imagen» en el navegador),
 arrástrala a la ventana o adjúntala con el clip, y pregunta: «¿qué error es este?», «¿qué
-dice este cartel?». La imagen aparece como miniatura en tu mensaje —también al reabrir la
-conversación— y un click la muestra a tamaño completo.
+dice este cartel?». Hasta cuatro por mensaje («¿qué cambió entre estas dos?»), y una
+imagen sola sin texto también vale. Aparecen como miniaturas en tu mensaje —también al
+reabrir la conversación— y un click las muestra a tamaño completo.
 
 Las imágenes pegadas se guardan en `users_data/<usuario>/imagenes/`. Las que superan lo que
 los proveedores aceptan (1568 px de lado o 4 MB) viajan al modelo como una copia reducida.

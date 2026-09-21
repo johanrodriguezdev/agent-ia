@@ -733,9 +733,9 @@ def test_el_clip_abre_el_dialogo_y_adjunta(ventana, qtbot, monkeypatch, tmp_path
     _click(page, "document.getElementById('attach-btn')")
     _esperar(qtbot, 500)
 
-    assert _run_js(page, "document.getElementById('attachment-chip-name').textContent") \
+    assert _run_js(page, "document.querySelector('#attachment-chips .attachment-chip-name').textContent") \
         == "informe.txt"
-    assert _run_js(page, "document.getElementById('attachment-chip').hidden") is False
+    assert _run_js(page, "document.getElementById('attachment-chips').hidden") is False
     _sin_errores(page)
 
 
@@ -747,7 +747,7 @@ def test_cancelar_el_dialogo_no_adjunta_nada(ventana, qtbot, monkeypatch):
     _click(page, "document.getElementById('attach-btn')")
     _esperar(qtbot, 400)
 
-    assert _run_js(page, "document.getElementById('attachment-chip').hidden") is True
+    assert _run_js(page, "document.getElementById('attachment-chips').hidden") is True
     _sin_errores(page)
 
 
@@ -1165,7 +1165,8 @@ def test_la_imagen_adjunta_se_ve_como_miniatura_y_se_abre_a_tamano_completo(vent
 
     # La miniatura va ANTES del texto, por la propiedad src (nunca innerHTML), y el nombre
     # del archivo se trata como texto.
-    assert _run_js(page, "document.querySelector('.msg-user .bubble').firstElementChild.className") == "bubble-imagen"
+    assert _run_js(page, "document.querySelector('.msg-user .bubble').firstElementChild.className") == "bubble-adjuntos"
+    assert _run_js(page, "document.querySelector('.msg-user .bubble .bubble-adjuntos').firstElementChild.className") == "bubble-imagen"
     assert _run_js(page, "document.querySelector('.bubble-imagen img').getAttribute('src')") == _PNG_1x1
     assert _run_js(page, "document.querySelector('.bubble-imagen img').alt") == "captura <b>x</b>.png"
     assert _run_js(page, "document.querySelector('.bubble-imagen b') === null") is True
@@ -1233,14 +1234,14 @@ def test_pegar_una_imagen_en_el_cuadro_la_adjunta_y_pegar_texto_sigue_pegando(ve
     _esperar(qtbot, 600)
 
     assert _run_js(page, "window.__pasteImagenCancelado") is True   # el pegado nativo se frenó
-    pendiente = window.bridge._pending_attachment
+    pendiente = (window.bridge._pending_attachments or [None])[0]
     assert pendiente and pendiente.startswith(str(tmp_path)) and pendiente.endswith(".png")
-    assert _run_js(page, "document.getElementById('attachment-chip').hidden") is False
-    assert _run_js(page, "document.getElementById('attachment-chip-thumb').hidden") is False
-    assert _run_js(page, "document.getElementById('attachment-chip-thumb').getAttribute('src').startsWith('data:image/')") is True
+    assert _run_js(page, "document.getElementById('attachment-chips').hidden") is False
+    assert _run_js(page, "document.querySelector('.attachment-chip-thumb').hidden") is False
+    assert _run_js(page, "document.querySelector('.attachment-chip-thumb').getAttribute('src').startsWith('data:image/')") is True
 
     # Con texto, gana el texto: no se toca el portapapeles del sistema.
-    window.bridge._pending_attachment = None
+    window.bridge._pending_attachments = []
     _run_js(page, """
       (() => {
         const dt = new DataTransfer();
@@ -1252,12 +1253,13 @@ def test_pegar_una_imagen_en_el_cuadro_la_adjunta_y_pegar_texto_sigue_pegando(ve
     """)
     _esperar(qtbot, 300)
     assert _run_js(page, "window.__pasteTextoCancelado") is False
-    assert window.bridge._pending_attachment is None
+    assert window.bridge._pending_attachments == []
 
-    # Quitar el chip también esconde la miniatura.
-    _click(page, "document.getElementById('attachment-chip-remove')")
+    # Quitar el chip lo saca de la fila, y la fila se esconde al quedar vacía.
+    _click(page, "document.querySelector('.attachment-chip-remove')")
     _esperar(qtbot, 200)
-    assert _run_js(page, "document.getElementById('attachment-chip-thumb').hidden") is True
+    assert _run_js(page, "document.querySelectorAll('.attachment-chip').length") == 0
+    assert _run_js(page, "document.getElementById('attachment-chips').hidden") is True
     _sin_errores(page)
 
 
@@ -1530,6 +1532,51 @@ def test_cada_mensaje_muestra_su_hora_en_la_fila_de_acciones(ventana, qtbot):
     _sin_errores(page)
 
 
+# ---------------------------------------------------------------------------
+# REQ-063: varios adjuntos
+# ---------------------------------------------------------------------------
+
+def test_un_chip_por_adjunto_quitar_uno_deja_el_otro_y_mandar_los_vacia(ventana, qtbot, tmp_path):
+    window, page, _ = ventana
+    a = tmp_path / "a.md"
+    b = tmp_path / "b.md"
+    a.write_text("a", encoding="utf-8")
+    b.write_text("b", encoding="utf-8")
+
+    assert window.bridge.attach_file(str(a)) is True
+    assert window.bridge.attach_file(str(b)) is True
+    _esperar(qtbot, 300)
+    nombres = _run_js(page, "Array.from(document.querySelectorAll('#attachment-chips .attachment-chip-name')).map((n) => n.textContent)")
+    assert nombres == ["a.md", "b.md"]
+
+    # Quitar el primero: se va su chip y su ruta de la lista del bridge; el otro sigue.
+    _click(page, "document.querySelector('#attachment-chips .attachment-chip-remove')")
+    qtbot.waitUntil(lambda: window.bridge._pending_attachments == [str(b)], timeout=4000)
+    assert _run_js(page, "document.querySelectorAll('#attachment-chips .attachment-chip').length") == 1
+
+    # Mandar el mensaje consume el adjunto y la fila de chips desaparece.
+    _run_js(page, "document.getElementById('composer-input').value = 'resumime'; document.getElementById('send-btn').click(); true;")
+    _esperar(qtbot, 600)
+    assert _run_js(page, "document.querySelectorAll('#attachment-chips .attachment-chip').length") == 0
+    assert _run_js(page, "document.getElementById('attachment-chips').hidden") is True
+    assert window.bridge._pending_attachments == []
+    _sin_errores(page)
+
+
+def test_dos_imagenes_en_la_burbuja_van_en_fila(ventana, qtbot):
+    window, page, _ = ventana
+    window.bridge.message_appended.emit(json.dumps({
+        "role": "user", "html": "<p>compará</p>", "timestamp": "t1",
+        "adjuntos": [{"nombre": "a.png", "miniatura": _PNG_1x1, "ruta": ""},
+                     {"nombre": "b.png", "miniatura": _PNG_1x1, "ruta": ""},
+                     {"nombre": "notas.pdf", "miniatura": "", "ruta": ""}],
+    }))
+    _esperar(qtbot, 300)
+    assert _run_js(page, "document.querySelectorAll('.bubble-adjuntos.varios .bubble-imagen').length") == 2
+    assert _run_js(page, "document.querySelector('.bubble-adjuntos .bubble-adjunto span').textContent") == "notas.pdf"
+    _sin_errores(page)
+
+
 # --------------------------------------------------------------------------- cobertura
 
 def test_todo_boton_con_id_del_html_tiene_su_manejador(ventana):
@@ -1547,7 +1594,7 @@ def test_todo_boton_con_id_del_html_tiene_su_manejador(ventana):
         "btn-minimize", "btn-maximize", "btn-close",
         "new-conversation-btn", "sidebar-collapse-toggle", "theme-toggle-btn",
         "load-more-btn", "attach-btn", "wake-toggle-btn", "send-btn", "stop-btn",
-        "model-btn", "attachment-chip-remove",
+        "model-btn",
         "project-add-btn",   # REQ-051 — test_el_mas_de_proyectos_pide_el_nombre_y_lo_crea
         "map-btn",           # REQ-052 — test_el_mapa_dibuja_los_nodos_y_el_detalle_abre_configuracion
         # REQ-058 — test_ctrl_f_abre_la_busqueda_resalta_y_recorre_los_hallazgos

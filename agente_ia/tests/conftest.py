@@ -51,6 +51,20 @@ os.environ.setdefault(
                  "logs", "orion-tests.log"),
 )
 
+# La memoria unificada de los tests va a una base TEMPORAL, nunca a `ai/unified_memory.db`.
+# Se descubrió el 2026-09-21 que los tests del bridge que llegaban a `store_turn()` sin
+# stubear la memoria habían dejado 84 conversaciones de prueba en la barra lateral del
+# usuario (y `conv-1`/`conv-9` con cientos de filas), algunas con llamadas reales al
+# modelo. Los tests que necesitan una base propia siguen redirigiendo `DB_PATH` a
+# `tmp_path`; esto es la red de abajo para los que no lo hacen. Fijado ANTES de importar
+# `ai.memory_manager`, que lee la variable al cargarse.
+import tempfile  # noqa: E402
+
+os.environ.setdefault(
+    "ORION_MEMORY_DB",
+    os.path.join(tempfile.gettempdir(), "orion-tests-unified_memory.db"),
+)
+
 # REQ-015 — `QtWebEngineWidgets`/`QtWebEngineCore` exigen ser importados ANTES de que
 # exista cualquier instancia de `QApplication` en todo el proceso (si no, PyQt6 lanza
 # `ImportError: QtWebEngineWidgets must be imported... before a QCoreApplication instance

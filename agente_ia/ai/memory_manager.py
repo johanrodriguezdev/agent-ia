@@ -15,7 +15,11 @@ from core.address import vocative, vocative_start
 logger = logging.getLogger(__name__)
 
 DB_DIR = os.path.join(os.path.dirname(__file__))
-DB_PATH = os.path.join(DB_DIR, "unified_memory.db")
+# `ORION_MEMORY_DB` (2026-09-21): la suite de tests la apunta a una base temporal desde
+# `tests/conftest.py`. Sin eso, cualquier test que llegara hasta `store_turn()` sin stubear
+# la memoria escribia en la base REAL del usuario: se encontraron 84 conversaciones de
+# prueba en la barra lateral, algunas con llamadas reales al modelo.
+DB_PATH = os.environ.get("ORION_MEMORY_DB") or os.path.join(DB_DIR, "unified_memory.db")
 
 # Columnas leidas por todas las queries que materializan un `MemoryItem`. Se enumeran
 # explicitamente (nunca `SELECT *`) para que agregar columnas al esquema no rompa el

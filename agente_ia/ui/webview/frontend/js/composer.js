@@ -47,7 +47,8 @@ function doSend() {
   if (!_sendEnabled) return;
   const input = $("composer-input");
   const text = input.value.trim();
-  if (!text) return;
+  // REQ-063: una imagen sola, sin texto, también es un mensaje.
+  if (!text && !hayAdjuntos()) return;
   sendMessage(text, _activeModeId || "");
   input.value = "";
   autoGrow(input);
@@ -90,13 +91,6 @@ export function initComposer() {
     toggleWakeWord(turningOn);
   });
 
-  $("attachment-chip-remove").addEventListener("click", () => {
-    $("attachment-chip").hidden = true;
-    showAttachmentPreview("");
-    // Y del lado de Python tambien: si no, el archivo seguiria viajando con el proximo
-    // mensaje aunque el chip ya no este en pantalla.
-    clearAttachment();
-  });
 
   // El clip abre el diálogo nativo de archivos. Antes era solo un cartel que decía
   // "arrastrá el archivo": un clip que no abre nada es un botón roto a los ojos de
@@ -145,13 +139,70 @@ export function setWakeState(state) {
   btn.setAttribute("aria-label", label);
 }
 
+// REQ-063 — un chip por adjunto, en el orden en que entraron. Cada chip conoce su ruta
+// (`dataset.path`) para pedirle al bridge que lo saque; un rechazado se muestra tachado
+// unos segundos y se va solo: no es un adjunto, es un aviso.
+function hayAdjuntos() {
+  return document.querySelectorAll("#attachment-chips .attachment-chip:not(.rechazado)").length > 0;
+}
+
+function sincronizarChips() {
+  const fila = $("attachment-chips");
+  if (fila) fila.hidden = fila.children.length === 0;
+}
+
 export function showAttachment(path, name, accepted, reason) {
-  const chip = $("attachment-chip");
-  const nameEl = $("attachment-chip-name");
+  const fila = $("attachment-chips");
+  if (!fila) return;
+  const existente = fila.querySelector(`.attachment-chip[data-path="${CSS.escape(path)}"]`);
+  if (existente) return;
+
+  const chip = document.createElement("div");
+  chip.className = "attachment-chip" + (accepted ? "" : " rechazado");
+  chip.dataset.path = path;
+
+  const img = document.createElement("img");
+  img.className = "attachment-chip-thumb";
+  img.alt = "";
+  img.hidden = true;
+  chip.appendChild(img);
+
+  chip.appendChild(icon("paperclip", "ic-sm attachment-chip-icon"));
+
+  const nombre = document.createElement("span");
+  nombre.className = "attachment-chip-name";
   // §10.1 — nunca innerHTML: `name` puede no ser texto del propio usuario.
-  nameEl.textContent = accepted ? name : `Rechazado: ${name} (${reason})`;
-  chip.classList.toggle("rechazado", !accepted);
-  chip.hidden = false;
+  nombre.textContent = accepted ? name : `Rechazado: ${name} (${reason})`;
+  nombre.title = accepted ? name : `${name}: ${reason}`;
+  chip.appendChild(nombre);
+
+  const quitar = document.createElement("button");
+  quitar.type = "button";
+  quitar.className = "attachment-chip-remove";
+  quitar.setAttribute("aria-label", `Quitar ${name}`);
+  quitar.appendChild(icon("close", "ic-sm"));
+  quitar.addEventListener("click", () => {
+    chip.remove();
+    sincronizarChips();
+    // Y del lado de Python tambien: si no, el archivo seguiria viajando con el proximo
+    // mensaje aunque el chip ya no este en pantalla.
+    if (accepted) clearAttachment(path);
+  });
+  chip.appendChild(quitar);
+
+  fila.appendChild(chip);
+  sincronizarChips();
+  if (!accepted) {
+    setTimeout(() => { chip.remove(); sincronizarChips(); }, 6000);
+  }
+}
+
+/** REQ-063 — el bridge consumió (o vació) los adjuntos: fuera todos los chips. */
+export function clearAttachmentChips() {
+  const fila = $("attachment-chips");
+  if (!fila) return;
+  fila.replaceChildren();
+  sincronizarChips();
 }
 
 /** REQ-055 — dejar un texto escrito en el cuadro, listo para corregir y mandar. */
@@ -163,17 +214,20 @@ export function setComposerText(texto) {
   input.setSelectionRange(input.value.length, input.value.length);
 }
 
-/** REQ-054 — la miniatura del adjunto en el chip (un `data:` URL que armo Python), o
+/** REQ-054 — la miniatura del adjunto en SU chip (un `data:` URL que armo Python), o
  *  nada si no es una imagen. Va por la propiedad `src`, nunca por innerHTML. */
-export function showAttachmentPreview(dataUrl) {
-  const img = $("attachment-chip-thumb");
-  if (!img) return;
+export function showAttachmentPreview(path, dataUrl) {
+  const chip = document.querySelector(`#attachment-chips .attachment-chip[data-path="${CSS.escape(path)}"]`);
+  if (!chip) return;
+  const img = chip.querySelector(".attachment-chip-thumb");
   if (dataUrl && dataUrl.startsWith("data:image/")) {
     img.src = dataUrl;
     img.hidden = false;
+    chip.classList.add("con-miniatura");
   } else {
     img.removeAttribute("src");
     img.hidden = true;
+    chip.classList.remove("con-miniatura");
   }
 }
 

@@ -354,6 +354,24 @@ mark.hallazgo.hallazgo-actual {
   margin-top: 8px;
 }
 
+/* REQ-063 — varios adjuntos en fila; con más de una imagen, las miniaturas se acotan para
+   que dos o cuatro capturas quepan una al lado de la otra. */
+.bubble-adjuntos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.bubble-adjuntos.varios .bubble-imagen img {
+  max-width: 156px;
+  max-height: 156px;
+}
+
+.bubble-adjuntos + .bubble-texto {
+  margin-top: 8px;
+}
+
 /* Un adjunto que no es imagen: chip con el clip y el nombre, en la misma burbuja. */
 .bubble-adjunto {
   display: inline-flex;

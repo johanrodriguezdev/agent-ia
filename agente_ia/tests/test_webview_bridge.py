@@ -71,6 +71,11 @@ def resolve_falso(monkeypatch):
         return SimpleNamespace(text="respuesta de prueba", matched_by="stub")
 
     monkeypatch.setattr("core.resolution.resolve", resolve)
+    # Y el guardado del turno, que calcula embeddings (torch) y escribe en la base: el
+    # test que necesite ver qué se guarda lo vuelve a stubear a su manera.
+    from ai.memory_manager import memory
+
+    monkeypatch.setattr(memory, "store_turn", lambda *a, **k: None)
 
 
 @pytest.fixture
@@ -181,7 +186,7 @@ def test_send_message_con_imagen_adjunta_se_la_pasa_a_resolve_y_muestra_la_minia
     """El modelo tiene que VER la imagen (`image_path`), y la burbuja del usuario tiene
     que mostrarla como miniatura en vez de la ruta cruda entre corchetes."""
     ruta = _captura(tmp_path)
-    bridge._pending_attachment = ruta
+    bridge._pending_attachments = [ruta]
     recibidos = []
     bridge.message_appended.connect(lambda payload: recibidos.append(json.loads(payload)))
 
@@ -194,8 +199,8 @@ def test_send_message_con_imagen_adjunta_se_la_pasa_a_resolve_y_muestra_la_minia
     usuario = [m for m in recibidos if m["role"] == "user"][0]
     assert "Imagen adjunta" not in usuario["html"]
     assert "¿qué error es este?" in usuario["html"]
-    assert usuario["adjunto"]["nombre"] == "captura.png"
-    assert usuario["adjunto"]["miniatura"].startswith("data:image/")
+    assert usuario["adjuntos"][0]["nombre"] == "captura.png"
+    assert usuario["adjuntos"][0]["miniatura"].startswith("data:image/")
 
 
 def test_send_message_con_un_archivo_que_no_es_imagen_no_manda_image_path(
@@ -205,7 +210,7 @@ def test_send_message_con_un_archivo_que_no_es_imagen_no_manda_image_path(
     una imagen. El chip del adjunto sí llega, sin miniatura."""
     archivo = tmp_path / "informe.pdf"
     archivo.write_bytes(b"%PDF-1.4")
-    bridge._pending_attachment = str(archivo)
+    bridge._pending_attachments = [str(archivo)]
     recibidos = []
     bridge.message_appended.connect(lambda payload: recibidos.append(json.loads(payload)))
 
@@ -214,7 +219,7 @@ def test_send_message_con_un_archivo_que_no_es_imagen_no_manda_image_path(
     llamada = [c for c in fake_run_async if getattr(c["fn"], "__name__", "") == "resolve"][0]
     assert "image_path" not in llamada["kwargs"]
     usuario = [m for m in recibidos if m["role"] == "user"][0]
-    assert usuario["adjunto"] == {"nombre": "informe.pdf", "miniatura": "", "ruta": ""}
+    assert usuario["adjuntos"] == [{"nombre": "informe.pdf", "miniatura": "", "ruta": ""}]
 
 
 def test_send_message_sin_adjunto_no_lleva_el_campo_adjunto(bridge, fake_run_async):
@@ -224,7 +229,7 @@ def test_send_message_sin_adjunto_no_lleva_el_campo_adjunto(bridge, fake_run_asy
     bridge.send_message("hola")
 
     usuario = [m for m in recibidos if m["role"] == "user"][0]
-    assert "adjunto" not in usuario
+    assert "adjuntos" not in usuario
     llamada = [c for c in fake_run_async if getattr(c["fn"], "__name__", "") == "resolve"][0]
     assert "image_path" not in llamada["kwargs"]
 
@@ -248,13 +253,13 @@ def test_al_reabrir_la_conversacion_el_turno_del_usuario_trae_su_miniatura(bridg
 
     cargados = recibidos[0]
     assert cargados[0]["id"] == 1
-    assert cargados[0]["adjunto"]["miniatura"].startswith("data:image/")
+    assert cargados[0]["adjuntos"][0]["miniatura"].startswith("data:image/")
     assert "Imagen adjunta" not in cargados[0]["html"]
-    assert "adjunto" not in cargados[1]
-    assert cargados[2]["adjunto"]["nombre"] == "esta.png"
-    assert cargados[2]["adjunto"]["miniatura"] == ""
+    assert "adjuntos" not in cargados[1]
+    assert cargados[2]["adjuntos"][0]["nombre"] == "esta.png"
+    assert cargados[2]["adjuntos"][0]["miniatura"] == ""
     # Y la que sí está queda habilitada para el visor a tamaño completo.
-    assert cargados[0]["adjunto"]["ruta"] == ruta
+    assert cargados[0]["adjuntos"][0]["ruta"] == ruta
     assert ruta in bridge._imagenes_mostradas
 
 
@@ -269,7 +274,7 @@ def test_request_image_sirve_la_imagen_entera_solo_si_ya_se_mostro(bridge, fake_
     bridge.request_image(otra)          # nunca mostrada: se ignora
     assert cargadas == []
 
-    bridge._pending_attachment = ruta
+    bridge._pending_attachments = [ruta]
     bridge.send_message("mirá")
     bridge.request_image(ruta)
 
@@ -308,11 +313,11 @@ def test_pegar_una_imagen_del_portapapeles_la_guarda_y_la_adjunta(bridge, monkey
     monkeypatch.setattr(QApplication, "clipboard", staticmethod(lambda: _PortapapelesFalso(imagen)))
     monkeypatch.setattr(imagenes, "carpeta_de_imagenes_pegadas", lambda user_id="owner": str(tmp_path))
     miniaturas = []
-    bridge.attachment_preview.connect(miniaturas.append)
+    bridge.attachment_preview.connect(lambda p, m: miniaturas.append(m))
 
     bridge.paste_from_clipboard()
 
-    pendiente = bridge._pending_attachment
+    pendiente = (bridge._pending_attachments or [None])[0]
     assert pendiente and pendiente.startswith(str(tmp_path)) and pendiente.endswith(".png")
     assert imagenes.media_type(pendiente) == "image/png"
     assert miniaturas and miniaturas[-1].startswith("data:image/")
@@ -328,7 +333,7 @@ def test_pegar_un_archivo_copiado_del_explorador_lo_adjunta_por_su_ruta(bridge, 
 
     bridge.paste_from_clipboard()
 
-    assert bridge._pending_attachment == str(archivo)
+    assert bridge._pending_attachments == [str(archivo)]
 
 
 def test_pegar_sin_imagen_ni_archivo_solo_avisa(bridge, monkeypatch):
@@ -340,7 +345,7 @@ def test_pegar_sin_imagen_ni_archivo_solo_avisa(bridge, monkeypatch):
 
     bridge.paste_from_clipboard()
 
-    assert bridge._pending_attachment is None
+    assert bridge._pending_attachments == []
     assert avisos == [("info", "No hay una imagen ni un archivo en el portapapeles.")]
 
 
@@ -435,7 +440,7 @@ def test_edit_last_deja_el_texto_en_el_cuadro_y_devuelve_el_adjunto_al_chip(brid
     assert quitados == [True]
     assert textos == ["¿qué dise esto?"]          # sin el marcador
     assert adjuntos == [(ruta, True)]
-    assert bridge._pending_attachment == ruta
+    assert bridge._pending_attachments == [ruta]
     # No se resuelve nada: el usuario corrige y manda cuando quiere.
     assert not [c for c in fake_run_async if getattr(c["fn"], "__name__", "") == "resolve"]
 
@@ -454,7 +459,7 @@ def test_edit_last_con_un_adjunto_que_ya_no_existe_solo_deja_el_texto(bridge, mo
     bridge.edit_last()
 
     assert textos == ["resumí esto"]
-    assert bridge._pending_attachment is None
+    assert bridge._pending_attachments == []
 
 
 # ---------------------------------------------------------------------------
@@ -1925,7 +1930,7 @@ def test_el_titulo_se_pide_sin_el_marcador_del_adjunto(bridge, monkeypatch, fake
                         lambda cid, u, a, user_id="default": pedidos.append(u) or False)
     monkeypatch.setattr("core.resolution.resolve",
                         lambda *a, **k: SimpleNamespace(text="Dice hola.", matched_by="claude"))
-    bridge._pending_attachment = ruta
+    bridge._pending_attachments = [ruta]
 
     bridge.send_message("¿qué dice esta captura tan larga que sí pasa el umbral?")
 
@@ -1987,3 +1992,112 @@ def test_editar_reserva_el_turno_mientras_borra_y_lo_libera_al_volver(bridge, mo
 
     assert vistos == [True]
     assert bridge._resolution_in_flight is False
+
+
+# ---------------------------------------------------------------------------
+# REQ-063: varias imágenes por mensaje
+# ---------------------------------------------------------------------------
+
+def test_dos_imagenes_viajan_como_lista_y_la_burbuja_trae_dos_miniaturas(bridge, fake_run_async, tmp_path):
+    a = _captura(tmp_path, "a.png")
+    b = _captura(tmp_path, "b.png")
+    bridge._pending_attachments = [a, b]
+    recibidos = []
+    bridge.message_appended.connect(lambda payload: recibidos.append(json.loads(payload)))
+    vaciados = []
+    bridge.attachments_cleared.connect(lambda: vaciados.append(True))
+
+    bridge.send_message("compará estas dos")
+
+    llamada = [c for c in fake_run_async if getattr(c["fn"], "__name__", "") == "resolve"][0]
+    assert llamada["kwargs"]["image_path"] == [a, b]
+    assert llamada["args"][0] == f"compará estas dos\n\n[Imagen adjunta: {a}]\n[Imagen adjunta: {b}]"
+    usuario = [m for m in recibidos if m["role"] == "user"][0]
+    assert [x["nombre"] for x in usuario["adjuntos"]] == ["a.png", "b.png"]
+    assert all(x["miniatura"].startswith("data:image/") for x in usuario["adjuntos"])
+    assert vaciados == [True]                       # los chips se van al mandar
+    assert bridge._pending_attachments == []
+
+
+def test_una_imagen_sola_sin_texto_tambien_es_un_mensaje(bridge, fake_run_async, tmp_path):
+    ruta = _captura(tmp_path)
+    bridge._pending_attachments = [ruta]
+
+    bridge.send_message("")
+
+    llamada = [c for c in fake_run_async if getattr(c["fn"], "__name__", "") == "resolve"][0]
+    assert llamada["args"][0] == f"[Imagen adjunta: {ruta}]"
+    assert llamada["kwargs"]["image_path"] == ruta
+
+
+def test_sin_texto_ni_adjuntos_no_se_manda_nada(bridge, fake_run_async):
+    bridge.send_message("")
+    assert not [c for c in fake_run_async if getattr(c["fn"], "__name__", "") == "resolve"]
+
+
+def test_el_tope_de_adjuntos_y_los_repetidos(bridge, tmp_path):
+    from core import imagenes
+
+    avisos = []
+    bridge.notice_shown.connect(lambda tipo, texto: avisos.append(texto))
+    rutas = [_captura(tmp_path, f"{i}.png") for i in range(imagenes.MAX_ADJUNTOS + 1)]
+
+    for ruta in rutas[:-1]:
+        assert bridge.attach_file(ruta) is True
+    assert bridge.attach_file(rutas[-1]) is False          # el quinto no entra
+    assert bridge._pending_attachments == rutas[:-1]
+    assert any("Hasta 4 adjuntos" in a for a in avisos)
+
+    assert bridge.attach_file(rutas[0]) is True             # repetido: no se duplica
+    assert bridge._pending_attachments.count(rutas[0]) == 1
+    assert any("ya está adjunto" in a for a in avisos)
+
+
+def test_quitar_un_chip_saca_solo_ese_adjunto_y_vacio_saca_todos(bridge, tmp_path):
+    a = _captura(tmp_path, "a.png")
+    b = _captura(tmp_path, "b.png")
+    bridge._pending_attachments = [a, b]
+
+    bridge.clear_attachment(a)
+    assert bridge._pending_attachments == [b]
+
+    vaciados = []
+    bridge.attachments_cleared.connect(lambda: vaciados.append(True))
+    bridge.clear_attachment("")
+    assert bridge._pending_attachments == [] and vaciados == [True]
+
+
+def test_pegar_varios_archivos_del_explorador_los_adjunta_todos(bridge, monkeypatch, tmp_path):
+    from PyQt6.QtWidgets import QApplication
+
+    archivos = []
+    for nombre in ("uno.md", "dos.md", "tres.md"):
+        ruta = tmp_path / nombre
+        ruta.write_text("x", encoding="utf-8")
+        archivos.append(str(ruta))
+    monkeypatch.setattr(QApplication, "clipboard",
+                        staticmethod(lambda: _PortapapelesFalso(urls=archivos)))
+
+    bridge.paste_from_clipboard()
+
+    assert bridge._pending_attachments == archivos
+
+
+def test_editar_devuelve_todos_los_adjuntos_al_chip_y_regenerar_reenvia_todas_las_imagenes(bridge, monkeypatch, fake_run_async, tmp_path):
+    from ai.memory_manager import memory
+
+    a = _captura(tmp_path, "a.png")
+    b = _captura(tmp_path, "b.png")
+    texto = f"compará\n\n[Imagen adjunta: {a}]\n[Imagen adjunta: {b}]"
+    monkeypatch.setattr(memory, "delete_last_turn",
+                        lambda conversation_id, user_id="default": SimpleNamespace(id=7, role="user", text=texto, timestamp="t"))
+    monkeypatch.setattr(memory, "get_conversation_turns", lambda *a, **k: [])
+    bridge._conversation_id = "conv-1"
+
+    bridge.edit_last()
+    assert bridge._pending_attachments == [a, b]
+
+    bridge._pending_attachments = []
+    bridge.regenerate_last()
+    llamada = [c for c in fake_run_async if getattr(c["fn"], "__name__", "") == "resolve"][-1]
+    assert llamada["kwargs"]["image_path"] == [a, b]
