@@ -9,7 +9,9 @@
 // confirm_modal.js para los campos de texto NO confiable, que van por `textContent`.
 
 import { icon } from "./icons.js";
-import { runCommandInTerminal, regenerateLast, editLast } from "./bridge_client.js";
+import {
+  runCommandInTerminal, regenerateLast, editLast, regenerateFrom, editFrom,
+} from "./bridge_client.js";
 import { mostrarAviso } from "./toasts.js";
 import { abrirVisor } from "./visor_imagen.js";
 import { crearMarca } from "./marca.js";
@@ -107,6 +109,10 @@ function etiquetaDeHora(timestamp) {
 function buildMessageNode(item) {
   const wrapper = document.createElement("div");
   wrapper.className = `message msg-${item.role || "assistant"}`;
+  // REQ-064 — el id de la fila en la base, si ya lo tiene (historial): es lo que permite
+  // regenerar/editar desde cualquier punto. Un turno en vivo lo recibe al guardarse
+  // (`turn_ids_assigned`).
+  if (Number.isInteger(item.id) && item.id > 0) wrapper.dataset.id = String(item.id);
 
   // REQ-053 — qué hizo el agente para responder (las herramientas que usó), plegado
   // encima de la respuesta. Llega con el turno en vivo y, desde REQ-059, también con el
@@ -285,7 +291,14 @@ function accionesDelMensaje(bubble) {
     const ok = await copiarAlPortapapeles(bubble.innerText.trim());
     mostrarAviso(ok ? "ok" : "error", ok ? "Respuesta copiada." : "No pude copiar.");
   }));
-  const regenerar = botonDeAccion("refresh", "Regenerar", () => regenerateLast());
+  const regenerar = botonDeAccion("refresh", "Regenerar", () => {
+    const mensaje = bubble.closest(".message");
+    // En la última respuesta, el camino corto de REQ-055; en una del medio, la
+    // conversación vuelve a la pregunta que la provocó (REQ-064, con confirmación).
+    if (mensaje.classList.contains("es-ultimo")) return regenerateLast();
+    const pregunta = preguntaDe(mensaje);
+    if (pregunta && pregunta.dataset.id) regenerateFrom(Number(pregunta.dataset.id));
+  });
   regenerar.classList.add("msg-action-ultimo");
   fila.appendChild(regenerar);
   return fila;
@@ -301,7 +314,11 @@ function accionesDelUsuario(bubble) {
     const ok = await copiarAlPortapapeles((texto ? texto.innerText : bubble.innerText).trim());
     mostrarAviso(ok ? "ok" : "error", ok ? "Mensaje copiado." : "No pude copiar.");
   }));
-  const editar = botonDeAccion("lapiz", "Editar", () => editLast());
+  const editar = botonDeAccion("lapiz", "Editar", () => {
+    const mensaje = bubble.closest(".message");
+    if (mensaje.classList.contains("es-ultimo")) return editLast();
+    if (mensaje.dataset.id) editFrom(Number(mensaje.dataset.id));
+  });
   editar.classList.add("msg-action-ultimo");
   fila.appendChild(editar);
   return fila;
@@ -311,9 +328,16 @@ function accionesDelUsuario(bubble) {
  *  unicos donde «Editar» y «Regenerar» tienen sentido. Se recalcula cada vez que la lista
  *  cambia. La respuesta solo cuenta si es el ultimo mensaje de todos (si el usuario ya
  *  mando otra pregunta, esa respuesta ya no es la ultima palabra). */
+/** El mensaje del usuario que provocó una respuesta: el `.msg-user` anterior más cercano. */
+function preguntaDe(mensaje) {
+  let anterior = mensaje.previousElementSibling;
+  while (anterior && !anterior.classList.contains("msg-user")) anterior = anterior.previousElementSibling;
+  return anterior;
+}
+
 function marcarUltimos() {
   const mensajes = Array.from($("messages").querySelectorAll(".message"));
-  for (const m of mensajes) m.classList.remove("es-ultimo");
+  for (const m of mensajes) m.classList.remove("es-ultimo", "con-id");
   const ultimo = mensajes[mensajes.length - 1];
   if (!ultimo) return;
   if (ultimo.classList.contains("msg-assistant")) {
@@ -326,6 +350,43 @@ function marcarUltimos() {
       }
     }
   }
+  // REQ-064 — los del medio también ofrecen Regenerar/Editar, si están en la base (tienen
+  // id). Un par que terminó en error y quedó atrás no lo tiene y no los ofrece.
+  for (const m of mensajes) {
+    if (m.classList.contains("msg-user") && m.dataset.id) m.classList.add("con-id");
+    if (m.classList.contains("msg-assistant")) {
+      const pregunta = preguntaDe(m);
+      if (pregunta && pregunta.dataset.id) m.classList.add("con-id");
+    }
+  }
+}
+
+/** REQ-064 — el turno recién guardado ya tiene ids: se cuelgan a las dos últimas burbujas
+ *  sin id (la pregunta y su respuesta). */
+export function assignTurnIds(idUsuario, idAsistente) {
+  const mensajes = Array.from($("messages").querySelectorAll(".message"));
+  let asistente = null;
+  let usuario = null;
+  for (let i = mensajes.length - 1; i >= 0 && (!asistente || !usuario); i--) {
+    const m = mensajes[i];
+    if (m.dataset.id) break;                     // ya llegamos a lo guardado antes
+    if (!asistente && m.classList.contains("msg-assistant")) asistente = m;
+    else if (asistente && !usuario && m.classList.contains("msg-user")) usuario = m;
+  }
+  if (asistente) asistente.dataset.id = String(idAsistente);
+  if (usuario) usuario.dataset.id = String(idUsuario);
+  marcarUltimos();
+}
+
+/** REQ-064 — la conversación volvió al mensaje con ese id: fuera esa burbuja y todas las
+ *  que vinieron después. */
+export function removeTurnsFrom(id) {
+  const mensajes = Array.from($("messages").querySelectorAll(".message"));
+  const desde = mensajes.findIndex((m) => m.dataset.id === String(id));
+  if (desde === -1) return;
+  for (const m of mensajes.slice(desde)) m.remove();
+  marcarUltimos();
+  syncEmptyState();
 }
 
 /** REQ-055 — el ultimo intercambio salio de la conversacion guardada: se quitan sus dos

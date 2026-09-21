@@ -182,6 +182,13 @@ class Bridge(QObject):
     last_turn_removed = pyqtSignal()
     #: REQ-055 — texto para dejar escrito en el cuadro (editar el último mensaje).
     composer_text_requested = pyqtSignal(str)
+    #: REQ-064 — el turno recién guardado ya tiene ids en la base: (fila user, fila
+    #: assistant). La página se los cuelga a las dos últimas burbujas para poder
+    #: regenerar/editar desde cualquier punto.
+    turn_ids_assigned = pyqtSignal(int, int)
+    #: REQ-064 — la conversación volvió al mensaje con ese id: la página quita esa burbuja
+    #: y todas las posteriores.
+    turns_removed_from = pyqtSignal(int)
     chips_loaded = pyqtSignal(str)                   # json: {modes: [...], quick_actions: [...]} (REQ-026)
     error_occurred = pyqtSignal(str)
     window_maximized_changed = pyqtSignal(bool)
@@ -499,6 +506,78 @@ class Bridge(QObject):
         self.last_turn_removed.emit()
         self._reenviar(usuario.text or "")
 
+    # ------------------------------------------------------------ desde cualquier punto (REQ-064)
+    @pyqtSlot(int)
+    def regenerate_from(self, mensaje_id: int) -> None:
+        """«Regenerar» sobre un mensaje del medio: la conversación vuelve a ese mensaje del
+        usuario (lo que vino después se descarta, con confirmación si hay algo) y se vuelve
+        a mandar."""
+        self._rebobinar(int(mensaje_id), regenerar=True)
+
+    @pyqtSlot(int)
+    def edit_from(self, mensaje_id: int) -> None:
+        """«Editar» sobre un mensaje del medio: igual que `regenerate_from`, pero el texto
+        vuelve al cuadro en vez de mandarse."""
+        self._rebobinar(int(mensaje_id), regenerar=False)
+
+    def _rebobinar(self, mensaje_id: int, *, regenerar: bool) -> None:
+        if self._resolution_in_flight:
+            logger.warning("rebobinar ignorado: hay una resolución en curso")
+            return
+        if not self._conversation_id or not mensaje_id:
+            return
+        if self._guardando_turno:
+            self._accion_tras_guardar = (
+                (lambda: self.regenerate_from(mensaje_id)) if regenerar
+                else (lambda: self.edit_from(mensaje_id))
+            )
+            return
+        # El turno se reserva mientras la confirmación y el borrado están en el pool.
+        self._resolution_in_flight = True
+        conversation_id = self._conversation_id
+        run_async(
+            self._rebobinar_flow,
+            lambda usuario: self._tras_rebobinar(usuario, conversation_id, regenerar),
+            self._on_error_borrando_turno, conversation_id, mensaje_id,
+        )
+
+    def _rebobinar_flow(self, conversation_id: str, mensaje_id: int):
+        """Corre FUERA del hilo de la GUI (la confirmación puede esperar). Return la fila
+        del usuario a la que se volvió, `None` si no se pudo, o `False` si se canceló."""
+        from ai.memory_manager import memory
+        from core.security_manager import format_details, security_manager
+
+        posteriores = memory.turnos_posteriores(conversation_id, mensaje_id, user_id=OWNER_USER_ID)
+        if posteriores is None:
+            return None
+        if posteriores > 0:
+            # Volver atrás borra lo que vino después: eso se confirma, como borrar la
+            # conversación (🟡). En el último par no hay nada después y no se pregunta.
+            detalle = f"{posteriores} mensaje{'s' if posteriores != 1 else ''} posterior{'es' if posteriores != 1 else ''}"
+            if not security_manager.require_confirmation(
+                "chat_rewind", ChannelType.DESKTOP,
+                details=format_details("webview:chat_rewind", {"name": detalle}),
+                user_id=OWNER_USER_ID,
+            ):
+                return False
+        return memory.delete_turns_from(conversation_id, mensaje_id, user_id=OWNER_USER_ID)
+
+    def _tras_rebobinar(self, usuario, conversation_id: str, regenerar: bool) -> None:
+        self._resolution_in_flight = False
+        if usuario is False:
+            return                                  # cancelado por el usuario
+        if usuario is None:
+            self.notice_shown.emit("info", "No encontré ese mensaje en la conversación.")
+            return
+        if conversation_id != self._conversation_id:
+            logger.warning("rebobinar: la conversación cambió mientras tanto; no se sigue")
+            return
+        self.turns_removed_from.emit(int(usuario.id))
+        if regenerar:
+            self._reenviar(usuario.text or "")
+        else:
+            self._devolver_al_cuadro(usuario.text or "")
+
     def _reenviar(self, texto: str) -> None:
         """Vuelve a mandar `texto` (que ya trae su marcador de adjunto) con su imagen si
         el archivo sigue existiendo."""
@@ -749,6 +828,11 @@ class Bridge(QObject):
         (REQ-051), ahora sí se puede."""
         from ai.memory_manager import memory
         from core import conversacion_activa
+
+        # REQ-064 — `store_turn` devuelve los ids de las dos filas: la página se los cuelga
+        # a las burbujas. Un doble viejo que devuelva None no rompe nada.
+        if isinstance(_resultado, tuple) and len(_resultado) == 2 and all(_resultado):
+            self.turn_ids_assigned.emit(int(_resultado[0]), int(_resultado[1]))
 
         pendiente = conversacion_activa.tomar_asignacion_pendiente()
         if pendiente is not None:

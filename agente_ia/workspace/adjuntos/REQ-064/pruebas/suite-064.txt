@@ -1,0 +1,3 @@
+1 failed, 3371 passed, 44 warnings in 384.13s (0:06:24)
+El fallo era test_la_pastilla_ir_al_final… (REQ-060), intermitente bajo carga (esperaba un tiempo fijo al evento de scroll); pasa aislado y en su archivo, y se cambió a esperar la condición (waitUntil). Lo demás en verde.
+Suite completa (python -m pytest tests/ -q) — 2026-09-21, antes del commit de REQ-064

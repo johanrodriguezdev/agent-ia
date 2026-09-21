@@ -87,3 +87,55 @@ def test_no_borra_de_otro_usuario_ni_con_id_vacio(isolated_memory_db):
     assert memory.delete_last_turn("conv-4", user_id="bob") is None
     assert _textos(isolated_memory_db, "conv-4") == ["hola", "hola"]
     assert memory.delete_last_turn("", user_id="alice") is None
+
+
+# --------------------------------------------------------------------------- REQ-064: rebobinar
+
+def _ids(db_path, conversation_id):
+    with sqlite3.connect(db_path) as conn:
+        return [r[0] for r in conn.execute(
+            "SELECT id FROM memories WHERE conversation_id = ? ORDER BY id", (conversation_id,)).fetchall()]
+
+
+def test_store_turn_devuelve_los_ids_de_las_dos_filas(isolated_memory_db):
+    ids = memory.store_turn("hola", "hola", "conv-r")
+    assert ids == tuple(_ids(isolated_memory_db, "conv-r"))
+    assert memory.store_turn("x", "y", "") is None
+
+
+def test_turnos_posteriores_cuenta_lo_que_vino_despues_del_par(isolated_memory_db):
+    u1, _ = memory.store_turn("uno", "r1", "conv-r")
+    u2, _ = memory.store_turn("dos", "r2", "conv-r")
+    u3, _ = memory.store_turn("tres", "r3", "conv-r")
+
+    assert memory.turnos_posteriores("conv-r", u1) == 4      # dos, r2, tres, r3
+    assert memory.turnos_posteriores("conv-r", u2) == 2
+    assert memory.turnos_posteriores("conv-r", u3) == 0
+    assert memory.turnos_posteriores("conv-r", u3 + 999) is None
+    with sqlite3.connect(isolated_memory_db) as conn:
+        asistente = conn.execute("SELECT id FROM memories WHERE text = 'r1'").fetchone()[0]
+    assert memory.turnos_posteriores("conv-r", asistente) is None   # no es una fila del usuario
+
+
+def test_delete_turns_from_borra_desde_ese_mensaje_hasta_el_final(isolated_memory_db):
+    memory.store_turn("uno", "r1", "conv-r")
+    u2, _ = memory.store_turn("dos", "r2", "conv-r")
+    memory.store_turn("tres", "r3", "conv-r")
+    antes = len(memory._embedding_ids)
+
+    usuario = memory.delete_turns_from("conv-r", u2)
+
+    assert usuario is not None and usuario.text == "dos"
+    assert [t.text for t in memory.get_conversation_turns("conv-r")] == ["uno", "r1"]
+    assert len(memory._embedding_ids) == antes - 4
+
+
+def test_delete_turns_from_no_toca_otra_conversacion_ni_otro_usuario_ni_una_fila_del_asistente(isolated_memory_db):
+    u_a, r_a = memory.store_turn("a", "ra", "conv-a")
+    memory.store_turn("b", "rb", "conv-b", user_id="alice")
+
+    assert memory.delete_turns_from("conv-b", u_a) is None            # id de otra conversación
+    assert memory.delete_turns_from("conv-a", r_a) is None            # fila del asistente
+    assert memory.delete_turns_from("conv-a", u_a, user_id="alice") is None
+    assert [t.text for t in memory.get_conversation_turns("conv-a")] == ["a", "ra"]
+    assert [t.text for t in memory.get_conversation_turns("conv-b", user_id="alice")] == ["b", "rb"]

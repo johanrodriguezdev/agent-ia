@@ -761,7 +761,8 @@ mark.hallazgo.hallazgo-actual {
   display: none;
 }
 
-.message.es-ultimo .msg-actions .msg-action-ultimo {
+.message.es-ultimo .msg-actions .msg-action-ultimo,
+.message.con-id .msg-actions .msg-action-ultimo {   /* REQ-064: también en los del medio */
   display: inline-flex;
 }
 

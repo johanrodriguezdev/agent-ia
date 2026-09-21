@@ -7,7 +7,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 from core.address import vocative, vocative_start
@@ -313,8 +313,14 @@ class UnifiedMemory:
 
     def store_turn(self, user_text: str, assistant_text: str, conversation_id: str,
                    user_id: str = "default", matched_by: str = "",
-                   importance: float = 0.5, pasos: Optional[List[str]] = None) -> None:
+                   importance: float = 0.5,
+                   pasos: Optional[List[str]] = None) -> Optional[Tuple[Optional[int], Optional[int]]]:
         """Persiste un turno completo del canal DESKTOP (REQ-013/CA-09).
+
+        Return `(id de la fila del usuario, id de la fila del asistente)` (REQ-064): la
+        pantalla se los cuelga a las burbujas para poder «Regenerar»/«Editar» desde
+        cualquier punto de la conversación, no solo desde el último. `None` si no había
+        `conversation_id`.
 
         Escribe DOS filas `category="interaction"` con el mismo `conversation_id`: el
         texto original del usuario (`role="user"`) y la respuesta de la IA
@@ -327,15 +333,17 @@ class UnifiedMemory:
         """
         if not conversation_id:
             logger.warning("store_turn() sin conversation_id - turno no persistido")
-            return
+            return None
 
+        id_usuario = None
         if user_text:
-            self.store(user_text, user_id=user_id, category="interaction",
-                       importance=importance, source="desktop",
-                       conversation_id=conversation_id, role="user")
+            id_usuario = self.store(user_text, user_id=user_id, category="interaction",
+                                    importance=importance, source="desktop",
+                                    conversation_id=conversation_id, role="user")
         else:
             logger.warning(f"store_turn(): texto de usuario vacio (conv={conversation_id})")
 
+        mem_id = None
         if assistant_text:
             mem_id = self.store(assistant_text, user_id=user_id, category="interaction",
                                 importance=importance, source=f"desktop:{matched_by}",
@@ -347,6 +355,7 @@ class UnifiedMemory:
                 self._guardar_pasos(mem_id, pasos)
         else:
             logger.warning(f"store_turn(): respuesta vacia (conv={conversation_id})")
+        return id_usuario, mem_id
 
     def _guardar_pasos(self, mem_id: int, pasos: List[str]) -> None:
         """Escribe `pasos` como JSON en la fila `mem_id`. Un fallo se registra y no tumba
@@ -714,6 +723,72 @@ class UnifiedMemory:
             return usuario
         except Exception as e:
             logger.error(f"Error borrando el último turno de {conversation_id}: {e}")
+            return None
+
+    def turnos_posteriores(self, conversation_id: str, desde_id: int,
+                           user_id: str = "default") -> Optional[int]:
+        """Return cuántas filas de la conversación vienen DESPUÉS del par que empieza en
+        `desde_id` (REQ-064), o `None` si `desde_id` no es una fila `user` de esa
+        conversación. Es lo que la confirmación de «volver atrás» le dice al usuario."""
+        if not conversation_id or not desde_id:
+            return None
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                fila = conn.execute(
+                    "SELECT role FROM memories WHERE id = ? AND conversation_id = ? AND user_id = ?",
+                    (int(desde_id), conversation_id, user_id),
+                ).fetchone()
+                if fila is None or fila[0] != "user":
+                    return None
+                total = conn.execute(
+                    """SELECT COUNT(*) FROM memories
+                       WHERE conversation_id = ? AND user_id = ? AND archived = 0 AND id > ?""",
+                    (conversation_id, user_id, int(desde_id)),
+                ).fetchone()[0]
+            # La fila siguiente al `user` es su respuesta (parte del mismo par).
+            return max(0, int(total) - 1)
+        except Exception as e:
+            logger.error(f"Error contando turnos posteriores en {conversation_id}: {e}")
+            return None
+
+    def delete_turns_from(self, conversation_id: str, desde_id: int,
+                          user_id: str = "default") -> Optional[MemoryItem]:
+        """Borra desde el mensaje `desde_id` (una fila `user`) hasta el final de la
+        conversación (REQ-064) y devuelve esa fila del usuario, o `None` si no era un
+        mensaje del usuario de esa conversación.
+
+        Es «Regenerar»/«Editar» sobre un mensaje del medio: la conversación vuelve a ese
+        punto y lo que vino después se descarta (sin ramas). Restringido por `user_id` como
+        todo lo demás. Nunca lanza.
+        """
+        if not conversation_id or not desde_id:
+            return None
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                fila = conn.execute(
+                    f"""SELECT {_MEMORY_COLUMNS} FROM memories
+                        WHERE id = ? AND conversation_id = ? AND user_id = ?""",
+                    (int(desde_id), conversation_id, user_id),
+                ).fetchone()
+                if fila is None:
+                    return None
+                usuario = _row_to_item(fila)
+                if usuario.role != "user":
+                    logger.warning(f"delete_turns_from(): la fila {desde_id} no es del usuario")
+                    return None
+                ids = [r[0] for r in conn.execute(
+                    "SELECT id FROM memories WHERE conversation_id = ? AND user_id = ? AND id >= ?",
+                    (conversation_id, user_id, int(desde_id)),
+                ).fetchall()]
+                conn.execute(
+                    "DELETE FROM memories WHERE conversation_id = ? AND user_id = ? AND id >= ?",
+                    (conversation_id, user_id, int(desde_id)),
+                )
+            self._olvidar_embeddings(set(ids))
+            logger.info(f"Conversación {conversation_id} rebobinada al mensaje {desde_id}: {len(ids)} filas fuera")
+            return usuario
+        except Exception as e:
+            logger.error(f"Error rebobinando {conversation_id} desde {desde_id}: {e}")
             return None
 
     def _olvidar_embeddings(self, ids: set) -> None:

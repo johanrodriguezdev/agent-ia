@@ -689,6 +689,9 @@ def _register_default_actions():
     # — a diferencia de REQ-014 (borrado solo alcanzable vía un QPushButton nativo), acá
     # el modal JS ya no es una barrera real. Mismo patrón que delete_file/delete_folder.
     sm.register_action("delete_conversation", RiskLevel.YELLOW)
+    # REQ-064 — volver la conversación a un mensaje anterior borra lo que vino después:
+    # misma familia que borrar la conversación, misma confirmación.
+    sm.register_action("chat_rewind", RiskLevel.YELLOW)
     # REQ-016/CA-08, CA-18, CA-33 — mismo patrón que delete_conversation: son @pyqtSlot
     # invocables desde cualquier script que corra en la página del WebView, no solo desde
     # el botón visible; se clasifican YELLOW y pasan por el mismo

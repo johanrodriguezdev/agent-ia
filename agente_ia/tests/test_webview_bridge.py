@@ -2101,3 +2101,114 @@ def test_editar_devuelve_todos_los_adjuntos_al_chip_y_regenerar_reenvia_todas_la
     bridge.regenerate_last()
     llamada = [c for c in fake_run_async if getattr(c["fn"], "__name__", "") == "resolve"][-1]
     assert llamada["kwargs"]["image_path"] == [a, b]
+
+
+# ---------------------------------------------------------------------------
+# REQ-064: regenerar / editar desde cualquier punto (rebobinar)
+# ---------------------------------------------------------------------------
+
+def _memoria_para_rebobinar(monkeypatch, posteriores, texto="la pregunta del medio"):
+    from ai.memory_manager import memory
+
+    borrados = []
+    monkeypatch.setattr(memory, "turnos_posteriores",
+                        lambda conversation_id, desde_id, user_id="default": posteriores)
+    monkeypatch.setattr(memory, "delete_turns_from",
+                        lambda conversation_id, desde_id, user_id="default": borrados.append(desde_id)
+                        or SimpleNamespace(id=desde_id, role="user", text=texto, timestamp="t"))
+    monkeypatch.setattr(memory, "get_conversation_turns", lambda *a, **k: [])
+    return borrados
+
+
+def test_regenerar_desde_un_mensaje_del_medio_pide_confirmacion_y_rebobina(bridge, monkeypatch, fake_run_async):
+    from core.security_manager import security_manager
+
+    borrados = _memoria_para_rebobinar(monkeypatch, posteriores=3)
+    confirmaciones = []
+    monkeypatch.setattr(security_manager, "require_confirmation",
+                        lambda action_name, channel, details="", user_id="default":
+                        confirmaciones.append((action_name, details)) or True)
+    bridge._conversation_id = "conv-1"
+    quitados = []
+    bridge.turns_removed_from.connect(quitados.append)
+
+    bridge.regenerate_from(41)
+
+    assert confirmaciones[0][0] == "chat_rewind"
+    assert "3 mensajes posteriores" in confirmaciones[0][1]
+    assert borrados == [41]
+    assert quitados == [41]
+    llamada = [c for c in fake_run_async if getattr(c["fn"], "__name__", "") == "resolve"][-1]
+    assert llamada["args"][0] == "la pregunta del medio"
+    assert bridge._resolution_in_flight is False
+
+
+def test_cancelar_la_confirmacion_no_borra_ni_reenvia(bridge, monkeypatch, fake_run_async):
+    from core.security_manager import security_manager
+
+    borrados = _memoria_para_rebobinar(monkeypatch, posteriores=2)
+    monkeypatch.setattr(security_manager, "require_confirmation", lambda *a, **k: False)
+    bridge._conversation_id = "conv-1"
+
+    bridge.regenerate_from(41)
+
+    assert borrados == []
+    assert not [c for c in fake_run_async if getattr(c["fn"], "__name__", "") == "resolve"]
+    assert bridge._resolution_in_flight is False
+
+
+def test_sin_mensajes_posteriores_no_pregunta(bridge, monkeypatch, fake_run_async):
+    from core.security_manager import security_manager
+
+    borrados = _memoria_para_rebobinar(monkeypatch, posteriores=0)
+    monkeypatch.setattr(security_manager, "require_confirmation",
+                        lambda *a, **k: pytest.fail("no debe preguntar"))
+    bridge._conversation_id = "conv-1"
+
+    bridge.regenerate_from(41)
+
+    assert borrados == [41]
+
+
+def test_editar_desde_el_medio_devuelve_ese_texto_al_cuadro(bridge, monkeypatch, fake_run_async):
+    from core.security_manager import security_manager
+
+    _memoria_para_rebobinar(monkeypatch, posteriores=1, texto="corregime esto")
+    monkeypatch.setattr(security_manager, "require_confirmation", lambda *a, **k: True)
+    bridge._conversation_id = "conv-1"
+    textos = []
+    bridge.composer_text_requested.connect(textos.append)
+
+    bridge.edit_from(41)
+
+    assert textos == ["corregime esto"]
+    assert not [c for c in fake_run_async if getattr(c["fn"], "__name__", "") == "resolve"]
+
+
+def test_un_id_que_no_es_del_usuario_o_no_existe_solo_avisa(bridge, monkeypatch, fake_run_async):
+    from ai.memory_manager import memory
+
+    monkeypatch.setattr(memory, "turnos_posteriores", lambda *a, **k: None)
+    monkeypatch.setattr(memory, "delete_turns_from", lambda *a, **k: pytest.fail("no debe borrar"))
+    bridge._conversation_id = "conv-1"
+    avisos = []
+    bridge.notice_shown.connect(lambda tipo, texto: avisos.append(texto))
+
+    bridge.regenerate_from(999)
+
+    assert avisos == ["No encontré ese mensaje en la conversación."]
+
+
+def test_al_guardar_el_turno_se_emiten_los_ids_de_las_burbujas(bridge, monkeypatch, fake_run_async):
+    from ai.memory_manager import memory
+
+    monkeypatch.setattr(memory, "store_turn", lambda *a, **k: (10, 11))
+    monkeypatch.setattr(memory, "get_conversation_turns", lambda *a, **k: [])
+    monkeypatch.setattr(memory, "list_conversations", lambda **k: [])
+    monkeypatch.setattr(memory, "get_conversation_title", lambda *a, **k: "x")
+    ids = []
+    bridge.turn_ids_assigned.connect(lambda u, a: ids.append((u, a)))
+
+    bridge.send_message("hola")
+
+    assert ids == [(10, 11)]

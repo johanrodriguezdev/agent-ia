@@ -14,7 +14,8 @@ import {
   onTurnsLoaded, onMessageAppended, onTypingStarted, onTypingStopped, onProgressUpdated,
   onConfirmationRequested, onFileAttached, onAttachmentPreview, onAttachmentsCleared, onImageLoaded,
   onErrorOccurred,
-  onWindowMaximizedChanged, onLastTurnRemoved, onComposerTextRequested,
+  onWindowMaximizedChanged, onLastTurnRemoved, onComposerTextRequested, onTurnIdsAssigned,
+  onTurnsRemovedFrom,
   onAutonomyChanged,
   onTasksLoaded, onProjectsLoaded, onProjectConversationsLoaded, onProjectRemoved,
   onSecurityOverridesLoaded, onSecurityOverrideSaved, onSecurityOverrideSaveRejected,
@@ -33,7 +34,7 @@ import {
 } from "./sidebar.js";
 import {
   initChat, renderTurns, appendMessage, clearMessages, setTyping, setProgress, updateGuiState,
-  removeLastTurn,
+  removeLastTurn, assignTurnIds, removeTurnsFrom,
   appendChunk, clearChunks,
 } from "./chat.js";
 import {
@@ -195,6 +196,9 @@ async function bootstrap() {
   // REQ-055 — regenerar / editar: el bridge ya saco el ultimo par de la conversacion.
   onLastTurnRemoved(() => removeLastTurn());
   onComposerTextRequested((texto) => setComposerText(texto));
+  // REQ-064 — ids de las burbujas recién guardadas, y rebobinado desde un mensaje.
+  onTurnIdsAssigned((idUsuario, idAsistente) => assignTurnIds(idUsuario, idAsistente));
+  onTurnsRemovedFrom((id) => removeTurnsFrom(id));
   // Los errores del bridge terminaban en un console.error que nadie mira: si fallaba
   // borrar una conversacion o guardar la configuracion, la pantalla no decia nada.
   onErrorOccurred((message) => {

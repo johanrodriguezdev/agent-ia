@@ -93,6 +93,11 @@ export function onImageLoaded(cb) { _bridge.image_loaded.connect(cb); }
 // REQ-055 — regenerar la última respuesta / editar el último mensaje.
 export function regenerateLast() { _bridge.regenerate_last(); }
 export function editLast() { _bridge.edit_last(); }
+// REQ-064 — desde cualquier punto: la conversación vuelve al mensaje `id` del usuario.
+export function regenerateFrom(id) { _bridge.regenerate_from(id); }
+export function editFrom(id) { _bridge.edit_from(id); }
+export function onTurnIdsAssigned(cb) { _bridge.turn_ids_assigned.connect(cb); }
+export function onTurnsRemovedFrom(cb) { _bridge.turns_removed_from.connect(cb); }
 export function onLastTurnRemoved(cb) { _bridge.last_turn_removed.connect(cb); }
 export function onComposerTextRequested(cb) { _bridge.composer_text_requested.connect(cb); }
 export function onChipsLoaded(cb) { _bridge.chips_loaded.connect(cb); }

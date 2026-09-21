@@ -1495,15 +1495,15 @@ def test_la_pastilla_ir_al_final_aparece_lejos_del_final_y_avisa_de_lo_nuevo(ven
     assert _run_js(page, "document.getElementById('ir-al-final').hidden") is True   # al final: nada
 
     _run_js(page, "document.getElementById('chat-area').scrollTop = 0; true;")
-    _esperar(qtbot, 200)
-    assert _run_js(page, "document.getElementById('ir-al-final').hidden") is False
+    # El evento de scroll llega en el siguiente frame; con la suite entera corriendo, ese
+    # frame puede tardar: se espera a la condición, no un tiempo fijo.
+    qtbot.waitUntil(lambda: _run_js(page, "document.getElementById('ir-al-final').hidden") is False, timeout=6000)
     assert _run_js(page, "document.getElementById('ir-al-final-texto').textContent") == "Ir al final"
 
     # Llega una respuesta mientras está arriba: no lo arrastra (CA-16) pero se lo dice.
     _mensaje(window, "assistant", "<p>respuesta nueva</p>", "t99")
-    _esperar(qtbot, 300)
+    qtbot.waitUntil(lambda: _run_js(page, "document.getElementById('ir-al-final').classList.contains('con-nuevos')") is True, timeout=6000)
     assert _run_js(page, "document.getElementById('chat-area').scrollTop") < 50
-    assert _run_js(page, "document.getElementById('ir-al-final').classList.contains('con-nuevos')") is True
     assert _run_js(page, "document.getElementById('ir-al-final-texto').textContent") == "Nuevos mensajes"
 
     _click(page, "document.getElementById('ir-al-final')")
@@ -1574,6 +1574,77 @@ def test_dos_imagenes_en_la_burbuja_van_en_fila(ventana, qtbot):
     _esperar(qtbot, 300)
     assert _run_js(page, "document.querySelectorAll('.bubble-adjuntos.varios .bubble-imagen').length") == 2
     assert _run_js(page, "document.querySelector('.bubble-adjuntos .bubble-adjunto span').textContent") == "notas.pdf"
+    _sin_errores(page)
+
+
+# ---------------------------------------------------------------------------
+# REQ-064: regenerar / editar desde cualquier punto
+# ---------------------------------------------------------------------------
+
+def test_los_mensajes_guardados_del_medio_ofrecen_regenerar_y_editar_y_un_error_no(ventana, qtbot, monkeypatch):
+    from ai.memory_manager import memory
+
+    window, page, registro = ventana
+    # `renderTurns` inserta por tandas con requestAnimationFrame, que no corre con la
+    # ventana sin mostrar en offscreen.
+    window.show()
+    _esperar(qtbot, 300)
+    # Historial cargado: con ids.
+    window.bridge.turns_loaded.emit(json.dumps([
+        {"id": 1, "role": "user", "html": "<p>uno</p>", "timestamp": "t1"},
+        {"id": 2, "role": "assistant", "html": "<p>r1</p>", "timestamp": "t2"},
+        {"id": 3, "role": "user", "html": "<p>dos</p>", "timestamp": "t3"},
+        {"id": 4, "role": "assistant", "html": "<p>r2</p>", "timestamp": "t4"},
+    ]))
+    _esperar(qtbot, 400)
+    visibles = _run_js(page, """
+      Array.from(document.querySelectorAll('.message')).map((m) =>
+        Array.from(m.querySelectorAll('.msg-action-ultimo'))
+             .filter((b) => getComputedStyle(b).display !== 'none')
+             .map((b) => b.querySelector('span').textContent).join(','))
+    """)
+    assert visibles == ["Editar", "Regenerar", "Editar", "Regenerar"]
+
+    # Un par en vivo que terminó en error (sin id) no los ofrece hasta que se guarde.
+    _mensaje(window, "user", "<p>tres</p>", "t5")
+    window.bridge._on_resolve_error("se cayó")
+    _mensaje(window, "user", "<p>cuatro</p>", "t7")
+    _mensaje(window, "assistant", "<p>r4</p>", "t8")
+    _esperar(qtbot, 300)
+    visibles = _run_js(page, """
+      Array.from(document.querySelectorAll('.message')).slice(4).map((m) =>
+        Array.from(m.querySelectorAll('.msg-action-ultimo'))
+             .filter((b) => getComputedStyle(b).display !== 'none').length)
+    """)
+    assert visibles == [0, 0, 1, 1]          # el par con error no; el último par sí (es-ultimo)
+
+    # Al guardarse, las dos últimas burbujas reciben sus ids.
+    window.bridge.turn_ids_assigned.emit(30, 31)
+    _esperar(qtbot, 200)
+    ids = _run_js(page, "Array.from(document.querySelectorAll('.message')).map((m) => m.dataset.id || null)")
+    assert ids == ["1", "2", "3", "4", None, None, "30", "31"]
+
+    # Regenerar en la SEGUNDA respuesta (del medio): la conversación vuelve a «dos» —con
+    # confirmación porque hay mensajes después—, se quitan esa burbuja y las posteriores,
+    # y «dos» se vuelve a mandar.
+    from core.security_manager import security_manager
+
+    confirmaciones = []
+    monkeypatch.setattr(security_manager, "require_confirmation",
+                        lambda action_name, channel, details="", user_id="default":
+                        confirmaciones.append((action_name, details)) or True)
+    monkeypatch.setattr(memory, "turnos_posteriores", lambda cid, desde_id, user_id="default": 4)
+    monkeypatch.setattr(memory, "delete_turns_from",
+                        lambda cid, desde_id, user_id="default": types.SimpleNamespace(
+                            id=desde_id, role="user", text="dos", timestamp="t3"))
+    window.bridge._conversation_id = "conv-x"
+    _click(page, "document.querySelectorAll('.msg-assistant')[1].querySelector('.msg-action-ultimo')")
+    qtbot.waitUntil(lambda: "dos" in registro["mensajes"], timeout=8000)
+    _esperar(qtbot, 500)
+
+    assert confirmaciones and confirmaciones[0][0] == "chat_rewind" and "4 mensajes posteriores" in confirmaciones[0][1]
+    textos = _run_js(page, "Array.from(document.querySelectorAll('.message .bubble')).map((b) => b.textContent.trim())")
+    assert textos == ["uno", "r1", "dos", "respuesta de prueba"]
     _sin_errores(page)
 
 

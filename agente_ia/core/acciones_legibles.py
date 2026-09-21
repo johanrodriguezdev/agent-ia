@@ -123,6 +123,8 @@ _DESCRIPCIONES: Dict[str, str] = {
 
     # ── Datos y memoria ──
     "delete_conversation": "borre una conversación",
+    # REQ-064 — el detalle («3 mensajes posteriores») lo agrega `format_details`.
+    "chat_rewind": "vuelva la conversación a un mensaje anterior y borre lo que vino después",
     "delete_project": "borre un proyecto",
     "delete_task": "borre una tarea",
     "delete_database": "borre su base de datos de memoria",
