@@ -1390,6 +1390,94 @@ def test_el_indicador_de_escritura_es_la_marca_girando(ventana, qtbot):
     _sin_errores(page)
 
 
+# ---------------------------------------------------------------------------
+# REQ-058: buscar dentro de la conversación (Ctrl+F)
+# ---------------------------------------------------------------------------
+
+def _teclear_en_busqueda(page, texto):
+    # En una IIFE: un `const` suelto queda declarado en el ámbito global de la página y la
+    # segunda llamada reventaría con "already been declared".
+    _run_js(page, f"""
+      (() => {{
+        const e = document.getElementById('buscar-en-chat-input');
+        e.value = {json.dumps(texto)};
+        e.dispatchEvent(new Event('input', {{bubbles: true}}));
+      }})(); true;
+    """)
+
+
+def _tecla_en_busqueda(page, key, shift=False):
+    _run_js(page, f"""
+      document.getElementById('buscar-en-chat-input').dispatchEvent(
+        new KeyboardEvent('keydown', {{key: {json.dumps(key)}, shiftKey: {str(shift).lower()}, bubbles: true, cancelable: true}}));
+      true;
+    """)
+
+
+def test_ctrl_f_abre_la_busqueda_resalta_y_recorre_los_hallazgos(ventana, qtbot):
+    window, page, _ = ventana
+    _mensaje(window, "user", "<p>¿Dónde queda el café?</p>", "t1")
+    _mensaje(window, "assistant", "<p>El <b>café</b> de la esquina. Un cafe con leche cuesta poco.</p>", "t2")
+    _mensaje(window, "user", "<p>Gracias.</p>", "t3")
+    _esperar(qtbot, 300)
+
+    assert _run_js(page, "document.getElementById('buscar-en-chat').hidden") is True
+    _run_js(page, "document.getElementById('composer-input').focus(); document.dispatchEvent(new KeyboardEvent('keydown', {key: 'f', ctrlKey: true, bubbles: true, cancelable: true})); true;")
+    _esperar(qtbot, 200)
+    assert _run_js(page, "document.getElementById('buscar-en-chat').hidden") is False
+    assert _run_js(page, "document.activeElement.id") == "buscar-en-chat-input"
+
+    # Sin acentos ni mayúsculas: «cafe» encuentra «café», «Café» y «cafe».
+    _teclear_en_busqueda(page, "cafe")
+    _esperar(qtbot, 200)
+    assert _run_js(page, "document.querySelectorAll('mark.hallazgo').length") == 3
+    assert _run_js(page, "document.getElementById('buscar-en-chat-contador').textContent") == "1 de 3"
+    assert _run_js(page, "document.querySelector('mark.hallazgo-actual').textContent") == "café"
+    # El resaltado no rompió el HTML de alrededor: la negrita sigue envolviendo su café.
+    assert _run_js(page, "document.querySelector('.msg-assistant b mark') !== null") is True
+
+    _tecla_en_busqueda(page, "Enter")
+    assert _run_js(page, "document.getElementById('buscar-en-chat-contador').textContent") == "2 de 3"
+    _tecla_en_busqueda(page, "Enter", shift=True)
+    assert _run_js(page, "document.getElementById('buscar-en-chat-contador').textContent") == "1 de 3"
+    _tecla_en_busqueda(page, "ArrowUp")
+    assert _run_js(page, "document.getElementById('buscar-en-chat-contador').textContent") == "3 de 3"
+
+    _teclear_en_busqueda(page, "zzz")
+    _esperar(qtbot, 100)
+    assert _run_js(page, "document.getElementById('buscar-en-chat-contador').textContent") == "Sin resultados"
+    assert _run_js(page, "document.querySelectorAll('mark.hallazgo').length") == 0
+
+    # Escape cierra, deja el DOM como estaba y devuelve el foco al cuadro de escribir.
+    _teclear_en_busqueda(page, "cafe")
+    _tecla_en_busqueda(page, "Escape")
+    _esperar(qtbot, 100)
+    assert _run_js(page, "document.getElementById('buscar-en-chat').hidden") is True
+    assert _run_js(page, "document.querySelectorAll('mark.hallazgo').length") == 0
+    assert _run_js(page, "document.querySelector('.msg-assistant .bubble-texto').innerHTML") ==         "<p>El <b>café</b> de la esquina. Un cafe con leche cuesta poco.</p>"
+    assert _run_js(page, "document.activeElement.id") == "composer-input"
+    _sin_errores(page)
+
+
+def test_la_busqueda_se_rehace_con_mensajes_nuevos_y_se_cierra_al_cambiar_de_chat(ventana, qtbot):
+    window, page, _ = ventana
+    _mensaje(window, "user", "<p>hola mundo</p>", "t1")
+    _esperar(qtbot, 200)
+    _run_js(page, "document.dispatchEvent(new KeyboardEvent('keydown', {key: 'f', ctrlKey: true, bubbles: true, cancelable: true})); true;")
+    _teclear_en_busqueda(page, "mundo")
+    _esperar(qtbot, 100)
+    assert _run_js(page, "document.getElementById('buscar-en-chat-contador').textContent") == "1 de 1"
+
+    _mensaje(window, "assistant", "<p>Hola, mundo. Mundo grande.</p>", "t2")
+    qtbot.waitUntil(lambda: _run_js(page, "document.querySelectorAll('mark.hallazgo').length") == 3, timeout=4000)
+    assert _run_js(page, "document.getElementById('buscar-en-chat-contador').textContent") == "1 de 3"
+
+    window.bridge.conversation_cleared.emit()
+    _esperar(qtbot, 300)
+    assert _run_js(page, "document.getElementById('buscar-en-chat').hidden") is True
+    _sin_errores(page)
+
+
 # --------------------------------------------------------------------------- cobertura
 
 def test_todo_boton_con_id_del_html_tiene_su_manejador(ventana):
@@ -1410,6 +1498,8 @@ def test_todo_boton_con_id_del_html_tiene_su_manejador(ventana):
         "model-btn", "attachment-chip-remove",
         "project-add-btn",   # REQ-051 — test_el_mas_de_proyectos_pide_el_nombre_y_lo_crea
         "map-btn",           # REQ-052 — test_el_mapa_dibuja_los_nodos_y_el_detalle_abre_configuracion
+        # REQ-058 — test_ctrl_f_abre_la_busqueda_resalta_y_recorre_los_hallazgos
+        "buscar-en-chat-anterior", "buscar-en-chat-siguiente", "buscar-en-chat-cerrar",
     }
     assert set(ids) == esperados, (
         "cambió el inventario de botones del HTML: agregá el nuevo a un test de este "

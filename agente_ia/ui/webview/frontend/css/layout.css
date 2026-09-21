@@ -235,6 +235,7 @@ html, body {
   min-width: 0;
   display: flex;
   flex-direction: column;
+  position: relative;   /* REQ-058: ancla de la barra de búsqueda flotante */
 }
 
 /* Eje de lectura compartido: chat y composer se alinean sobre la misma columna centrada,

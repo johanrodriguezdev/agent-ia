@@ -119,6 +119,109 @@ body.chat-empty #empty-state {
   padding: 10px 14px;
 }
 
+/* -------------------------------------------------------------- buscar en la conversación (REQ-058) */
+
+/* Barra flotante arriba a la derecha del chat, encima de los mensajes. Los tokens y el
+   borde degradado son los de los demás controles; el degradado solo se enciende con el
+   foco dentro, igual que la miniatura al pasar el mouse. */
+#buscar-en-chat {
+  position: absolute;
+  top: 10px;
+  right: 22px;
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px 4px 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  box-shadow: var(--shadow-pop);
+  max-width: min(440px, calc(100% - 44px));
+}
+
+#buscar-en-chat[hidden] {
+  display: none;
+}
+
+/* Con la barra abierta el chat baja lo que ella mide: flota, pero no tapa el primer mensaje. */
+body.buscando-en-chat #messages {
+  padding-top: 62px;
+}
+
+#buscar-en-chat:focus-within {
+  border-color: color-mix(in srgb, var(--marca-2) 55%, var(--border));
+}
+
+.buscar-en-chat-icono {
+  color: var(--text-secondary);
+  flex: none;
+}
+
+#buscar-en-chat-input {
+  flex: 1 1 160px;
+  min-width: 120px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+  padding: 4px 6px;
+}
+
+#buscar-en-chat-contador {
+  flex: none;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  padding: 0 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+#buscar-en-chat.sin-resultados #buscar-en-chat-contador {
+  color: var(--danger);
+}
+
+.buscar-en-chat-btn {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.buscar-en-chat-btn:hover,
+.buscar-en-chat-btn:focus-visible {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.buscar-en-chat-arriba {
+  transform: rotate(180deg);
+}
+
+/* Los hallazgos: un fondo con el tono de la marca; el actual, más marcado y con un
+   borde, para saber dónde está el cursor de la búsqueda. */
+mark.hallazgo {
+  background: color-mix(in srgb, var(--marca-2) 32%, transparent);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 1px;
+}
+
+mark.hallazgo.hallazgo-actual {
+  background: color-mix(in srgb, var(--marca-1) 45%, transparent);
+  outline: 1.5px solid color-mix(in srgb, var(--marca-1) 70%, transparent);
+  outline-offset: 1px;
+}
+
 /* -------------------------------------------------------------- adjuntos del usuario (REQ-054) */
 
 /* La miniatura va dentro de la burbuja, arriba del texto. Es un botón: abre el visor. El

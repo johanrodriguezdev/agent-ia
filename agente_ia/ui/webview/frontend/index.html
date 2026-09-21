@@ -257,6 +257,23 @@
 
     <main id="main-column">
 
+      <!-- REQ-058: buscar dentro de la conversación (Ctrl+F); js/buscar_en_chat.js.
+           Hermana de #chat-area, no hija: flota sobre el chat sin desplazarse con él. -->
+        <div id="buscar-en-chat" role="search" aria-label="Buscar en la conversación" hidden>
+          <svg class="ic ic-sm buscar-en-chat-icono" aria-hidden="true"><use href="#ic-search"/></svg>
+          <input id="buscar-en-chat-input" type="text" placeholder="Buscar en la conversación…"
+                 autocomplete="off" spellcheck="false" aria-label="Texto a buscar">
+          <span id="buscar-en-chat-contador" aria-live="polite"></span>
+          <button type="button" id="buscar-en-chat-anterior" class="buscar-en-chat-btn" title="Anterior (Shift+Enter)" aria-label="Hallazgo anterior">
+            <svg class="ic ic-sm buscar-en-chat-arriba" aria-hidden="true"><use href="#ic-chevron"/></svg>
+          </button>
+          <button type="button" id="buscar-en-chat-siguiente" class="buscar-en-chat-btn" title="Siguiente (Enter)" aria-label="Hallazgo siguiente">
+            <svg class="ic ic-sm" aria-hidden="true"><use href="#ic-chevron"/></svg>
+          </button>
+          <button type="button" id="buscar-en-chat-cerrar" class="buscar-en-chat-btn" title="Cerrar (Esc)" aria-label="Cerrar la búsqueda">
+            <svg class="ic ic-sm" aria-hidden="true"><use href="#ic-close"/></svg>
+          </button>
+        </div>
       <div id="chat-area">
         <div id="empty-state">
           <div id="empty-state-avatar" aria-hidden="true"></div>

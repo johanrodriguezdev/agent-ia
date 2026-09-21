@@ -56,6 +56,7 @@ import { openFlowsPanel, renderFlows } from "./flows_panel.js";
 import { openMapPanel, renderConnectionMap } from "./map_panel.js";
 import { initSugerencias, sortearSugerencias } from "./sugerencias.js";
 import { ponerImagenCompleta } from "./visor_imagen.js";   // REQ-054
+import { initBuscarEnChat, cerrarBusquedaEnChat } from "./buscar_en_chat.js";   // REQ-058
 import {
   openProjectsPanel, renderProjects, renderProjectConversations, handleProjectRemoved,
   renderProjectItems, renderAssignableItems,
@@ -127,6 +128,7 @@ async function bootstrap() {
   initTheme();
   initSidebar();
   initChat();
+  initBuscarEnChat();   // REQ-058
   initComposer();
   initSugerencias();
   initShortcuts({ alternarTerminal: toggleTerminalPanel, chatNuevo: () => newConversation() });
@@ -151,6 +153,7 @@ async function bootstrap() {
 
   onConversationListUpdated((json) => renderConversationList(JSON.parse(json)));
   onConversationCleared(() => {
+    cerrarBusquedaEnChat();   // REQ-058: una búsqueda es de la conversación que se cierra
     clearActiveConversation();
     clearMessages();
     resetActiveMode();   // REQ-026: el modo no sobrevive a una conversación nueva/limpiada
