@@ -893,7 +893,11 @@ def test_las_tareas_ofrecidas_son_las_que_el_codigo_etiqueta():
         if "openclaw-main" not in p.parts and "tests" not in p.parts
     )
     for tarea in bridge_module._TAREAS_ENRUTABLES:
-        assert f'tarea="{tarea["id"]}"' in fuentes, (
+        # «vision» (REQ-061) no es una `tarea=` de `generate_response()`: la consulta
+        # `_destinos_iniciales` cuando hay una imagen, por `destinos_de_tarea("vision")`.
+        usada = (f'tarea="{tarea["id"]}"' in fuentes
+                 or f'destinos_de_tarea("{tarea["id"]}")' in fuentes)
+        assert usada, (
             f"la tarea '{tarea['id']}' se ofrece en la pantalla pero ningun "
             f"generate_response() la usa"
         )

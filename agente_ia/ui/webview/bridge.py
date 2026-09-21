@@ -2608,6 +2608,16 @@ _TAREAS_ENRUTABLES: List[Dict[str, str]] = [
         "descripcion": "Resumir correos y páginas, compactar el historial, destilar "
                        "memoria. Es lo que más conviene mandar a un modelo gratuito.",
     },
+    # REQ-061 — la imagen pegada o adjunta (REQ-054) va a este modelo. Sin nada elegido,
+    # al `vision_provider` de config.json; sin ninguno de los dos, al modelo general, que
+    # puede no verla.
+    {
+        "id": "vision",
+        "label": "Ver imágenes",
+        "descripcion": "Cuando pegás o adjuntás una imagen. Necesita un modelo que vea "
+                       "imágenes (Gemini, Claude, GPT-4o…): uno de solo texto no sirve por "
+                       "barato que sea.",
+    },
 ]
 
 
@@ -2760,6 +2770,21 @@ def _destinos_ya_configurados() -> set:
     return ya
 
 
+def _texto_sin_eleccion_de_vision() -> str:
+    """Qué pasa con una imagen si en «Ver imágenes» no se eligió nada."""
+    try:
+        from ai.llm_provider import get_provider_config
+
+        _, vision_provider, _, _ = get_provider_config()
+    except Exception as e:
+        logger.debug(f"no se pudo leer el vision_provider: {e}")
+        vision_provider = ""
+    if vision_provider:
+        etiqueta = _MODELOS_CONOCIDOS.get(vision_provider, {}).get("label", vision_provider)
+        return f"Usa {etiqueta} (vision_provider de config.json)."
+    return "Usa el modelo general, que puede no ver imágenes."
+
+
 def _build_task_models_payload() -> Dict[str, Any]:
     """Qué modelo atiende cada tarea, y el catálogo para cambiarlo."""
     from ai.llm_provider import destinos_de_tarea
@@ -2775,7 +2800,12 @@ def _build_task_models_payload() -> Dict[str, Any]:
             }
             for proveedor, modelo in destinos_de_tarea(tarea["id"])
         ]
-        tareas.append({**tarea, "destinos": destinos})
+        entrada = {**tarea, "destinos": destinos}
+        if tarea["id"] == "vision":
+            # REQ-061 — sin elección no cae al modelo general sino al `vision_provider`
+            # de config.json (si lo hay): que la pantalla diga la verdad.
+            entrada["sin_eleccion"] = _texto_sin_eleccion_de_vision()
+        tareas.append(entrada)
 
     catalogo = [
         {

@@ -131,6 +131,7 @@ puedes asignar a cada tipo de trabajo el modelo que lo atienda:
 | Respuesta principal | Lo que te contesta en el chat. Necesita un modelo con tool-calling. |
 | Escribir código | Cuando le pides un script. |
 | Trabajo mecánico | Resumir, compactar historial, destilar memoria. Lo que más conviene mandar a un modelo gratuito. |
+| Ver imágenes | Cuando pegas o adjuntas una imagen en el chat. Necesita un modelo que vea imágenes (Gemini, Claude, GPT-4o…). |
 
 Lo que no esté asignado usa el modelo general de siempre, así que dejarlo todo vacío deja el
 comportamiento exactamente como estaba.
@@ -173,8 +174,9 @@ conversación— y un click la muestra a tamaño completo.
 
 Las imágenes pegadas se guardan en `users_data/<usuario>/imagenes/`. Las que superan lo que
 los proveedores aceptan (1568 px de lado o 4 MB) viajan al modelo como una copia reducida.
-Si tu modelo principal no ve imágenes, pon en `vision_provider` (`config.json`) uno que sí
-(por ejemplo `gemini` o `anthropic`): con una imagen de por medio el turno va a ese proveedor.
+Si tu modelo principal no ve imágenes, elige uno que sí en **Configuración → Modelos → Ver
+imágenes** (Gemini, Claude, GPT-4o…): con una imagen de por medio el turno va a ese modelo.
+Sin nada elegido ahí, vale `vision_provider` de `config.json` (por ejemplo `gemini`).
 
 ### Guardar una conversación como archivo
 

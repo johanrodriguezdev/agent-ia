@@ -355,3 +355,57 @@ def test_generate_response_reduce_la_imagen_antes_de_elegir_destino(monkeypatch,
 
     assert respuesta == "ok"
     assert recibidas == [str(tmp_path / "reducida.png")]
+
+
+# ─────────────────────────────────────────────
+#  REQ-061 — «Ver imágenes» como tarea configurable
+# ─────────────────────────────────────────────
+
+def _png_chico(tmp_path):
+    import pytest as _pytest
+
+    _pytest.importorskip("PIL")
+    from PIL import Image
+
+    ruta = tmp_path / "captura.png"
+    Image.new("RGB", (4, 4), (0, 0, 0)).save(ruta, format="PNG")
+    return str(ruta)
+
+
+def test_con_la_tarea_vision_configurada_la_imagen_va_a_esos_modelos(monkeypatch, tmp_path):
+    """Configuración → Modelos → «Ver imágenes» manda, con su lista de rotación."""
+    ruta = _png_chico(tmp_path)
+    monkeypatch.setattr(llm_provider, "destinos_de_tarea",
+                        lambda tarea: [("anthropic", "claude-x"), ("gemini", "")] if tarea == "vision" else [])
+
+    destinos = llm_provider._destinos_iniciales("razonamiento", "deepseek", "deepseek-chat", "gemini", ruta)
+
+    assert destinos[0] == ("anthropic", "claude-x")
+    assert destinos[1][0] == "gemini" and destinos[1][1]     # modelo por defecto del proveedor
+
+
+def test_sin_tarea_vision_vale_el_vision_provider_de_siempre(monkeypatch, tmp_path):
+    ruta = _png_chico(tmp_path)
+    monkeypatch.setattr(llm_provider, "destinos_de_tarea", lambda tarea: [])
+
+    destinos = llm_provider._destinos_iniciales("razonamiento", "deepseek", "deepseek-chat", "gemini", ruta)
+
+    assert len(destinos) == 1 and destinos[0][0] == "gemini"
+
+
+def test_sin_imagen_la_tarea_vision_no_interviene(monkeypatch):
+    monkeypatch.setattr(llm_provider, "destinos_de_tarea",
+                        lambda tarea: [("anthropic", "claude-x")] if tarea == "vision" else [])
+
+    destinos = llm_provider._destinos_iniciales("razonamiento", "deepseek", "deepseek-chat", "gemini", None)
+
+    assert destinos == [("deepseek", "deepseek-chat")]
+
+
+def test_sin_vision_provider_ni_tarea_la_imagen_va_al_modelo_general(monkeypatch, tmp_path):
+    ruta = _png_chico(tmp_path)
+    monkeypatch.setattr(llm_provider, "destinos_de_tarea", lambda tarea: [])
+
+    destinos = llm_provider._destinos_iniciales("razonamiento", "deepseek", "deepseek-chat", "", ruta)
+
+    assert destinos == [("deepseek", "deepseek-chat")]

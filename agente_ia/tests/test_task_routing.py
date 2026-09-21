@@ -179,7 +179,9 @@ def test_con_una_imagen_la_vision_le_gana_al_enrutado_por_tarea(monkeypatch, tmp
 
     recibido = {}
     monkeypatch.setattr(prov, "get_provider_config", _proveedores("deepseek", vision="gemini"))
-    monkeypatch.setattr(prov, "destinos_de_tarea", lambda t: [("ollama", "")])
+    # La tarea «vision» (REQ-061) sin configurar: si estuviera, mandaría ella.
+    monkeypatch.setattr(prov, "destinos_de_tarea",
+                        lambda t: [] if t == "vision" else [("ollama", "")])
 
     def _fake(proveedor, messages, system_prompt, image_path, model):
         recibido["proveedor"] = proveedor

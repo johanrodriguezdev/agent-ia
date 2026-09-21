@@ -1,0 +1,3 @@
+1 failed, 3320 passed, 44 warnings in 385.72s (0:06:25)
+El fallo era test_task_routing::test_con_una_imagen_la_vision_le_gana_al_enrutado_por_tarea, cuyo doble devolvía ollama para TODAS las tareas (incluida la nueva 'vision'); ajustado para dejar 'vision' vacía y reprobado: test_task_routing + test_llm_provider = 51 passed; test_mejoras_escritorio + webview_buttons (modelos) = 19 passed.
+Suite completa (python -m pytest tests/ -q) — 2026-09-21, antes del commit de REQ-061

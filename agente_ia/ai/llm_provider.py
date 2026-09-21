@@ -287,11 +287,23 @@ def _destinos_iniciales(tarea, provider, model_name, vision_provider, image_path
     # modelo de texto no sirve por barato que sea. Y con el proveedor cambia el modelo:
     # pedirle "deepseek-chat" a Gemini falla igual que pedirle "gemini-1.5-flash" a
     # DeepSeek.
-    if image_path and os.path.exists(image_path) and vision_provider:
-        activo, modelo = destinos[0]
-        if vision_provider != activo:
-            modelo = _MODELO_POR_PROVEEDOR.get(vision_provider, "")
-        destinos = [(vision_provider, modelo)]
+    #
+    # REQ-061: la tarea "vision" de `task_providers` (Configuracion -> Modelos -> «Ver
+    # imagenes») manda, con su lista de rotacion como cualquier otra tarea. Sin ella, el
+    # `vision_provider` de siempre (un proveedor solo, con su modelo por defecto).
+    if image_path and os.path.exists(image_path):
+        destinos_vision = [
+            (prov, modelo or _MODELO_POR_PROVEEDOR.get(prov, ""))
+            for prov, modelo in destinos_de_tarea("vision")
+        ]
+        if destinos_vision:
+            logger.debug(f"Imagen de por medio: enrutada a {destinos_vision}")
+            return destinos_vision
+        if vision_provider:
+            activo, modelo = destinos[0]
+            if vision_provider != activo:
+                modelo = _MODELO_POR_PROVEEDOR.get(vision_provider, "")
+            destinos = [(vision_provider, modelo)]
 
     return destinos
 

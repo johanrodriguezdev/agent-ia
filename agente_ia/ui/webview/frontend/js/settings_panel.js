@@ -550,7 +550,9 @@ function buildTaskRow(tarea) {
   if (tarea.destinos.length === 0) {
     const vacio = document.createElement("span");
     vacio.className = "settings-row-desc";
-    vacio.textContent = "Usa el modelo general.";
+    // REQ-061: «Ver imágenes» sin elección cae al `vision_provider` de config.json, no al
+    // modelo general; el bridge manda el texto exacto en `sin_eleccion` cuando difiere.
+    vacio.textContent = tarea.sin_eleccion || "Usa el modelo general.";
     lista.appendChild(vacio);
   }
 
