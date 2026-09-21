@@ -51,6 +51,59 @@ function scrollToBottom() {
   area.scrollTop = area.scrollHeight;
 }
 
+// REQ-060 — «Ir al final». Cuando el usuario sube a releer algo y mientras tanto llega
+// una respuesta, el chat no lo arrastra (CA-16) pero tampoco le decía que había algo
+// nuevo abajo. La pastilla aparece al alejarse del final; si llega contenido mientras
+// está lejos, cambia a «Nuevos mensajes».
+const LEJOS_DEL_FINAL_PX = 240;
+
+function actualizarIrAlFinal() {
+  const boton = $("ir-al-final");
+  if (!boton) return;
+  const area = $("chat-area");
+  const lejos = area.scrollHeight - area.scrollTop - area.clientHeight > LEJOS_DEL_FINAL_PX;
+  if (!lejos) {
+    boton.hidden = true;
+    boton.classList.remove("con-nuevos");
+    $("ir-al-final-texto").textContent = "Ir al final";
+    return;
+  }
+  boton.hidden = false;
+}
+
+function avisarNuevosAbajo() {
+  const boton = $("ir-al-final");
+  if (!boton || boton.hidden) return;
+  boton.classList.add("con-nuevos");
+  $("ir-al-final-texto").textContent = "Nuevos mensajes";
+}
+
+/** Hora del mensaje para la fila de acciones: «01:15» si es de hoy, «19 sept, 01:15» si
+ *  no. Se muestra con las acciones (al pasar el mouse): la fecha exacta importa poco
+ *  mientras se lee y mucho cuando se busca. */
+function horaDelMensaje(timestamp) {
+  if (!timestamp) return "";
+  const fecha = new Date(timestamp);
+  if (Number.isNaN(fecha.getTime())) return "";
+  // Siempre 24 h («14:05»), sea cual sea la configuración regional del equipo.
+  const hora = fecha.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  const hoy = new Date();
+  const mismoDia = fecha.getFullYear() === hoy.getFullYear() && fecha.getMonth() === hoy.getMonth()
+                && fecha.getDate() === hoy.getDate();
+  if (mismoDia) return hora;
+  const dia = fecha.toLocaleDateString([], { day: "numeric", month: "short" });
+  return `${dia}, ${hora}`;
+}
+
+function etiquetaDeHora(timestamp) {
+  const hora = horaDelMensaje(timestamp);
+  if (!hora) return null;
+  const span = document.createElement("span");
+  span.className = "msg-hora";
+  span.textContent = hora;
+  return span;
+}
+
 function buildMessageNode(item) {
   const wrapper = document.createElement("div");
   wrapper.className = `message msg-${item.role || "assistant"}`;
@@ -80,9 +133,15 @@ function buildMessageNode(item) {
 
   if ((item.role || "assistant") === "assistant") {
     decorarBloquesDeCodigo(bubble);
-    wrapper.appendChild(accionesDelMensaje(bubble));
+    const acciones = accionesDelMensaje(bubble);
+    const hora = etiquetaDeHora(item.timestamp);
+    if (hora) acciones.appendChild(hora);
+    wrapper.appendChild(acciones);
   } else if ((item.role || "assistant") === "user") {
-    wrapper.appendChild(accionesDelUsuario(bubble));
+    const acciones = accionesDelUsuario(bubble);
+    const hora = etiquetaDeHora(item.timestamp);
+    if (hora) acciones.insertBefore(hora, acciones.firstChild);
+    wrapper.appendChild(acciones);
   }
 
   if ((item.html || "").length > CLAMP_THRESHOLD) {
@@ -310,6 +369,18 @@ function decorarBloquesDeCodigo(bubble) {
 }
 
 export function initChat() {
+  // REQ-060 — la pastilla «Ir al final» sigue al scroll del chat.
+  const area = $("chat-area");
+  const boton = $("ir-al-final");
+  if (area && boton) {
+    area.addEventListener("scroll", actualizarIrAlFinal, { passive: true });
+    boton.addEventListener("click", () => {
+      area.scrollTo({ top: area.scrollHeight, behavior: "smooth" });
+      boton.hidden = true;
+      boton.classList.remove("con-nuevos");
+      $("ir-al-final-texto").textContent = "Ir al final";
+    });
+  }
   // REQ-057 — mientras el agente piensa, la marca (los anillos de REQ-052) gira más
   // rápido que en la barra: es el mismo pulso de "vivo", acelerado porque está
   // trabajando. Reemplaza a los tres puntos genéricos.
@@ -370,6 +441,7 @@ export function appendChunk(texto) {
   // Markdown se ve recien cuando llega el mensaje definitivo.
   _viva.textContent += texto;
   if (shouldStick) scrollToBottom();
+  else avisarNuevosAbajo();
 }
 
 /** Saca la burbuja viva. La respuesta definitiva ocupa su lugar (o nada, si se cancelo). */
@@ -391,6 +463,8 @@ export function appendMessage(item) {
   syncEmptyState();
   if (shouldStick) {
     scrollToBottom(); // CA-16: no interrumpe si el usuario se alejó del final
+  } else {
+    avisarNuevosAbajo();
   }
 }
 

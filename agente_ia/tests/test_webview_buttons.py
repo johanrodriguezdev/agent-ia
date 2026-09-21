@@ -1478,6 +1478,58 @@ def test_la_busqueda_se_rehace_con_mensajes_nuevos_y_se_cierra_al_cambiar_de_cha
     _sin_errores(page)
 
 
+# ---------------------------------------------------------------------------
+# REQ-060: «Ir al final» y la hora de cada mensaje
+# ---------------------------------------------------------------------------
+
+def test_la_pastilla_ir_al_final_aparece_lejos_del_final_y_avisa_de_lo_nuevo(ventana, qtbot):
+    window, page, _ = ventana
+    # Sin mostrar la ventana el área de chat mide 0 px de alto y no hay scroll que medir.
+    window.show()
+    _esperar(qtbot, 400)
+    for i in range(30):
+        _mensaje(window, "user" if i % 2 == 0 else "assistant", f"<p>{'texto largo ' * 12}{i}</p>", f"t{i}")
+    _esperar(qtbot, 500)
+    assert _run_js(page, "document.getElementById('ir-al-final').hidden") is True   # al final: nada
+
+    _run_js(page, "document.getElementById('chat-area').scrollTop = 0; true;")
+    _esperar(qtbot, 200)
+    assert _run_js(page, "document.getElementById('ir-al-final').hidden") is False
+    assert _run_js(page, "document.getElementById('ir-al-final-texto').textContent") == "Ir al final"
+
+    # Llega una respuesta mientras está arriba: no lo arrastra (CA-16) pero se lo dice.
+    _mensaje(window, "assistant", "<p>respuesta nueva</p>", "t99")
+    _esperar(qtbot, 300)
+    assert _run_js(page, "document.getElementById('chat-area').scrollTop") < 50
+    assert _run_js(page, "document.getElementById('ir-al-final').classList.contains('con-nuevos')") is True
+    assert _run_js(page, "document.getElementById('ir-al-final-texto').textContent") == "Nuevos mensajes"
+
+    _click(page, "document.getElementById('ir-al-final')")
+    qtbot.waitUntil(lambda: _run_js(page, "(() => { const a = document.getElementById('chat-area'); return a.scrollHeight - a.scrollTop - a.clientHeight < 60; })()") is True, timeout=4000)
+    assert _run_js(page, "document.getElementById('ir-al-final').hidden") is True
+    _sin_errores(page)
+
+
+def test_cada_mensaje_muestra_su_hora_en_la_fila_de_acciones(ventana, qtbot):
+    from datetime import datetime
+
+    window, page, _ = ventana
+    hoy = datetime.now().replace(hour=14, minute=5, second=0, microsecond=0)
+    _mensaje(window, "user", "<p>hoy</p>", hoy.isoformat())
+    _mensaje(window, "assistant", "<p>ayer</p>", "2026-01-03T09:30:00")
+    _mensaje(window, "assistant", "<p>sin fecha</p>", "")
+    _esperar(qtbot, 300)
+
+    horas = _run_js(page, "Array.from(document.querySelectorAll('.message')).map((m) => (m.querySelector('.msg-hora') || {textContent: null}).textContent)")
+    assert horas[0].endswith("05") and ":" in horas[0] and "," not in horas[0]
+    assert "," in horas[1] and horas[1].endswith("30")
+    assert horas[2] is None
+    # En el mensaje del usuario la hora va antes de las acciones; en la respuesta, después.
+    assert _run_js(page, "document.querySelector('.msg-user .msg-actions').firstElementChild.className") == "msg-hora"
+    assert _run_js(page, "document.querySelector('.msg-assistant .msg-actions').lastElementChild.className") == "msg-hora"
+    _sin_errores(page)
+
+
 # --------------------------------------------------------------------------- cobertura
 
 def test_todo_boton_con_id_del_html_tiene_su_manejador(ventana):
@@ -1500,6 +1552,7 @@ def test_todo_boton_con_id_del_html_tiene_su_manejador(ventana):
         "map-btn",           # REQ-052 — test_el_mapa_dibuja_los_nodos_y_el_detalle_abre_configuracion
         # REQ-058 — test_ctrl_f_abre_la_busqueda_resalta_y_recorre_los_hallazgos
         "buscar-en-chat-anterior", "buscar-en-chat-siguiente", "buscar-en-chat-cerrar",
+        "ir-al-final",       # REQ-060 — test_la_pastilla_ir_al_final_aparece_lejos_del_final_y_avisa_de_lo_nuevo
     }
     assert set(ids) == esperados, (
         "cambió el inventario de botones del HTML: agregá el nuevo a un test de este "

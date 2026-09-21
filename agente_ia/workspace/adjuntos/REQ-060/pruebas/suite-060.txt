@@ -1,0 +1,2 @@
+3309 passed, 45 warnings in 409.69s (0:06:49)
+Suite completa (python -m pytest tests/ -q) — 2026-09-20, antes del commit de REQ-060

@@ -119,6 +119,80 @@ body.chat-empty #empty-state {
   padding: 10px 14px;
 }
 
+/* -------------------------------------------------------------- ir al final (REQ-060) */
+
+/* Envoltorio pegajoso de altura cero al final del área de scroll: la pastilla flota sobre
+   el último contenido sin ocupar sitio ni depender de la altura del composer. */
+#ir-al-final-wrap {
+  position: sticky;
+  bottom: 0;
+  height: 0;
+  display: flex;
+  justify-content: flex-end;
+  /* Sin esto el botón se estira a la altura del envoltorio (0) y el texto se sale. */
+  align-items: flex-end;
+  pointer-events: none;
+  z-index: 5;
+}
+
+#ir-al-final {
+  pointer-events: auto;
+  flex: none;
+  transform: translateY(-46px);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px 6px 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  box-shadow: var(--shadow-pop);
+  cursor: pointer;
+  animation: fadeSlideIn 180ms ease;
+}
+
+#ir-al-final[hidden] {
+  display: none;
+}
+
+#ir-al-final:hover {
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--marca-2) 55%, var(--border));
+}
+
+/* Llegó algo mientras el usuario estaba arriba: el punto de la marca late al lado. */
+#ir-al-final.con-nuevos {
+  color: var(--text-primary);
+}
+
+#ir-al-final.con-nuevos::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--marca-1), var(--marca-3));
+  animation: marcaRespira 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #ir-al-final { animation: none; }
+  #ir-al-final.con-nuevos::before { animation: none; }
+}
+
+/* -------------------------------------------------------------- hora del mensaje (REQ-060) */
+
+.msg-hora {
+  align-self: center;
+  font-size: 11px;
+  color: var(--text-secondary);
+  opacity: 0.75;
+  padding: 0 6px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 /* -------------------------------------------------------------- buscar en la conversación (REQ-058) */
 
 /* Barra flotante arriba a la derecha del chat, encima de los mensajes. Los tokens y el
