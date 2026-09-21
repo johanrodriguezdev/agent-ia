@@ -1366,6 +1366,30 @@ def test_el_menu_del_chat_ofrece_exportar_a_markdown_y_pide_confirmacion(ventana
     _sin_errores(page)
 
 
+# ---------------------------------------------------------------------------
+# REQ-057: la marca piensa
+# ---------------------------------------------------------------------------
+
+def test_el_indicador_de_escritura_es_la_marca_girando(ventana, qtbot):
+    """Los tres puntos se fueron: mientras el agente responde, la marca (misma geometría
+    que la barra) gira en `#typing-marca`, y la línea de estado va al lado."""
+    window, page, _ = ventana
+    assert _run_js(page, "document.querySelector('#typing-marca svg.marca.marca-animada.marca-pensando') !== null") is True
+    assert _run_js(page, "document.querySelectorAll('#typing-marca .marca-anillo').length") == 3
+
+    window.bridge.typing_started.emit()
+    window.bridge.progress_updated.emit("Buscando en internet: clima")
+    _esperar(qtbot, 300)
+    assert _run_js(page, "document.getElementById('typing-indicator').hidden") is False
+    assert _run_js(page, "getComputedStyle(document.getElementById('typing-marca')).display") == "flex"
+    assert _run_js(page, "document.getElementById('progress-text').textContent") == "Buscando en internet: clima"
+
+    window.bridge.typing_stopped.emit()
+    _esperar(qtbot, 200)
+    assert _run_js(page, "document.getElementById('typing-indicator').hidden") is True
+    _sin_errores(page)
+
+
 # --------------------------------------------------------------------------- cobertura
 
 def test_todo_boton_con_id_del_html_tiene_su_manejador(ventana):

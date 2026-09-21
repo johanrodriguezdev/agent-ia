@@ -47,6 +47,7 @@ import json
 import logging
 import os
 import re
+import time
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
@@ -257,6 +258,9 @@ class Bridge(QObject):
         #: ejecuta en `_tras_guardar_turno()`.
         self._guardando_turno: bool = False
         self._accion_tras_guardar: Optional[Callable[[], None]] = None
+        #: REQ-057 — cuándo arrancó el turno en curso (`time.monotonic()`), para avisar
+        #: solo si la respuesta tardó.
+        self._turno_inicio: Optional[float] = None
         # (conversation_id, texto del usuario, respuesta) del primer turno, a la espera de
         # que el turno esté guardado para pedirle un título (REQ-053).
         self._titulo_pendiente: Optional[tuple] = None
@@ -390,6 +394,7 @@ class Bridge(QObject):
         """
         self._pending_user_text = text
         self._resolution_in_flight = True
+        self._turno_inicio = time.monotonic()   # REQ-057
         self._turno_id = nuevo_turno()
         self._pasos_del_turno = []
         # El reportero se registra por turno y se retira al acabar: fuera de una resolución
@@ -719,6 +724,7 @@ class Bridge(QObject):
             "pasos": self._tomar_pasos(),
         }))
         self.typing_stopped.emit()
+        self._avisar_si_no_esta_mirando(result_text)
 
         conversation_id = self._ensure_conversation_id()
         if self._primer_turno:
@@ -737,6 +743,39 @@ class Bridge(QObject):
         # separados por toda la locución — es lo que hace que el segundo turno de una
         # conversación nunca llegue con una resolución en curso (CA-15), sin tocar el guard.
         self._speak_response(result_text)
+
+    # ------------------------------------------------------------ aviso al llegar (REQ-057)
+    #: Por debajo de esto no se avisa: una respuesta que tardó tres segundos la vio llegar.
+    _SEGUNDOS_PARA_AVISAR = 8.0
+
+    def _ventana_a_la_vista(self) -> bool:
+        """Return si la ventana está visible y activa (el usuario la está mirando)."""
+        ventana = self._main_window
+        try:
+            return bool(ventana.isVisible() and not ventana.isMinimized() and ventana.isActiveWindow())
+        except Exception as e:
+            logger.debug(f"no se pudo saber si la ventana está a la vista: {e}")
+            return True
+
+    def _avisar_si_no_esta_mirando(self, texto: str) -> None:
+        """Un aviso del sistema cuando la respuesta llega y la ventana no está al frente.
+
+        Pedirle algo largo al agente y pasar a otra cosa mientras trabaja es el uso normal;
+        hasta acá había que volver a mirar para saber si terminó. Solo si tardó
+        (`_SEGUNDOS_PARA_AVISAR`) y solo si la ventana no está activa: si la estás mirando,
+        la respuesta ya está ahí. Va por `core/notificaciones.py`, que la bandeja muestra.
+        """
+        inicio = self._turno_inicio
+        if inicio is None or time.monotonic() - inicio < self._SEGUNDOS_PARA_AVISAR:
+            return
+        if self._ventana_a_la_vista():
+            return
+        from core.notificaciones import notificar
+
+        primera = " ".join((texto or "").split())
+        if len(primera) > 140:
+            primera = primera[:140].rstrip() + "…"
+        notificar("Respuesta lista", primera, "ok")
 
     # ------------------------------------------------------------ voz de la respuesta (pieza 8)
     def _hands_free_active(self) -> bool:

@@ -264,8 +264,9 @@
           <p id="empty-state-subtitle">¿En qué puedo ayudarte hoy?</p>
         </div>
         <div id="messages" class="content-col" role="log" aria-live="polite"></div>
+        <!-- REQ-057: la marca gira mientras el agente piensa (chat.js la monta) -->
         <div id="typing-indicator" class="content-col" hidden>
-          <span></span><span></span><span></span>
+          <span id="typing-marca" aria-hidden="true"></span>
           <span id="progress-text" aria-live="polite"></span>
         </div>
       </div>

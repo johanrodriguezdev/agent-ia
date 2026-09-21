@@ -223,6 +223,8 @@ def _bridge_con_worker(worker=None):
     bridge._pasos_del_turno = []
     bridge._primer_turno = False
     bridge._titulo_pendiente = None
+    # REQ-057 — el inicio del turno (sin él no se avisa), por lo mismo.
+    bridge._turno_inicio = None
     return bridge
 
 

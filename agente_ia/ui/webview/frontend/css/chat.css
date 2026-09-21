@@ -431,16 +431,46 @@ body.chat-empty #empty-state {
   display: none;
 }
 
-#typing-indicator span {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background-color: var(--text-secondary);
-  animation: typingBounce 1.2s infinite ease-in-out;
+/* REQ-057 — la marca pensando. Los anillos giran en segundos, no en minutos como en la
+   barra (marca.css), y un halo respira detrás: se ve que está trabajando sin que grite. */
+#typing-marca {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
 }
 
-#typing-indicator span:nth-child(2) { animation-delay: 0.15s; }
-#typing-indicator span:nth-child(3) { animation-delay: 0.3s; }
+#typing-marca::before {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--marca-2) 28%, transparent) 0%,
+    color-mix(in srgb, var(--marca-2) 8%, transparent) 45%,
+    transparent 72%
+  );
+  animation: marcaRespira 2.4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+#typing-marca .marca {
+  position: relative;
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--marca-1) 22%, transparent));
+}
+
+.marca-pensando .marca-anillo-1 { animation-duration: 3.2s; }
+.marca-pensando .marca-anillo-2 { animation-duration: 4.4s; }
+.marca-pensando .marca-anillo-3 { animation-duration: 5.6s; }
+
+@keyframes marcaRespira {
+  0%, 100% { opacity: 0.55; transform: scale(0.92); }
+  50% { opacity: 1; transform: scale(1.08); }
+}
 
 /* Linea de estado ("Buscando en internet: ..."). Es un <span> dentro del indicador, asi
    que hereda la regla de arriba y saldria como un cuarto punto animado: hay que anular
@@ -450,11 +480,24 @@ body.chat-empty #empty-state {
   width: auto;
   height: auto;
   border-radius: 0;
-  background-color: transparent;
   animation: none;
-  margin-left: 6px;
+  margin-left: 8px;
   align-self: center;
   font-size: 12.5px;
+  /* REQ-057 — un brillo que recorre el texto despacio, con los tonos de la marca. */
+  color: transparent;
+  background-image: linear-gradient(
+    100deg,
+    var(--text-secondary) 0%,
+    var(--text-secondary) 38%,
+    var(--marca-1) 50%,
+    var(--text-secondary) 62%,
+    var(--text-secondary) 100%
+  );
+  background-size: 240% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  animation: progresoBrillo 2.8s linear infinite;
   color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
@@ -468,8 +511,18 @@ body.chat-empty #empty-state {
   display: none;
 }
 
+@keyframes progresoBrillo {
+  from { background-position: 120% 0; }
+  to { background-position: -120% 0; }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  #typing-indicator span { animation: none; }
+  #typing-marca::before { animation: none; }
+  #typing-indicator #progress-text {
+    animation: none;
+    color: var(--text-secondary);
+    background-image: none;
+  }
   .message { animation: none; }
 }
 

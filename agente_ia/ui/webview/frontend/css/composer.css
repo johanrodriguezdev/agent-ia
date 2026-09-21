@@ -299,6 +299,18 @@
   background-color: var(--bg-hover);
   color: var(--text-primary);
   border-radius: 50%;
+  /* REQ-057 — un anillo que late mientras el agente trabaja: el botón vivo es el de
+     detener, y se nota sin mirar fijo. */
+  animation: detenerLate 2.4s ease-in-out infinite;
+}
+
+@keyframes detenerLate {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--marca-2) 45%, transparent); }
+  50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--marca-2) 0%, transparent); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-stop-btn { animation: none; }
 }
 
 .composer-stop-btn:hover {

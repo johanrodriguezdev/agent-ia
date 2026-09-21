@@ -12,6 +12,7 @@ import { icon } from "./icons.js";
 import { runCommandInTerminal, regenerateLast, editLast } from "./bridge_client.js";
 import { mostrarAviso } from "./toasts.js";
 import { abrirVisor } from "./visor_imagen.js";
+import { crearMarca } from "./marca.js";
 
 const CLAMP_THRESHOLD = 500; // CA-18
 
@@ -308,6 +309,13 @@ function decorarBloquesDeCodigo(bubble) {
 }
 
 export function initChat() {
+  // REQ-057 — mientras el agente piensa, la marca (los anillos de REQ-052) gira más
+  // rápido que en la barra: es el mismo pulso de "vivo", acelerado porque está
+  // trabajando. Reemplaza a los tres puntos genéricos.
+  const sitio = $("typing-marca");
+  if (sitio && !sitio.firstChild) {
+    sitio.appendChild(crearMarca({ tamano: 22, trazo: 9, nodo: 12, animada: true, clase: "marca-pensando" }));
+  }
   syncEmptyState();
 }
 
