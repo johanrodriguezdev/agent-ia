@@ -390,4 +390,5 @@
 }
 .conv-menu-item:hover { background-color: var(--bg-hover); }
 .conv-menu-item-peligroso { color: var(--danger); }
+.conv-menu-sep { height: 1px; margin: 4px 2px; background-color: var(--border); }   /* REQ-056 */
 .conv-menu-empty { padding: 4px 8px; font-size: 12px; color: var(--text-secondary); }

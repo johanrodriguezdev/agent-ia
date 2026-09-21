@@ -62,6 +62,8 @@ _DESCRIPCIONES: Dict[str, str] = {
     "file_create": "cree un archivo",
     "document_to_pdf": "convierta un documento a PDF",
     "document_edit": "edite un documento que ya existe",
+    # REQ-056 — la conversación abierta como .md; el nombre lo agrega `format_details`.
+    "chat_export_current": "guarde esta conversación como un archivo",
 
     # ── Terminal ──
     "terminal_open": "abra una terminal",

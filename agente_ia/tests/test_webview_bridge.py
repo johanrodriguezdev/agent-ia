@@ -1752,3 +1752,61 @@ def test_si_el_guardado_falla_la_accion_encolada_se_descarta(bridge, monkeypatch
     assert bridge._guardando_turno is False
     assert bridge._accion_tras_guardar is None
 
+
+# ---------------------------------------------------------------------------
+# REQ-056: exportar una conversación a Markdown desde la barra lateral
+# ---------------------------------------------------------------------------
+
+def test_export_conversation_pide_confirmacion_amarilla_y_exporta(bridge, monkeypatch):
+    from ai.memory_manager import memory
+    from core import exportar_chat
+    from core.security_manager import security_manager
+
+    confirmaciones = []
+    monkeypatch.setattr(security_manager, "require_confirmation",
+                        lambda action_name, channel, details="", user_id="default":
+                        confirmaciones.append((action_name, details)) or True)
+    monkeypatch.setattr(memory, "get_conversation_title", lambda cid, user_id="default": "Tesis")
+    monkeypatch.setattr(exportar_chat, "exportar",
+                        lambda cid, user_id, carpeta=None, nombre=None: r"C:\Users\j\Desktop\Tesis.md")
+    avisos = []
+    bridge.notice_shown.connect(lambda tipo, texto: avisos.append((tipo, texto)))
+
+    bridge.export_conversation("conv-1")
+
+    assert confirmaciones[0][0] == "chat_export_current"
+    assert "Tesis" in confirmaciones[0][1]           # la confirmación dice qué chat
+    assert avisos == [("ok", r"Conversación guardada en C:\Users\j\Desktop\Tesis.md")]
+
+
+def test_export_conversation_cancelada_no_escribe_nada(bridge, monkeypatch):
+    from core import exportar_chat
+    from core.security_manager import security_manager
+
+    monkeypatch.setattr(security_manager, "require_confirmation", lambda *a, **k: False)
+    monkeypatch.setattr(exportar_chat, "exportar", lambda *a, **k: pytest.fail("no debe exportar"))
+    avisos = []
+    bridge.notice_shown.connect(lambda tipo, texto: avisos.append((tipo, texto)))
+
+    bridge.export_conversation("conv-1")
+
+    assert avisos == []
+
+
+def test_export_conversation_muestra_el_rechazo_como_aviso(bridge, monkeypatch):
+    from core import exportar_chat
+    from core.documentos import DocumentoRechazado
+    from core.security_manager import security_manager
+
+    monkeypatch.setattr(security_manager, "require_confirmation", lambda *a, **k: True)
+
+    def _rechaza(*a, **k):
+        raise DocumentoRechazado("Esa conversación no tiene mensajes guardados.")
+
+    monkeypatch.setattr(exportar_chat, "exportar", _rechaza)
+    avisos = []
+    bridge.notice_shown.connect(lambda tipo, texto: avisos.append((tipo, texto)))
+
+    bridge.export_conversation("conv-1")
+
+    assert avisos == [("error", "Esa conversación no tiene mensajes guardados.")]

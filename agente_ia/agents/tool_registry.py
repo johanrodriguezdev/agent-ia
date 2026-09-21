@@ -3238,6 +3238,56 @@ register_tool(ToolSpec(
 ))
 
 
+# ── REQ-056 — «guardá esta conversación en un archivo» ─────────────────────────────────────
+#
+# La conversación abierta como `.md`, con lo guardado en la base (no con lo que el modelo
+# recuerda del historial, que viene acotado): título, fecha y cada turno. Amarillo porque
+# crea un archivo en el equipo, como `document_create`; la confirmación muestra el nombre.
+
+def _chat_export_invoke(params: dict) -> str:
+    from core import conversacion_activa
+    from core.documentos import DocumentoRechazado
+    from core.exportar_chat import exportar
+    from core.user_identity import OWNER_USER_ID
+
+    conversation_id = conversacion_activa.actual()
+    if not conversation_id:
+        return f"No hay ningún chat abierto que pueda exportar{vocative()}."
+    try:
+        ruta = exportar(
+            conversation_id, OWNER_USER_ID,
+            carpeta=params.get("carpeta"), nombre=params.get("nombre"),
+        )
+    except DocumentoRechazado as e:
+        return str(e)
+    except Exception as e:
+        logger.error(f"'chat_export_current' falló: {type(e).__name__}: {e}")
+        return "No pude escribir el archivo de la conversación."
+    return f"Conversación guardada en {ruta}."
+
+
+register_tool(ToolSpec(
+    name="chat_export_current",
+    description=(
+        "Guarda el chat ACTUAL (esta conversación entera, tal como está guardada) como un "
+        "archivo Markdown (.md) en el equipo del usuario. Usala cuando pida «exportá esta "
+        "conversación», «guardá este chat en un archivo», «pasame esto a un .md». Sin "
+        "carpeta va al Escritorio; sin nombre se arma con la fecha y el título."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "nombre": {"type": "string",
+                       "description": "Nombre del archivo (opcional; se le agrega .md)."},
+            "carpeta": {"type": "string",
+                        "description": "Dónde guardarlo (opcional). Vacío = el Escritorio."},
+        },
+    },
+    risk_level=RiskLevel.YELLOW,
+    invoke=_chat_export_invoke,
+))
+
+
 # ── REQ-052 — «¿qué tenés conectado?» ─────────────────────────────────────────────────────
 #
 # El mismo mapa que dibuja el panel «Mapa» de la barra superior, en texto: con qué modelo

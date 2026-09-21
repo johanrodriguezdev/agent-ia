@@ -176,6 +176,14 @@ los proveedores aceptan (1568 px de lado o 4 MB) viajan al modelo como una copia
 Si tu modelo principal no ve imágenes, pon en `vision_provider` (`config.json`) uno que sí
 (por ejemplo `gemini` o `anthropic`): con una imagen de por medio el turno va a ese proveedor.
 
+### Guardar una conversación como archivo
+
+«Guardá esta conversación en un archivo» (o «exportá este chat») deja la conversación
+entera como un `.md` en el Escritorio —o en la carpeta que le digas—, con la fecha, el
+título y cada mensaje con quién lo dijo. Lo mismo desde la barra lateral: el menú de
+cualquier chat tiene «Exportar a Markdown…». Como crea un archivo en tu equipo, pide
+confirmación antes.
+
 ---
 
 ## Cómo está organizado

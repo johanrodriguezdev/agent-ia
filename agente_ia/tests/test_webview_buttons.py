@@ -1330,6 +1330,42 @@ def test_editar_devuelve_el_mensaje_al_cuadro_y_quita_el_par(ventana, qtbot, mon
     _sin_errores(page)
 
 
+# ---------------------------------------------------------------------------
+# REQ-056: exportar a Markdown desde el menú del chat
+# ---------------------------------------------------------------------------
+
+def test_el_menu_del_chat_ofrece_exportar_a_markdown_y_pide_confirmacion(ventana, qtbot, monkeypatch):
+    from ai.memory_manager import memory
+    from core import exportar_chat
+    from core.security_manager import security_manager
+
+    window, page, _ = ventana
+    monkeypatch.setattr(memory, "get_conversation_title", lambda cid, user_id="default": "Una charla")
+    confirmaciones = []
+    monkeypatch.setattr(security_manager, "require_confirmation",
+                        lambda action_name, channel, details="", user_id="default":
+                        confirmaciones.append(action_name) or True)
+    exportados = []
+    monkeypatch.setattr(exportar_chat, "exportar",
+                        lambda cid, user_id, carpeta=None, nombre=None: exportados.append(cid) or "C:/x/Una charla.md")
+
+    window.bridge.conversation_list_updated.emit(json.dumps([
+        {"conversation_id": "a", "title": "Una charla", "last_activity": None},
+    ]))
+    _esperar(qtbot, 300)
+    _click(page, "document.querySelector('#conversation-list .conv-item [aria-label=\"Mover a un proyecto\"]')")
+    _esperar(qtbot, 200)
+    ultimo = _run_js(page, "Array.from(document.querySelectorAll('.conv-menu-item')).pop().textContent")
+    assert ultimo == "Exportar a Markdown…"
+
+    _click(page, "Array.from(document.querySelectorAll('.conv-menu-item')).pop()")
+    qtbot.waitUntil(lambda: exportados == ["a"], timeout=8000)
+    assert confirmaciones == ["chat_export_current"]
+    _esperar(qtbot, 300)
+    assert _run_js(page, "document.querySelector('.conv-menu') === null") is True
+    _sin_errores(page)
+
+
 # --------------------------------------------------------------------------- cobertura
 
 def test_todo_boton_con_id_del_html_tiene_su_manejador(ventana):

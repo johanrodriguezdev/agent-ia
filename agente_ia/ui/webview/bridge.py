@@ -931,6 +931,46 @@ class Bridge(QObject):
         logger.error(f"Error eliminando conversación: {message}")
         self.error_occurred.emit(message)
 
+    @pyqtSlot(str)
+    def export_conversation(self, conversation_id: str) -> None:
+        """REQ-056 — «Exportar a Markdown» desde el menú de un chat en la barra lateral.
+
+        Mismo gate que la herramienta `chat_export_current` (🟡 amarillo: crea un archivo
+        en el equipo) y mismo criterio que `request_delete_conversation`: el slot es
+        alcanzable desde cualquier script de la página, así que la confirmación va acá, y
+        el flujo corre fuera del hilo de la GUI porque la confirmación puede esperar.
+        """
+        if not conversation_id:
+            return
+        run_async(self._export_conversation_flow, None, self._on_export_error, conversation_id)
+
+    def _export_conversation_flow(self, conversation_id: str) -> None:
+        from ai.memory_manager import memory
+        from core.documentos import DocumentoRechazado
+        from core.exportar_chat import exportar
+        from core.security_manager import format_details, security_manager
+
+        titulo = memory.get_conversation_title(conversation_id, user_id=OWNER_USER_ID)
+        confirmed = security_manager.require_confirmation(
+            "chat_export_current",
+            ChannelType.DESKTOP,
+            details=format_details("webview:export_conversation",
+                                   {"name": titulo or conversation_id}),
+            user_id=OWNER_USER_ID,
+        )
+        if not confirmed:
+            return
+        try:
+            ruta = exportar(conversation_id, OWNER_USER_ID)
+        except DocumentoRechazado as e:
+            self.notice_shown.emit("error", str(e))
+            return
+        self.notice_shown.emit("ok", f"Conversación guardada en {ruta}")
+
+    def _on_export_error(self, message: str) -> None:
+        logger.error(f"Error exportando conversación: {message}")
+        self.error_occurred.emit("No pude exportar la conversación.")
+
     def _load_conversations(self, offset: int = 0) -> None:
         from ai.memory_manager import memory
 

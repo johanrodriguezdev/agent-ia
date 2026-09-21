@@ -20,6 +20,7 @@
 import {
   requestProjects, createProject, requestProjectConversations, newConversationInProject,
   assignConversationToProject, unassignConversationFromProject, requestDeleteProject,
+  exportConversation,
 } from "./bridge_client.js";
 import { icon } from "./icons.js";
 import { buildConversationItem, getActiveConversationId, setConversationMenuBuilder,
@@ -254,6 +255,15 @@ function abrirMenu(anchor, conv, contexto) {
       unassignConversationFromProject(conv.conversation_id);
     }, true));
   }
+
+  // REQ-056 — la conversación como archivo .md. Va en este menú y no como un cuarto
+  // icono en la fila: la fila ya tiene tres y este es el "menú del chat" de hecho.
+  const separador = document.createElement("div");
+  separador.className = "conv-menu-sep";
+  menu.appendChild(separador);
+  menu.appendChild(itemDeMenu("Exportar a Markdown…", () => {
+    exportConversation(conv.conversation_id);
+  }));
 
   anchor.closest(".conv-item").appendChild(menu);
   _menuAbierto = menu;

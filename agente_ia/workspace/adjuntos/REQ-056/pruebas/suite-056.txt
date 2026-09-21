@@ -1,0 +1,3 @@
+2 failed, 3272 passed, 45 warnings in 397.23s (0:06:37)
+Los 2 fallos eran las tablas de regresión (DESKTOP_ONLY_ACTIONS exacta, traducción de acciones amarillas) sin la acción nueva chat_export_current; corregidas y reprobadas: test_workspace_tools_seguridad + test_voice_confirmation = 616 passed.
+Suite completa (python -m pytest tests/ -q) — 2026-09-20, antes del commit de REQ-056

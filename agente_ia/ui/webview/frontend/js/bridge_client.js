@@ -28,6 +28,7 @@ export function sendMessage(text, modo) { _bridge.send_message(text, modo || "")
 export function newConversation() { _bridge.new_conversation(); }
 export function selectConversation(conversationId) { _bridge.select_conversation(conversationId); }
 export function requestDeleteConversation(conversationId) { _bridge.request_delete_conversation(conversationId); }
+export function exportConversation(conversationId) { _bridge.export_conversation(conversationId); }   // REQ-056
 export function loadMoreConversations(offset) { _bridge.load_more_conversations(offset); }
 export function runChipAction(actionName) { _bridge.run_chip_action(actionName); }
 export function setTheme(name) { _bridge.set_theme(name); }
