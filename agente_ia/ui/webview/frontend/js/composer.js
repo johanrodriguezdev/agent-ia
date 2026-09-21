@@ -119,6 +119,9 @@ export function setComposerEnabled(enabled) {
   // invocable desde JS sin pasar por el estado `disabled` del DOM.
   _sendEnabled = enabled;
   $("composer-input").disabled = !enabled;
+  // REQ-055: mientras el agente responde no hay «Regenerar» ni «Editar» que valgan; el
+  // ultimo intercambio esta a medio hacer (chat.css los esconde con esta clase).
+  document.body.classList.toggle("turno-en-curso", !enabled);
   // Mientras el agente responde, el botón de enviar se convierte en uno de detener: es el
   // mismo lugar de la pantalla, y es el único momento en que hace falta cada uno.
   $("send-btn").hidden = !enabled;
@@ -149,6 +152,15 @@ export function showAttachment(path, name, accepted, reason) {
   nameEl.textContent = accepted ? name : `Rechazado: ${name} (${reason})`;
   chip.classList.toggle("rechazado", !accepted);
   chip.hidden = false;
+}
+
+/** REQ-055 — dejar un texto escrito en el cuadro, listo para corregir y mandar. */
+export function setComposerText(texto) {
+  const input = $("composer-input");
+  input.value = texto || "";
+  autoGrow(input);
+  input.focus();
+  input.setSelectionRange(input.value.length, input.value.length);
 }
 
 /** REQ-054 — la miniatura del adjunto en el chip (un `data:` URL que armo Python), o

@@ -89,6 +89,11 @@ export function pasteFromClipboard() { _bridge.paste_from_clipboard(); }
 export function onAttachmentPreview(cb) { _bridge.attachment_preview.connect(cb); }
 export function requestImage(ruta) { _bridge.request_image(ruta); }
 export function onImageLoaded(cb) { _bridge.image_loaded.connect(cb); }
+// REQ-055 — regenerar la última respuesta / editar el último mensaje.
+export function regenerateLast() { _bridge.regenerate_last(); }
+export function editLast() { _bridge.edit_last(); }
+export function onLastTurnRemoved(cb) { _bridge.last_turn_removed.connect(cb); }
+export function onComposerTextRequested(cb) { _bridge.composer_text_requested.connect(cb); }
 export function onChipsLoaded(cb) { _bridge.chips_loaded.connect(cb); }
 export function onErrorOccurred(cb) { _bridge.error_occurred.connect(cb); }
 export function onWindowMaximizedChanged(cb) { _bridge.window_maximized_changed.connect(cb); }

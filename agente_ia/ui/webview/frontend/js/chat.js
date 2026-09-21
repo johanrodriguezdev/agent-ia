@@ -9,7 +9,7 @@
 // confirm_modal.js para los campos de texto NO confiable, que van por `textContent`.
 
 import { icon } from "./icons.js";
-import { runCommandInTerminal } from "./bridge_client.js";
+import { runCommandInTerminal, regenerateLast, editLast } from "./bridge_client.js";
 import { mostrarAviso } from "./toasts.js";
 import { abrirVisor } from "./visor_imagen.js";
 
@@ -79,6 +79,8 @@ function buildMessageNode(item) {
   if ((item.role || "assistant") === "assistant") {
     decorarBloquesDeCodigo(bubble);
     wrapper.appendChild(accionesDelMensaje(bubble));
+  } else if ((item.role || "assistant") === "user") {
+    wrapper.appendChild(accionesDelUsuario(bubble));
   }
 
   if ((item.html || "").length > CLAMP_THRESHOLD) {
@@ -203,7 +205,10 @@ function botonDeAccion(nombreIcono, etiqueta, alHacerClick) {
   return boton;
 }
 
-/** Copiar la respuesta entera. Antes habia que seleccionarla con el mouse sin pasarse. */
+/** Copiar la respuesta entera. Antes habia que seleccionarla con el mouse sin pasarse.
+ *  «Regenerar» (REQ-055) existe en todas las respuestas pero solo se ve en la ultima
+ *  (`marcarUltimos()` + chat.css): regenerar una del medio dejaria la conversacion
+ *  contando otra historia a partir de ahi. */
 function accionesDelMensaje(bubble) {
   const fila = document.createElement("div");
   fila.className = "msg-actions";
@@ -211,7 +216,65 @@ function accionesDelMensaje(bubble) {
     const ok = await copiarAlPortapapeles(bubble.innerText.trim());
     mostrarAviso(ok ? "ok" : "error", ok ? "Respuesta copiada." : "No pude copiar.");
   }));
+  const regenerar = botonDeAccion("refresh", "Regenerar", () => regenerateLast());
+  regenerar.classList.add("msg-action-ultimo");
+  fila.appendChild(regenerar);
   return fila;
+}
+
+/** Acciones del mensaje del usuario (REQ-055): copiar y, solo en el ultimo, «Editar»,
+ *  que lo devuelve al cuadro para corregirlo y mandarlo de nuevo. */
+function accionesDelUsuario(bubble) {
+  const fila = document.createElement("div");
+  fila.className = "msg-actions msg-actions-usuario";
+  fila.appendChild(botonDeAccion("copiar", "Copiar", async () => {
+    const texto = bubble.querySelector(".bubble-texto");
+    const ok = await copiarAlPortapapeles((texto ? texto.innerText : bubble.innerText).trim());
+    mostrarAviso(ok ? "ok" : "error", ok ? "Mensaje copiado." : "No pude copiar.");
+  }));
+  const editar = botonDeAccion("lapiz", "Editar", () => editLast());
+  editar.classList.add("msg-action-ultimo");
+  fila.appendChild(editar);
+  return fila;
+}
+
+/** Marca el ultimo mensaje del usuario y la ultima respuesta con `es-ultimo`: son los
+ *  unicos donde «Editar» y «Regenerar» tienen sentido. Se recalcula cada vez que la lista
+ *  cambia. La respuesta solo cuenta si es el ultimo mensaje de todos (si el usuario ya
+ *  mando otra pregunta, esa respuesta ya no es la ultima palabra). */
+function marcarUltimos() {
+  const mensajes = Array.from($("messages").querySelectorAll(".message"));
+  for (const m of mensajes) m.classList.remove("es-ultimo");
+  const ultimo = mensajes[mensajes.length - 1];
+  if (!ultimo) return;
+  if (ultimo.classList.contains("msg-assistant")) {
+    ultimo.classList.add("es-ultimo");
+    // Su pregunta: el ultimo mensaje del usuario antes de esa respuesta.
+    for (let i = mensajes.length - 2; i >= 0; i--) {
+      if (mensajes[i].classList.contains("msg-user")) {
+        mensajes[i].classList.add("es-ultimo");
+        break;
+      }
+    }
+  }
+}
+
+/** REQ-055 — el ultimo intercambio salio de la conversacion guardada: se quitan sus dos
+ *  burbujas (la respuesta y la pregunta que la provoco). */
+export function removeLastTurn() {
+  const mensajes = Array.from($("messages").querySelectorAll(".message"));
+  const ultimo = mensajes[mensajes.length - 1];
+  if (ultimo && ultimo.classList.contains("msg-assistant")) {
+    ultimo.remove();
+    for (let i = mensajes.length - 2; i >= 0; i--) {
+      if (mensajes[i].classList.contains("msg-user")) {
+        mensajes[i].remove();
+        break;
+      }
+    }
+  }
+  marcarUltimos();
+  syncEmptyState();
 }
 
 /** Copiar y —si parece un comando— mandar a la terminal cada bloque de codigo.
@@ -264,6 +327,7 @@ export function renderTurns(turns) {
     if (index < turns.length) {
       requestAnimationFrame(insertBatch);
     } else {
+      marcarUltimos();
       syncEmptyState();
       scrollToBottom();
     }
@@ -314,6 +378,7 @@ export function appendMessage(item) {
   // respuesta dos veces, una en texto plano y otra con formato.
   clearChunks();
   container.appendChild(buildMessageNode(item));
+  marcarUltimos();
   syncEmptyState();
   if (shouldStick) {
     scrollToBottom(); // CA-16: no interrumpe si el usuario se alejó del final

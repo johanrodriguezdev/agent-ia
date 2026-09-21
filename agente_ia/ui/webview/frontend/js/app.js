@@ -13,7 +13,7 @@ import {
   onConversationListUpdated, onConversationCleared, onConversationRemoved,
   onTurnsLoaded, onMessageAppended, onTypingStarted, onTypingStopped, onProgressUpdated,
   onConfirmationRequested, onFileAttached, onAttachmentPreview, onImageLoaded, onErrorOccurred,
-  onWindowMaximizedChanged,
+  onWindowMaximizedChanged, onLastTurnRemoved, onComposerTextRequested,
   onAutonomyChanged,
   onTasksLoaded, onProjectsLoaded, onProjectConversationsLoaded, onProjectRemoved,
   onSecurityOverridesLoaded, onSecurityOverrideSaved, onSecurityOverrideSaveRejected,
@@ -32,10 +32,12 @@ import {
 } from "./sidebar.js";
 import {
   initChat, renderTurns, appendMessage, clearMessages, setTyping, setProgress, updateGuiState,
+  removeLastTurn,
   appendChunk, clearChunks,
 } from "./chat.js";
 import {
   initComposer, setComposerEnabled, setWakeState, showAttachment, showAttachmentPreview,
+  setComposerText,
   renderModes, renderQuickActions, resetActiveMode, renderModels,
 } from "./composer.js";
 import { initTheme, applyTheme } from "./theme.js";
@@ -184,6 +186,9 @@ async function bootstrap() {
   });
   onAttachmentPreview((dataUrl) => showAttachmentPreview(dataUrl));   // REQ-054
   onImageLoaded((ruta, dataUrl) => ponerImagenCompleta(ruta, dataUrl));  // REQ-054
+  // REQ-055 — regenerar / editar: el bridge ya saco el ultimo par de la conversacion.
+  onLastTurnRemoved(() => removeLastTurn());
+  onComposerTextRequested((texto) => setComposerText(texto));
   // Los errores del bridge terminaban en un console.error que nadie mira: si fallaba
   // borrar una conversacion o guardar la configuracion, la pantalla no decia nada.
   onErrorOccurred((message) => {

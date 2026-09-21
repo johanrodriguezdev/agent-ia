@@ -1261,6 +1261,75 @@ def test_pegar_una_imagen_en_el_cuadro_la_adjunta_y_pegar_texto_sigue_pegando(ve
     _sin_errores(page)
 
 
+# ---------------------------------------------------------------------------
+# REQ-055: regenerar / editar
+# ---------------------------------------------------------------------------
+
+def _mensaje(window, role, html, ts):
+    window.bridge.message_appended.emit(json.dumps({"role": role, "html": html, "timestamp": ts}))
+
+
+def test_regenerar_y_editar_solo_aparecen_en_el_ultimo_intercambio(ventana, qtbot, monkeypatch):
+    """«Regenerar» en la ultima respuesta y «Editar» en la pregunta que la provoco; en el
+    resto, solo «Copiar». Con un turno en curso, ninguno de los dos."""
+    from ai.memory_manager import memory
+
+    window, page, registro = ventana
+    _mensaje(window, "user", "<p>primera</p>", "t1")
+    _mensaje(window, "assistant", "<p>respuesta uno</p>", "t2")
+    _mensaje(window, "user", "<p>segunda</p>", "t3")
+    _mensaje(window, "assistant", "<p>respuesta dos</p>", "t4")
+    _esperar(qtbot, 400)
+
+    visibles = _run_js(page, """
+      Array.from(document.querySelectorAll('.message')).map((m) =>
+        Array.from(m.querySelectorAll('.msg-action-ultimo'))
+             .filter((b) => getComputedStyle(b).display !== 'none')
+             .map((b) => b.querySelector('span').textContent).join(','))
+    """)
+    assert visibles == ["", "", "Editar", "Regenerar"]
+
+    # Mientras el agente responde, desaparecen.
+    _run_js(page, "document.body.classList.add('turno-en-curso'); true;")
+    assert _run_js(page, "getComputedStyle(document.querySelector('.es-ultimo .msg-action-ultimo')).display") == "none"
+    _run_js(page, "document.body.classList.remove('turno-en-curso'); true;")
+
+    # Click en «Regenerar»: el bridge borra el ultimo par y vuelve a mandar la pregunta.
+    monkeypatch.setattr(memory, "delete_last_turn",
+                        lambda conversation_id, user_id="default": types.SimpleNamespace(
+                            id=9, role="user", text="segunda", timestamp="t3"))
+    window.bridge._conversation_id = "conv-x"
+    _click(page, "document.querySelector('.msg-assistant.es-ultimo .msg-action-ultimo')")
+    qtbot.waitUntil(lambda: "segunda" in registro["mensajes"], timeout=8000)
+    _esperar(qtbot, 500)
+    textos = _run_js(page, "Array.from(document.querySelectorAll('.message .bubble')).map((b) => b.textContent.trim())")
+    # Las dos burbujas viejas del ultimo par se fueron; la pregunta volvio y llego la respuesta nueva.
+    assert textos == ["primera", "respuesta uno", "segunda", "respuesta de prueba"]
+    _sin_errores(page)
+
+
+def test_editar_devuelve_el_mensaje_al_cuadro_y_quita_el_par(ventana, qtbot, monkeypatch):
+    from ai.memory_manager import memory
+
+    window, page, registro = ventana
+    _mensaje(window, "user", "<p>primera</p>", "t1")
+    _mensaje(window, "assistant", "<p>respuesta uno</p>", "t2")
+    _esperar(qtbot, 300)
+
+    monkeypatch.setattr(memory, "delete_last_turn",
+                        lambda conversation_id, user_id="default": types.SimpleNamespace(
+                            id=9, role="user", text="primera", timestamp="t1"))
+    window.bridge._conversation_id = "conv-x"
+    _click(page, "document.querySelector('.msg-user.es-ultimo .msg-action-ultimo')")
+    _esperar(qtbot, 500)
+
+    assert _run_js(page, "document.getElementById('composer-input').value") == "primera"
+    assert _run_js(page, "document.querySelectorAll('.message').length") == 0
+    assert registro["mensajes"] == []          # no se manda solo: el usuario corrige primero
+    assert _run_js(page, "getComputedStyle(document.getElementById('sugerencias')).display") == "flex"
+    _sin_errores(page)
+
+
 # --------------------------------------------------------------------------- cobertura
 
 def test_todo_boton_con_id_del_html_tiene_su_manejador(ventana):

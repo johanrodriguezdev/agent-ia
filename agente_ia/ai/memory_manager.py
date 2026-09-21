@@ -635,6 +635,62 @@ class UnifiedMemory:
             logger.error(f"Error eliminando conversación {conversation_id}: {e}")
             return False
 
+    def delete_last_turn(self, conversation_id: str,
+                         user_id: str = "default") -> Optional[MemoryItem]:
+        """Borra el ÚLTIMO intercambio de una conversación (REQ-055) y devuelve la fila
+        del usuario que se borró, o `None` si no había un par completo que borrar.
+
+        Es lo que hay detrás de «Regenerar» y «Editar» en el chat: la última respuesta del
+        agente y el mensaje que la provocó salen de la conversación guardada, para que el
+        mensaje corregido —o el mismo, regenerado— ocupe su lugar en vez de acumularse.
+
+        Solo borra si las dos últimas filas son, en orden, `user` y `assistant`: una
+        conversación a medio guardar (turno en curso, fila suelta) no se toca. Restringido
+        por `user_id` igual que `delete_conversation()`. Nunca lanza.
+        """
+        if not conversation_id:
+            return None
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                rows = conn.execute(
+                    f"""SELECT {_MEMORY_COLUMNS} FROM memories
+                        WHERE conversation_id = ? AND user_id = ? AND archived = 0
+                        ORDER BY id DESC LIMIT 2""",
+                    (conversation_id, user_id),
+                ).fetchall()
+                if len(rows) < 2:
+                    return None
+                asistente, usuario = _row_to_item(rows[0]), _row_to_item(rows[1])
+                if asistente.role != "assistant" or usuario.role != "user":
+                    logger.warning(
+                        f"delete_last_turn(): las dos últimas filas de {conversation_id} no "
+                        f"son un par user/assistant ({usuario.role!r}, {asistente.role!r})"
+                    )
+                    return None
+                conn.execute(
+                    "DELETE FROM memories WHERE id IN (?, ?) AND user_id = ?",
+                    (asistente.id, usuario.id, user_id),
+                )
+            self._olvidar_embeddings({asistente.id, usuario.id})
+            logger.info(
+                f"Último intercambio borrado de {conversation_id} (ids {usuario.id}, {asistente.id})"
+            )
+            return usuario
+        except Exception as e:
+            logger.error(f"Error borrando el último turno de {conversation_id}: {e}")
+            return None
+
+    def _olvidar_embeddings(self, ids: set) -> None:
+        """Saca de las listas en RAM los embeddings de `ids`, sin recargar todo desde la DB
+        (que es lo que hace `_load_embeddings()` y cuesta lo que pesa la base)."""
+        with self._emb_lock:
+            conservar = [i for i, row_id in enumerate(self._embedding_ids) if row_id not in ids]
+            if len(conservar) == len(self._embedding_ids):
+                return
+            self._embeddings[:] = [self._embeddings[i] for i in conservar]
+            self._embedding_ids[:] = [self._embedding_ids[i] for i in conservar]
+            self._embedding_user_ids[:] = [self._embedding_user_ids[i] for i in conservar]
+
     # ------------------------------------------------------------ proyectos (REQ-016/§4.2)
     def create_project(self, user_id: str = "default", name: str = "") -> Optional[int]:
         """Crea un proyecto y devuelve su id (o None si el nombre es vacío/solo espacios,

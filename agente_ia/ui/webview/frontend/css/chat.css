@@ -489,6 +489,38 @@ body.chat-empty #empty-state {
   opacity: 1;
 }
 
+/* REQ-055 — acciones del mensaje del usuario, alineadas a la derecha como su burbuja. En
+   fila con la burbuja (`.msg-user` no es columna): van debajo con un salto. */
+.msg-user {
+  flex-wrap: wrap;
+}
+
+.msg-actions-usuario {
+  width: 100%;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+.msg-user:hover .msg-actions-usuario {
+  opacity: 1;
+}
+
+/* «Regenerar» y «Editar» solo en el ultimo intercambio, y nunca mientras el agente
+   responde: el ultimo par esta a medio hacer. */
+/* Con `.msg-actions` delante para ganarle a `.msg-action { display: inline-flex }`, que
+   viene despues en este archivo y tiene la misma especificidad sola. */
+.msg-actions .msg-action-ultimo {
+  display: none;
+}
+
+.message.es-ultimo .msg-actions .msg-action-ultimo {
+  display: inline-flex;
+}
+
+body.turno-en-curso .message .msg-actions .msg-action-ultimo {
+  display: none;
+}
+
 .msg-action {
   display: inline-flex;
   align-items: center;

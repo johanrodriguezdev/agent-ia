@@ -328,6 +328,119 @@ def test_pegar_sin_imagen_ni_archivo_solo_avisa(bridge, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# REQ-055: regenerar la última respuesta / editar el último mensaje
+# ---------------------------------------------------------------------------
+
+def test_regenerate_last_borra_el_ultimo_par_y_vuelve_a_resolver_el_mismo_texto(
+    bridge, monkeypatch, fake_run_async,
+):
+    from ai.memory_manager import memory
+
+    borrados = []
+    monkeypatch.setattr(memory, "delete_last_turn",
+                        lambda conversation_id, user_id="default": borrados.append(conversation_id)
+                        or SimpleNamespace(id=7, role="user", text="¿qué hora es?", timestamp="t"))
+    monkeypatch.setattr(memory, "get_conversation_turns", lambda *a, **k: [])
+    bridge._conversation_id = "conv-1"
+    quitados = []
+    bridge.last_turn_removed.connect(lambda: quitados.append(True))
+
+    bridge.regenerate_last()
+
+    assert borrados == ["conv-1"]
+    assert quitados == [True]
+    llamada = [c for c in fake_run_async if getattr(c["fn"], "__name__", "") == "resolve"][0]
+    assert llamada["args"][0] == "¿qué hora es?"
+    assert "image_path" not in llamada["kwargs"]
+
+
+def test_regenerate_last_reenvia_la_imagen_si_el_mensaje_la_tenia(bridge, monkeypatch, fake_run_async, tmp_path):
+    from ai.memory_manager import memory
+
+    ruta = _captura(tmp_path)
+    monkeypatch.setattr(memory, "delete_last_turn",
+                        lambda conversation_id, user_id="default": SimpleNamespace(
+                            id=7, role="user", text=f"¿qué dice?\n\n[Imagen adjunta: {ruta}]", timestamp="t"))
+    monkeypatch.setattr(memory, "get_conversation_turns", lambda *a, **k: [])
+    bridge._conversation_id = "conv-1"
+
+    bridge.regenerate_last()
+
+    llamada = [c for c in fake_run_async if getattr(c["fn"], "__name__", "") == "resolve"][0]
+    assert llamada["kwargs"]["image_path"] == ruta
+    assert llamada["args"][0].endswith(f"[Imagen adjunta: {ruta}]")
+
+
+def test_regenerate_last_sin_par_que_borrar_solo_avisa(bridge, monkeypatch, fake_run_async):
+    from ai.memory_manager import memory
+
+    monkeypatch.setattr(memory, "delete_last_turn", lambda *a, **k: None)
+    bridge._conversation_id = "conv-1"
+    avisos = []
+    bridge.notice_shown.connect(lambda tipo, texto: avisos.append((tipo, texto)))
+
+    bridge.regenerate_last()
+
+    assert avisos == [("info", "No hay una respuesta que regenerar.")]
+    assert not [c for c in fake_run_async if getattr(c["fn"], "__name__", "") == "resolve"]
+    assert bridge._resolution_in_flight is False
+
+
+def test_regenerate_last_se_ignora_con_un_turno_en_curso_o_sin_conversacion(bridge, monkeypatch, fake_run_async):
+    from ai.memory_manager import memory
+
+    monkeypatch.setattr(memory, "delete_last_turn",
+                        lambda *a, **k: pytest.fail("no debe borrar nada"))
+    bridge._conversation_id = None
+    bridge.regenerate_last()
+
+    bridge._conversation_id = "conv-1"
+    bridge._resolution_in_flight = True
+    bridge.regenerate_last()
+    bridge._resolution_in_flight = False
+
+
+def test_edit_last_deja_el_texto_en_el_cuadro_y_devuelve_el_adjunto_al_chip(bridge, monkeypatch, fake_run_async, tmp_path):
+    from ai.memory_manager import memory
+
+    ruta = _captura(tmp_path)
+    monkeypatch.setattr(memory, "delete_last_turn",
+                        lambda conversation_id, user_id="default": SimpleNamespace(
+                            id=7, role="user", text=f"¿qué dise esto?\n\n[Imagen adjunta: {ruta}]", timestamp="t"))
+    bridge._conversation_id = "conv-1"
+    textos, quitados, adjuntos = [], [], []
+    bridge.composer_text_requested.connect(textos.append)
+    bridge.last_turn_removed.connect(lambda: quitados.append(True))
+    bridge.file_attached.connect(lambda path, name, ok, motivo: adjuntos.append((path, ok)))
+
+    bridge.edit_last()
+
+    assert quitados == [True]
+    assert textos == ["¿qué dise esto?"]          # sin el marcador
+    assert adjuntos == [(ruta, True)]
+    assert bridge._pending_attachment == ruta
+    # No se resuelve nada: el usuario corrige y manda cuando quiere.
+    assert not [c for c in fake_run_async if getattr(c["fn"], "__name__", "") == "resolve"]
+
+
+def test_edit_last_con_un_adjunto_que_ya_no_existe_solo_deja_el_texto(bridge, monkeypatch, fake_run_async):
+    from ai.memory_manager import memory
+
+    monkeypatch.setattr(memory, "delete_last_turn",
+                        lambda conversation_id, user_id="default": SimpleNamespace(
+                            id=7, role="user", text="resumí esto\n\n[Archivo adjunto: C:\\ya\\no\\esta.pdf]",
+                            timestamp="t"))
+    bridge._conversation_id = "conv-1"
+    textos = []
+    bridge.composer_text_requested.connect(textos.append)
+
+    bridge.edit_last()
+
+    assert textos == ["resumí esto"]
+    assert bridge._pending_attachment is None
+
+
+# ---------------------------------------------------------------------------
 # CA-11: paginación "Ver más"
 # ---------------------------------------------------------------------------
 
@@ -1408,7 +1521,8 @@ _EXPECTED_SIGNALS = [
     "turns_loaded", "message_appended", "typing_started", "typing_stopped",
     "gui_state_changed", "wake_state_changed", "theme_changed",
     "confirmation_requested", "file_attached", "chips_loaded", "error_occurred",
-    "attachment_preview",   # REQ-054
+    "attachment_preview", "image_loaded",   # REQ-054
+    "last_turn_removed", "composer_text_requested",   # REQ-055
     # REQ-016
     "tasks_loaded", "projects_loaded", "project_conversations_loaded", "project_removed",
     # REQ-019
@@ -1597,3 +1711,44 @@ def test_un_turno_que_falla_entrega_los_pasos_que_alcanzo(bridge, monkeypatch):
     assert "Error" in messages[-1]["html"]
     assert messages[-1]["pasos"] == ["Buscando en internet: algo"]
     assert bridge._pasos_del_turno == []
+
+
+def test_regenerate_last_mientras_se_guarda_el_turno_espera_a_que_termine(bridge, monkeypatch, fake_run_async):
+    """`store_turn` corre en otro hilo y tarda (embeddings). Si «Regenerar» llega antes de
+    que termine, borrar "el último par" borraría el ANTERIOR: la acción se encola y corre
+    cuando el guardado avisa que terminó."""
+    from ai.memory_manager import memory
+
+    borrados = []
+    monkeypatch.setattr(memory, "delete_last_turn",
+                        lambda conversation_id, user_id="default": borrados.append(conversation_id)
+                        or SimpleNamespace(id=7, role="user", text="otra vez", timestamp="t"))
+    monkeypatch.setattr(memory, "get_conversation_turns", lambda *a, **k: [])
+    monkeypatch.setattr(memory, "list_conversations", lambda **k: [])
+    bridge._conversation_id = "conv-1"
+    bridge._guardando_turno = True
+
+    bridge.regenerate_last()
+    assert borrados == []                       # todavía no
+
+    bridge._tras_guardar_turno()                # el guardado terminó
+    assert borrados == ["conv-1"]
+    assert bridge._guardando_turno is False
+    assert bridge._accion_tras_guardar is None
+    llamada = [c for c in fake_run_async if getattr(c["fn"], "__name__", "") == "resolve"][0]
+    assert llamada["args"][0] == "otra vez"
+
+
+def test_si_el_guardado_falla_la_accion_encolada_se_descarta(bridge, monkeypatch, fake_run_async):
+    from ai.memory_manager import memory
+
+    monkeypatch.setattr(memory, "delete_last_turn", lambda *a, **k: pytest.fail("no debe borrar"))
+    bridge._conversation_id = "conv-1"
+    bridge._guardando_turno = True
+    bridge.edit_last()
+
+    bridge._on_error_guardando_turno("disco lleno")
+
+    assert bridge._guardando_turno is False
+    assert bridge._accion_tras_guardar is None
+
