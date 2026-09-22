@@ -25,6 +25,22 @@ pueden combinar:
   se escribe el contenido con los estilos que la plantilla define. Es lo que se hace con un
   membrete.
 
+Si tras rellenar queda algún marcador (`{{cliente}}` en el pie, `[FECHA]` en una tabla), el
+archivo **no se guarda**: se rechaza diciendo cuál y dónde, para que el modelo vuelva con
+el valor o se lo pregunte al usuario (REQ-065).
+
+**Estilo guiado por el usuario (REQ-065).** Sin plantilla —o encima de una— el usuario
+puede pedir el aspecto en palabras y el modelo lo pasa en `estilo`: fuente, tamaño,
+color de títulos, márgenes, orientación, encabezado y pie, logo, número de página; en
+Excel el color y la fuente del encabezado y un título de hoja; en PowerPoint fuente,
+colores, logo, pie y número de diapositiva. Un color que no se entiende se avisa y se
+ignora: nunca impide que salga el archivo.
+
+**Fórmulas (REQ-065).** El modelo escribe `=SUMA(B2:B4)`, `=SI(a;b;c)` o `=D5*0,19` con
+la misma naturalidad con la que habla, y Excel guarda las fórmulas siempre en inglés y con
+punto decimal: tal cual, el archivo mostraba `#¿NOMBRE?` o directamente no abría. Se
+normalizan al escribir (`normalizar_formula`).
+
 **PDF.** Con Office instalado —como en esta máquina— se convierte con el propio Word, Excel
 o PowerPoint, que es la única forma de que el PDF se vea exactamente igual que el
 documento. Sin Office, un documento de texto se maqueta con PyMuPDF; una hoja o una
@@ -271,6 +287,21 @@ def _bloques_de(spec: Any) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
     bloques = spec.get("bloques") or spec.get("secciones") or spec.get("contenido") or []
     if isinstance(bloques, str):
         bloques = _bloques_desde_markdown(bloques)
+    if isinstance(bloques, dict):
+        # Un bloque suelto ({"tipo": "parrafo", ...}) se acepta; un objeto con otra forma
+        # no: iterarlo escribiría sus claves («despues_de», «bloques») como párrafos y el
+        # documento saldría con basura diciendo «Listo». Pasó en la validación.
+        parece_bloque = any(bloques.get(k) for k in ("tipo", "texto", "items", "filas"))
+        if parece_bloque:
+            bloques = [bloques]
+        else:
+            raise DocumentoRechazado(
+                "'bloques' tiene que ser una lista de bloques ({tipo, texto...}) o un texto en "
+                f"Markdown, no un objeto con las claves {', '.join(map(str, bloques))}."
+            )
+    if not isinstance(bloques, (list, tuple)):
+        raise DocumentoRechazado(
+            "'bloques' tiene que ser una lista de bloques o un texto en Markdown.")
     cabecera = {k: spec.get(k) for k in ("titulo", "subtitulo", "autor", "fecha") if spec.get(k)}
     return cabecera, [b if isinstance(b, dict) else {"tipo": "parrafo", "texto": str(b)}
                       for b in bloques]
@@ -410,6 +441,50 @@ def _reemplazar_en_docx(doc, reemplazos: Dict[str, str]) -> int:
     return cuantos
 
 
+def _marcadores_restantes_docx(doc) -> List[Tuple[str, str]]:
+    """Return `[(marcador, dónde)]` de lo que quedó sin rellenar en cuerpo, tablas,
+    encabezados y pies."""
+    hallados: Dict[str, str] = {}
+
+    def _revisar(contenedor, donde: str) -> None:
+        try:
+            textos = [p.text for p in contenedor.paragraphs]
+            for tabla in contenedor.tables:
+                for fila in tabla.rows:
+                    for celda in fila.cells:
+                        textos += [p.text for p in celda.paragraphs]
+        except Exception as e:
+            logger.debug(f"no se pudo revisar {donde}: {e}")
+            return
+        for marcador in _marcadores_en("\n".join(textos)):
+            hallados.setdefault(marcador, donde)
+
+    _revisar(doc, "cuerpo")
+    for seccion in doc.sections:
+        _revisar(seccion.header, "encabezado")
+        _revisar(seccion.footer, "pie de página")
+        _revisar(seccion.first_page_header, "encabezado de primera página")
+        _revisar(seccion.first_page_footer, "pie de primera página")
+    return sorted(hallados.items())
+
+
+def _marcadores_restantes_pptx(prs) -> List[Tuple[str, str]]:
+    """Return `[(marcador, dónde)]` de lo que quedó sin rellenar en las diapositivas."""
+    hallados: Dict[str, str] = {}
+    for numero, slide in enumerate(prs.slides, 1):
+        textos = []
+        for shape in slide.shapes:
+            if shape.has_text_frame:
+                textos.append(shape.text_frame.text)
+            if getattr(shape, "has_table", False) and shape.has_table:
+                for fila in shape.table.rows:
+                    for celda in fila.cells:
+                        textos.append(celda.text_frame.text)
+        for marcador in _marcadores_en("\n".join(textos)):
+            hallados.setdefault(marcador, f"diapositiva {numero}")
+    return sorted(hallados.items())
+
+
 def _vaciar_cuerpo(doc) -> None:
     """Quita el contenido del cuerpo de una plantilla, dejando encabezados, pies y estilos."""
     cuerpo = doc.element.body
@@ -427,6 +502,264 @@ def _estilo(doc, *candidatos: str):
         except KeyError:
             continue
     return None
+
+
+# ================================================================ estilo guiado por el usuario
+
+#: Colores que la gente nombra al pedir un documento. Un hex («#2E7D32», «2E7D32») se
+#: acepta tal cual; cualquier otra cosa se avisa y se ignora, sin tumbar el documento.
+_COLORES_POR_NOMBRE = {
+    "negro": "000000", "blanco": "FFFFFF", "gris": "7F7F7F", "gris oscuro": "404040",
+    "gris claro": "BFBFBF", "azul": "2F5496", "azul oscuro": "1F3864", "azul claro": "5B9BD5",
+    "azul marino": "1F3864", "verde": "2E7D32", "verde oscuro": "1B5E20", "verde claro": "70AD47",
+    "rojo": "C00000", "rojo oscuro": "8B0000", "naranja": "ED7D31", "amarillo": "FFC000",
+    "morado": "7030A0", "violeta": "7030A0", "purpura": "7030A0", "cafe": "7B3F00",
+    "marron": "7B3F00", "dorado": "BF9000", "turquesa": "00B0F0", "celeste": "9DC3E6",
+    "vinotinto": "722F37", "rosa": "E91E63", "rosado": "E91E63",
+}
+
+#: Sinónimos que un modelo (o un usuario) usa para las claves de `estilo`.
+_ALIAS_ESTILO = {
+    "tamaño": "tamano", "tamano_letra": "tamano", "size": "tamano", "font": "fuente",
+    "tipografia": "fuente", "tipografía": "fuente", "letra": "fuente",
+    "margenes": "margenes_cm", "márgenes": "margenes_cm", "margenes_cm": "margenes_cm",
+    "orientación": "orientacion", "color_titulo": "color_titulos",
+    "color_encabezados": "color_encabezado",
+    "encabezado_color": "color_encabezado", "numeracion_paginas": "numeracion",
+    "numerar": "numeracion", "numero_de_pagina": "numeracion", "numero_pagina": "numeracion",
+    "justificar": "justificado", "interlineado": "interlineado", "footer": "pie",
+    "header": "encabezado", "logo_ancho": "logo_ancho_cm", "fuente_titulo": "fuente_titulos",
+}
+
+_CLAVES_DE_COLOR = ("color_titulos", "color_texto", "color_encabezado", "color_texto_encabezado")
+
+
+def _color_hex(valor: Any) -> Optional[str]:
+    """Return el color como «RRGGBB», o None si no se entiende."""
+    texto = _sin_tildes(str(valor or "")).strip().lower()
+    if not texto:
+        return None
+    if texto in _COLORES_POR_NOMBRE:
+        return _COLORES_POR_NOMBRE[texto]
+    m = re.fullmatch(r"#?([0-9a-f]{6})", texto)
+    if m:
+        return m.group(1).upper()
+    m = re.fullmatch(r"#?([0-9a-f])([0-9a-f])([0-9a-f])", texto)
+    if m:
+        return "".join(c * 2 for c in m.groups()).upper()
+    return None
+
+
+def _estilo_de(spec: Any, avisos: List[str]) -> Dict[str, Any]:
+    """Return el `estilo` que pidió el usuario, con claves canónicas y colores en hex.
+
+    Lo que no se entiende se avisa y se deja fuera: un color mal escrito no puede impedir
+    que salga el informe.
+    """
+    if not spec:
+        return {}
+    spec = _como_estructura(spec)
+    if not isinstance(spec, dict):
+        avisos.append("El 'estilo' tiene que ser un objeto (fuente, tamano, color_titulos...); "
+                      "se ignoró.")
+        return {}
+    estilo: Dict[str, Any] = {}
+    for clave, valor in spec.items():
+        canonica = _ALIAS_ESTILO.get(str(clave).strip().lower(), str(clave).strip().lower())
+        if valor is None or valor == "":
+            continue
+        if canonica in _CLAVES_DE_COLOR:
+            hexa = _color_hex(valor)
+            if hexa is None:
+                avisos.append(f"No entendí el color «{valor}» de '{canonica}'; "
+                              f"se dejó el de siempre.")
+                continue
+            estilo[canonica] = hexa
+        elif canonica == "tamano":
+            try:
+                estilo[canonica] = float(str(valor).replace(",", ".").replace("pt", "").strip())
+            except ValueError:
+                avisos.append(f"No entendí el tamaño de letra «{valor}»; se dejó el de siempre.")
+        elif canonica == "orientacion":
+            texto = _sin_tildes(str(valor)).lower()
+            apaisado = texto in ("horizontal", "apaisado", "apaisada", "landscape")
+            estilo[canonica] = "horizontal" if apaisado else "vertical"
+        elif canonica in ("numeracion", "justificado", "bordes"):
+            estilo[canonica] = valor if isinstance(valor, bool) else \
+                _sin_tildes(str(valor)).strip().lower() in ("1", "si", "true", "verdadero", "yes")
+        else:
+            estilo[canonica] = valor
+    return estilo
+
+
+def _margenes_de(valor: Any) -> Dict[str, float]:
+    """Return {superior, inferior, izquierdo, derecho} en cm a partir de un número o un objeto."""
+    if isinstance(valor, (int, float)):
+        return {k: float(valor) for k in ("superior", "inferior", "izquierdo", "derecho")}
+    if isinstance(valor, str):
+        try:
+            return _margenes_de(float(valor.replace(",", ".").replace("cm", "").strip()))
+        except ValueError:
+            return {}
+    if isinstance(valor, dict):
+        alias = {"top": "superior", "arriba": "superior", "bottom": "inferior", "abajo": "inferior",
+                 "left": "izquierdo", "izquierda": "izquierdo", "right": "derecho",
+                 "derecha": "derecho"}
+        salida = {}
+        for k, v in valor.items():
+            clave = alias.get(str(k).lower(), str(k).lower())
+            try:
+                salida[clave] = float(str(v).replace(",", ".").replace("cm", "").strip())
+            except ValueError:
+                continue
+        return salida
+    return {}
+
+
+def _campo_de_word(parrafo, instruccion: str) -> None:
+    """Añade un campo de Word (`PAGE`, `NUMPAGES`) al párrafo. python-docx no tiene API."""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    run = parrafo.add_run()
+    inicio = OxmlElement("w:fldChar")
+    inicio.set(qn("w:fldCharType"), "begin")
+    instr = OxmlElement("w:instrText")
+    instr.set(qn("xml:space"), "preserve")
+    instr.text = f" {instruccion} "
+    separador = OxmlElement("w:fldChar")
+    separador.set(qn("w:fldCharType"), "separate")
+    texto = OxmlElement("w:t")
+    texto.text = "1"
+    fin = OxmlElement("w:fldChar")
+    fin.set(qn("w:fldCharType"), "end")
+    for elemento in (inicio, instr, separador, texto, fin):
+        run._r.append(elemento)
+
+
+def _aplicar_estilo_docx(doc, estilo: Dict[str, Any], avisos: List[str]) -> List[str]:
+    """Aplica al documento lo que el usuario pidió de aspecto. Return qué se aplicó.
+
+    Va sobre los estilos del documento (`Normal`, `Title`, `Heading N`) y sus secciones,
+    no párrafo por párrafo: así vale para lo que se escribe después y también encima de
+    una plantilla, que es lo que se pidió explícitamente cuando vienen las dos cosas.
+    """
+    from docx.enum.section import WD_ORIENT
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml.ns import qn
+    from docx.shared import Cm, Pt, RGBColor
+
+    if not estilo:
+        return []
+    aplicado: List[str] = []
+    normal = _estilo(doc, "Normal")
+
+    if estilo.get("fuente") and normal is not None:
+        normal.font.name = str(estilo["fuente"])
+        rpr = normal.element.get_or_add_rPr()
+        fuentes = rpr.find(qn("w:rFonts"))
+        if fuentes is not None:
+            for atributo in ("w:ascii", "w:hAnsi", "w:eastAsia", "w:cs"):
+                fuentes.set(qn(atributo), str(estilo["fuente"]))
+        aplicado.append(f"fuente {estilo['fuente']}")
+    if estilo.get("tamano") and normal is not None:
+        normal.font.size = Pt(float(estilo["tamano"]))
+        aplicado.append(f"{estilo['tamano']:g} pt")
+    if estilo.get("color_texto") and normal is not None:
+        normal.font.color.rgb = RGBColor.from_string(estilo["color_texto"])
+    if estilo.get("justificado") and normal is not None:
+        normal.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        aplicado.append("justificado")
+    if estilo.get("interlineado") and normal is not None:
+        try:
+            interlineado = float(str(estilo["interlineado"]).replace(",", "."))
+            normal.paragraph_format.line_spacing = interlineado
+        except ValueError:
+            avisos.append(f"No entendí el interlineado «{estilo['interlineado']}».")
+
+    if estilo.get("fuente_titulos") or estilo.get("color_titulos"):
+        for nombre in ("Title", "Título", "Subtitle", "Subtítulo", "Heading 1", "Heading 2",
+                       "Heading 3", "Heading 4", "Título 1", "Título 2", "Título 3", "Título 4"):
+            s = _estilo(doc, nombre)
+            if s is None:
+                continue
+            if estilo.get("fuente_titulos"):
+                s.font.name = str(estilo["fuente_titulos"])
+                rpr = s.element.get_or_add_rPr()
+                fuentes = rpr.find(qn("w:rFonts"))
+                if fuentes is not None:
+                    for atributo in ("w:ascii", "w:hAnsi", "w:eastAsia", "w:cs"):
+                        fuentes.set(qn(atributo), str(estilo["fuente_titulos"]))
+                    # Los títulos de Word heredan la fuente del tema; ese atributo manda.
+                    del_tema = ("w:asciiTheme", "w:hAnsiTheme", "w:eastAsiaTheme", "w:cstheme")
+                    for atributo in del_tema:
+                        if fuentes.get(qn(atributo)) is not None:
+                            del fuentes.attrib[qn(atributo)]
+            if estilo.get("color_titulos"):
+                s.font.color.rgb = RGBColor.from_string(estilo["color_titulos"])
+        aplicado.append("títulos " + " ".join(
+            str(estilo[k]) for k in ("fuente_titulos", "color_titulos") if estilo.get(k)))
+
+    margenes = _margenes_de(estilo["margenes_cm"]) if estilo.get("margenes_cm") is not None else {}
+    orientacion = estilo.get("orientacion")
+    for seccion in doc.sections:
+        for lado, atributo in (("superior", "top_margin"), ("inferior", "bottom_margin"),
+                               ("izquierdo", "left_margin"), ("derecho", "right_margin")):
+            if lado in margenes:
+                setattr(seccion, atributo, Cm(margenes[lado]))
+        if orientacion == "horizontal" and seccion.orientation != WD_ORIENT.LANDSCAPE:
+            seccion.orientation = WD_ORIENT.LANDSCAPE
+            seccion.page_width, seccion.page_height = seccion.page_height, seccion.page_width
+        elif orientacion == "vertical" and seccion.orientation == WD_ORIENT.LANDSCAPE:
+            seccion.orientation = WD_ORIENT.PORTRAIT
+            seccion.page_width, seccion.page_height = seccion.page_height, seccion.page_width
+    if margenes:
+        aplicado.append("márgenes")
+    if orientacion:
+        aplicado.append(orientacion)
+
+    seccion = doc.sections[0]
+    if estilo.get("encabezado"):
+        seccion.header.is_linked_to_previous = False
+        encabezado = seccion.header
+        parrafo = encabezado.paragraphs[0] if encabezado.paragraphs else encabezado.add_paragraph()
+        parrafo.text = str(estilo["encabezado"])
+        aplicado.append("encabezado")
+    if estilo.get("logo"):
+        ruta_logo = str(estilo["logo"])
+        if os.path.isfile(ruta_logo):
+            try:
+                seccion.header.is_linked_to_previous = False
+                parrafo = seccion.header.add_paragraph()
+                posicion = _sin_tildes(str(estilo.get("logo_posicion") or "derecha")).lower()
+                alineaciones = {"izquierda": WD_ALIGN_PARAGRAPH.LEFT,
+                                "centro": WD_ALIGN_PARAGRAPH.CENTER}
+                parrafo.alignment = alineaciones.get(posicion, WD_ALIGN_PARAGRAPH.RIGHT)
+                ancho = float(str(estilo.get("logo_ancho_cm") or 3).replace(",", "."))
+                parrafo.add_run().add_picture(ruta_logo, width=Cm(ancho))
+                # Va primero en el encabezado: arriba del texto, no debajo.
+                seccion.header._element.insert(0, parrafo._p)
+                aplicado.append("logo")
+            except Exception as e:
+                avisos.append(f"No pude poner el logo «{os.path.basename(ruta_logo)}»: {e}.")
+        else:
+            avisos.append(f"No encontré el logo «{ruta_logo}»; el documento salió sin él.")
+    if estilo.get("pie"):
+        seccion.footer.is_linked_to_previous = False
+        pie = seccion.footer
+        parrafo = pie.paragraphs[0] if pie.paragraphs else pie.add_paragraph()
+        parrafo.text = str(estilo["pie"])
+        aplicado.append("pie")
+    if estilo.get("numeracion"):
+        seccion.footer.is_linked_to_previous = False
+        parrafo = seccion.footer.add_paragraph()
+        parrafo.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        parrafo.add_run("Página ")
+        _campo_de_word(parrafo, "PAGE")
+        parrafo.add_run(" de ")
+        _campo_de_word(parrafo, "NUMPAGES")
+        aplicado.append("número de página")
+    return aplicado
 
 
 # ================================================================================ gráficos
@@ -664,7 +997,8 @@ def _escribir_bloques(doc, bloques: List[Dict[str, Any]], avisos: List[str]) -> 
 
 
 def _docx(cabecera: Dict[str, Any], bloques: List[Dict[str, Any]], ruta: Path,
-          plantilla: Optional[Path], reemplazos: Dict[str, str]) -> Resultado:
+          plantilla: Optional[Path], reemplazos: Dict[str, str],
+          estilo: Optional[Dict[str, Any]] = None) -> Resultado:
     from docx import Document
     from docx.shared import Cm, Pt
 
@@ -677,6 +1011,19 @@ def _docx(cabecera: Dict[str, Any], bloques: List[Dict[str, Any]], ruta: Path,
                       "revisá cómo están escritos en ella con document_inspect.")
     if plantilla and bloques:
         _vaciar_cuerpo(doc)
+    if plantilla:
+        # Un marcador que quedó sin rellenar —en el pie, en una tabla— sale impreso y el
+        # archivo parece hecho sin estarlo. Se rechaza antes de guardar: el modelo puede
+        # volver con `reemplazos` o preguntarle al usuario el dato que falta.
+        restantes = _marcadores_restantes_docx(doc)
+        if restantes:
+            raise DocumentoRechazado(
+                "La plantilla quedó con marcadores sin rellenar: "
+                + "; ".join(f"{m} ({donde})" for m, donde in restantes)
+                + ". Pasá su valor en 'reemplazos' (o preguntale al usuario) y volvé a pedirlo."
+                + (" " + avisos[-1] if reemplazos and not sustituidos else "")
+            )
+    aplicado = _aplicar_estilo_docx(doc, estilo or {}, avisos)
 
     if cabecera.get("titulo"):
         p = doc.add_paragraph(str(cabecera["titulo"]), style=_estilo(doc, "Title", "Título"))
@@ -697,16 +1044,30 @@ def _docx(cabecera: Dict[str, Any], bloques: List[Dict[str, Any]], ruta: Path,
         detalle += f", {sustituidos} marcadores rellenados"
     if plantilla:
         detalle += f", sobre la plantilla {plantilla.name}"
+    if aplicado:
+        detalle += ", estilo: " + ", ".join(aplicado)
     return Resultado(ruta=str(ruta), formato="docx", detalle=detalle, avisos=avisos)
 
 
-def _html_de(cabecera: Dict[str, Any], bloques: List[Dict[str, Any]]) -> str:
+def _html_de(cabecera: Dict[str, Any], bloques: List[Dict[str, Any]],
+             estilo: Optional[Dict[str, Any]] = None) -> str:
     """Return el documento como HTML sencillo y limpio. Sirve para .html y para el PDF sin Office."""
     import html as _html
 
+    estilo = estilo or {}
+    fuente = _html.escape(str(estilo.get("fuente") or "Calibri"))
+    tamano = float(estilo.get("tamano") or 11)
+    color_texto = "#" + (estilo.get("color_texto") or "222222")
+    color_titulos = "#" + estilo["color_titulos"] if estilo.get("color_titulos") else "inherit"
+    fuente_titulos = "inherit"
+    if estilo.get("fuente_titulos"):
+        fuente_titulos = f"'{_html.escape(str(estilo['fuente_titulos']))}'"
     partes = ["<!doctype html><html><head><meta charset='utf-8'>",
-              "<style>body{font-family:Calibri,Arial,sans-serif;font-size:11pt;line-height:1.4;"
-              "max-width:17cm;margin:2cm auto;color:#222}h1{font-size:20pt}h2{font-size:15pt}"
+              f"<style>body{{font-family:'{fuente}',Calibri,Arial,sans-serif;"
+              f"font-size:{tamano:g}pt;line-height:1.4;max-width:17cm;margin:2cm auto;"
+              f"color:{color_texto}}}"
+              f"h1,h2,h3{{color:{color_titulos};font-family:{fuente_titulos}}}"
+              "h1{font-size:20pt}h2{font-size:15pt}"
               "h3{font-size:12.5pt}table{border-collapse:collapse;margin:8pt 0}"
               "td,th{border:1px solid #999;padding:4pt 6pt;vertical-align:top}th{background:#eee}"
               "blockquote{border-left:3px solid #999;margin:8pt 0;padding-left:8pt;color:#444}"
@@ -833,13 +1194,15 @@ def _pdf_sin_office(html: str, ruta: Path) -> None:
 
 def crear_documento(nombre: str, contenido: Any, plantilla: Optional[str] = None,
                     reemplazos: Optional[Dict[str, str]] = None,
-                    carpeta: Optional[str] = None) -> Resultado:
+                    carpeta: Optional[str] = None, estilo: Any = None) -> Resultado:
     """Produce un documento de texto: .docx, .pdf, .md, .html o .txt. Levanta `DocumentoRechazado`.
 
     `contenido` es un objeto con `titulo`, `subtitulo`, `autor`, `fecha` y `bloques` —o un
     texto en Markdown, que se convierte—. Cada bloque tiene `tipo`: `titulo` (con `nivel`),
     `parrafo`, `lista` (`items`, `numerada`), `tabla` (`encabezados`, `filas`, `titulo`),
-    `imagen` (`ruta`, `ancho_cm`, `pie`), `cita`, `salto`.
+    `imagen` (`ruta`, `ancho_cm`, `pie`), `cita`, `salto`. `estilo` es lo que el usuario
+    pidió de aspecto: `fuente`, `tamano`, `fuente_titulos`, `color_titulos`, `color_texto`,
+    `margenes_cm`, `orientacion`, `encabezado`, `pie`, `logo`, `numeracion`, `justificado`.
     """
     extension = _extension(nombre)
     if extension not in EXTENSIONES_DOCUMENTO:
@@ -855,16 +1218,21 @@ def crear_documento(nombre: str, contenido: Any, plantilla: Optional[str] = None
     destino = carpeta_de_salida(carpeta)
     ruta = ruta_libre(destino, nombre)
     ruta_plantilla = _plantilla_valida(plantilla, ("docx",)) if plantilla else None
+    avisos_estilo: List[str] = []
+    estilo_doc = _estilo_de(estilo, avisos_estilo)
 
     if extension == "docx":
-        return _docx(cabecera, bloques, ruta, ruta_plantilla, reemplazos)
+        resultado = _docx(cabecera, bloques, ruta, ruta_plantilla, reemplazos, estilo_doc)
+        resultado.avisos = avisos_estilo + resultado.avisos
+        return resultado
 
     if extension == "pdf":
         # Primero el Word —con la plantilla si la hay— y de ahí el PDF con el propio Word:
         # es la única forma de que el PDF se vea exactamente igual. Sin Word, se maqueta.
         with tempfile.TemporaryDirectory() as temporal:
             intermedio = Path(temporal) / (ruta.stem + ".docx")
-            resultado = _docx(cabecera, bloques, intermedio, ruta_plantilla, reemplazos)
+            resultado = _docx(cabecera, bloques, intermedio, ruta_plantilla, reemplazos, estilo_doc)
+            resultado.avisos = avisos_estilo + resultado.avisos
             pdf_temporal = Path(temporal) / (ruta.stem + ".pdf")
             if _con_office("Word", str(intermedio), str(pdf_temporal)):
                 os.replace(str(pdf_temporal), str(ruta))
@@ -875,17 +1243,25 @@ def crear_documento(nombre: str, contenido: Any, plantilla: Optional[str] = None
         if ruta_plantilla:
             avisos.append("Sin Word no puedo aplicar la plantilla al PDF: se maquetó con el "
                           "estilo básico.")
-        _pdf_sin_office(_html_de(cabecera, bloques), ruta)
+        if estilo_doc:
+            avisos.append("Sin Word, del estilo pedido solo van la fuente y los colores.")
+        _pdf_sin_office(_html_de(cabecera, bloques, estilo_doc), ruta)
         return Resultado(ruta=str(ruta), formato="pdf",
                          detalle=f"{len(bloques)} bloques, maquetado sin Office", avisos=avisos)
 
+    avisos = list(avisos_estilo)
     if extension == "html":
-        ruta.write_text(_html_de(cabecera, bloques), encoding="utf-8")
+        ruta.write_text(_html_de(cabecera, bloques, estilo_doc), encoding="utf-8")
     elif extension == "md":
         ruta.write_text(_markdown_de(cabecera, bloques), encoding="utf-8")
+        if estilo_doc:
+            avisos.append("Un .md no lleva fuente ni colores: el estilo no aplica.")
     else:
         ruta.write_text(_texto_plano_de(cabecera, bloques), encoding="utf-8")
-    return Resultado(ruta=str(ruta), formato=extension, detalle=f"{len(bloques)} bloques")
+        if estilo_doc:
+            avisos.append("Un .txt no lleva fuente ni colores: el estilo no aplica.")
+    return Resultado(ruta=str(ruta), formato=extension, detalle=f"{len(bloques)} bloques",
+                     avisos=avisos)
 
 
 # ==================================================================== hojas de cálculo
@@ -974,13 +1350,109 @@ def convencion() -> Convencion:
     return _CONVENCIONES.get(region) or _CONVENCIONES.get(idioma) or _CONVENCIONES["en"]
 
 
+def _sin_tildes(texto: str) -> str:
+    """Return el texto sin tildes ni diéresis: «MÁX» → «MAX», «AÑO» → «ANO»."""
+    import unicodedata
+
+    return "".join(c for c in unicodedata.normalize("NFD", texto)
+                   if unicodedata.category(c) != "Mn")
+
+
+#: Funciones de Excel en español → el nombre con el que se guardan en el archivo, que es
+#: siempre el inglés. El modelo escribe «=SUMA(B2:B4)» o «=SI(B2>5;"alto";"bajo")» con la
+#: misma naturalidad con la que habla, y Excel, al abrir el archivo, no traduce: «SUMA»
+#: sale como #¿NOMBRE? y el «;» o la coma decimal directamente impiden abrirlo ("Error en
+#: el método Open"). Pasó en la validación de REQ-040 y el agente había dicho «Listo».
+#: Las claves van sin tildes y en mayúsculas (`_sin_tildes`).
+_FUNCIONES_ES = {
+    "SUMA": "SUM", "PROMEDIO": "AVERAGE", "MAX": "MAX", "MIN": "MIN", "SI": "IF",
+    "SI.ERROR": "IFERROR", "SI.CONJUNTO": "IFS", "Y": "AND", "O": "OR", "NO": "NOT",
+    "CONTAR": "COUNT", "CONTARA": "COUNTA", "CONTAR.SI": "COUNTIF",
+    "CONTAR.SI.CONJUNTO": "COUNTIFS", "CONTAR.BLANCO": "COUNTBLANK", "SUMAR.SI": "SUMIF",
+    "SUMAR.SI.CONJUNTO": "SUMIFS", "PROMEDIO.SI": "AVERAGEIF",
+    "PROMEDIO.SI.CONJUNTO": "AVERAGEIFS", "REDONDEAR": "ROUND", "REDONDEAR.MAS": "ROUNDUP",
+    "REDONDEAR.MENOS": "ROUNDDOWN", "TRUNCAR": "TRUNC", "ENTERO": "INT", "RESIDUO": "MOD",
+    "COCIENTE": "QUOTIENT", "RAIZ": "SQRT", "POTENCIA": "POWER", "PRODUCTO": "PRODUCT",
+    "SUMAPRODUCTO": "SUMPRODUCT", "SUBTOTALES": "SUBTOTAL", "MEDIANA": "MEDIAN",
+    "MODA": "MODE", "DESVEST": "STDEV", "K.ESIMO.MAYOR": "LARGE", "K.ESIMO.MENOR": "SMALL",
+    "BUSCARV": "VLOOKUP", "BUSCARH": "HLOOKUP", "BUSCARX": "XLOOKUP", "BUSCAR": "LOOKUP",
+    "COINCIDIR": "MATCH", "INDICE": "INDEX", "DESREF": "OFFSET", "INDIRECTO": "INDIRECT",
+    "ELEGIR": "CHOOSE", "FILA": "ROW", "FILAS": "ROWS", "COLUMNA": "COLUMN",
+    "COLUMNAS": "COLUMNS", "CONCATENAR": "CONCATENATE", "UNIRCADENAS": "TEXTJOIN",
+    "TEXTO": "TEXT", "VALOR": "VALUE", "MONEDA": "DOLLAR", "LARGO": "LEN",
+    "IZQUIERDA": "LEFT", "DERECHA": "RIGHT", "EXTRAE": "MID", "ESPACIOS": "TRIM",
+    "MAYUSC": "UPPER", "MINUSC": "LOWER", "NOMPROPIO": "PROPER", "SUSTITUIR": "SUBSTITUTE",
+    "REEMPLAZAR": "REPLACE", "HALLAR": "SEARCH", "ENCONTRAR": "FIND", "REPETIR": "REPT",
+    "HOY": "TODAY", "AHORA": "NOW", "FECHA": "DATE", "ANO": "YEAR", "MES": "MONTH",
+    "DIA": "DAY", "DIAS": "DAYS", "SIFECHA": "DATEDIF", "DIAS.LAB": "NETWORKDAYS",
+    "DIA.LAB": "WORKDAY", "DIASEM": "WEEKDAY", "FIN.MES": "EOMONTH", "ESBLANCO": "ISBLANK",
+    "ESNUMERO": "ISNUMBER", "ESTEXTO": "ISTEXT", "ESERROR": "ISERROR", "ALEATORIO": "RAND",
+    "ALEATORIO.ENTRE": "RANDBETWEEN", "PAGO": "PMT", "VNA": "NPV", "TIR": "IRR",
+    "TASA": "RATE", "VA": "PV", "VF": "FV", "CAMBIAR": "SWITCH", "ABS": "ABS",
+}
+
+
+def normalizar_formula(formula: str) -> str:
+    """Return la fórmula como la guarda Excel: funciones en inglés, «,» entre argumentos
+    y «.» decimal. Una fórmula que ya venía así no cambia.
+
+    Se recorre con el tokenizador de openpyxl y no con regex sobre el texto: un «;» dentro
+    de `"una cadena"` o de una matriz `{1;2}` no es un separador. La coma entre dos enteros
+    es decimal si la fórmula lleva «;» (entonces la coma no puede ser separador) o si está
+    fuera de toda función (`=D5*0,19`); dentro de una función y sin «;», es separador:
+    `=ROUND(B5*1.19,2)` viene en inglés y adivinar lo contrario lo rompería.
+    """
+    from openpyxl.formula.tokenizer import Token, Tokenizer
+
+    try:
+        tokens = Tokenizer(formula).items
+    except Exception as e:
+        logger.debug(f"no se pudo tokenizar la fórmula {formula!r}: {e}")
+        return formula
+    hay_punto_y_coma = any(t.type == Token.SEP and t.value == ";" for t in tokens)
+    salida: List[str] = []
+    en_funcion = 0
+    en_matriz = 0
+    for i, t in enumerate(tokens):
+        valor = t.value
+        if t.type == Token.FUNC and t.subtype == Token.OPEN:
+            nombre = valor[:-1]
+            valor = _FUNCIONES_ES.get(_sin_tildes(nombre).upper(), nombre) + "("
+            en_funcion += 1
+        elif t.type == Token.FUNC and t.subtype == Token.CLOSE:
+            en_funcion -= 1
+        elif t.type == Token.ARRAY:
+            en_matriz += 1 if t.subtype == Token.OPEN else -1
+        elif t.type == Token.SEP and valor == ";" and not en_matriz:
+            valor = ","
+        elif valor == "," and t.type in (Token.SEP, Token.OP_IN):
+            anterior = tokens[i - 1] if i else None
+            siguiente = tokens[i + 1] if i + 1 < len(tokens) else None
+            entre_enteros = (
+                anterior is not None and siguiente is not None
+                and anterior.type == Token.OPERAND and anterior.subtype == Token.NUMBER
+                and siguiente.type == Token.OPERAND and siguiente.subtype == Token.NUMBER
+                and "." not in anterior.value and "." not in siguiente.value
+            )
+            if entre_enteros and (hay_punto_y_coma or not en_funcion):
+                valor = "."
+        elif t.type == Token.OPERAND and t.subtype == Token.RANGE:
+            clave = _sin_tildes(valor).upper()
+            if clave == "VERDADERO":
+                valor = "TRUE"
+            elif clave == "FALSO":
+                valor = "FALSE"
+        salida.append(valor)
+    return "=" + "".join(salida)
+
+
 def _valor_de_celda(valor: Any) -> Any:
     """Return el valor listo para Excel: números como números, fórmulas como fórmulas."""
     if valor is None or isinstance(valor, (int, float, bool)):
         return valor
     texto = str(valor).strip()
     if texto.startswith("="):
-        return texto                            # fórmula, la calcula Excel
+        return normalizar_formula(texto)        # fórmula, la calcula Excel
     # "1.250.000" y "12,5" son números escritos a mano: se guardan como número para que
     # las fórmulas y los formatos funcionen, no como texto que parece número.
     #
@@ -1014,38 +1486,136 @@ def _columna(indice: int) -> str:
     return get_column_letter(indice)
 
 
-def _escribir_hoja(ws, hoja: Dict[str, Any], desde_fila: int = 1) -> Dict[str, Any]:
-    """Escribe encabezados, filas, totales y formato en una hoja. Return qué se hizo."""
+def _celda_a_indices(celda: Any) -> Tuple[int, int]:
+    """Return `(columna, fila)` de «C3» → (3, 3). «5» → (1, 5); «C» → (3, 1); raro → (1, 1)."""
+    from openpyxl.utils import column_index_from_string
+
+    m = re.fullmatch(r"\s*\$?([A-Za-z]{0,3})\$?(\d{0,7})\s*", str(celda or ""))
+    if not m:
+        return 1, 1
+    letras, numero = m.group(1), m.group(2)
+    columna = column_index_from_string(letras.upper()) if letras else 1
+    return columna, (int(numero) if numero else 1) or 1
+
+
+def _textos_de_fila(ws, fila: int) -> List[str]:
+    """Return los textos de una fila que ya existe, sin crear celdas nuevas."""
+    if fila < 1 or fila > (ws.max_row or 0):
+        return []
+    return [_sin_tildes(str(v)).strip().lower()
+            for v in next(ws.iter_rows(min_row=fila, max_row=fila, values_only=True))
+            if isinstance(v, str) and v.strip()]
+
+
+def _fila_de_encabezado_existente(ws, encabezados: List[str], candidatas) -> Optional[int]:
+    """Return la primera fila candidata que ya trae (al menos la mitad de) esos encabezados.
+
+    Es lo que evita repetir el encabezado de una plantilla debajo del suyo: si el modelo
+    manda «Producto, Cantidad, Precio» y la fila 4 de la plantilla ya dice eso, los datos
+    van en la 5 y el encabezado se queda como estaba, con su formato.
+    """
+    buscados = {_sin_tildes(e).strip().lower() for e in encabezados if str(e).strip()}
+    if not buscados:
+        return None
+    for fila in candidatas:
+        textos = set(_textos_de_fila(ws, fila))
+        if textos and len(buscados & textos) >= max(1, (len(buscados) + 1) // 2):
+            return fila
+    return None
+
+
+def _celda_de_encabezado_con_estilo(ws, hasta_fila: int):
+    """Return una celda de encabezado de la plantilla (con relleno sólido) por encima de
+    `hasta_fila`, o None. Su formato se copia al encabezado nuevo en vez del azul fijo."""
+    for fila in range(min(hasta_fila - 1, ws.max_row or 0), 0, -1):
+        for celda in next(ws.iter_rows(min_row=fila, max_row=fila)):
+            if celda.value is None:
+                continue
+            if celda.fill is not None and celda.fill.fill_type == "solid":
+                return celda
+            break
+    return None
+
+
+def _escribir_hoja(ws, hoja: Dict[str, Any], desde_fila: int = 1, desde_columna: int = 1,
+                   escribir_encabezados: bool = True, estilo: Optional[Dict[str, Any]] = None,
+                   celda_modelo_encabezado=None) -> Dict[str, Any]:
+    """Escribe título, encabezados, filas, totales y formato en una hoja. Return qué se hizo.
+
+    `desde_fila`/`desde_columna` es la esquina de la tabla; `escribir_encabezados=False`
+    cuando la plantilla ya los tiene; `estilo` es lo que pidió el usuario (fuente, tamaño,
+    colores del encabezado, bordes); `celda_modelo_encabezado` es una celda de la plantilla
+    cuyo formato se copia al encabezado nuevo.
+    """
+    from copy import copy
+
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     from openpyxl.utils import get_column_letter
 
+    estilo = estilo or {}
     encabezados = hoja["encabezados"]
     filas = hoja["filas"]
     columnas = max([len(encabezados)] + [len(f) for f in filas]) if (encabezados or filas) else 0
-    fila_actual = desde_fila
-    borde = Border(*(Side(style="thin", color="BBBBBB"),) * 4)
+    col0 = max(1, int(desde_columna or 1))
+    fila_actual = max(1, int(desde_fila or 1))
+    con_bordes = estilo.get("bordes") is not False
+    borde = Border(*(Side(style="thin", color="BBBBBB"),) * 4) if con_bordes else None
 
-    if encabezados:
-        for i, texto in enumerate(encabezados, 1):
-            celda = ws.cell(row=fila_actual, column=i, value=texto)
-            celda.font = Font(bold=True, color="FFFFFF")
-            celda.fill = PatternFill("solid", fgColor="305496")
-            celda.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-            celda.border = borde
+    def _fuente(**extra) -> Font:
+        base = {k: v for k, v in (("name", estilo.get("fuente")),
+                                  ("size", estilo.get("tamano"))) if v}
+        base.update(extra)
+        return Font(**base)
+
+    con_estilo_de_texto = bool(estilo.get("fuente") or estilo.get("tamano"))
+
+    titulo = str(hoja.get("titulo") or "").strip()
+    if titulo:
+        celda = ws.cell(row=fila_actual, column=col0, value=titulo)
+        color_titulo = estilo.get("color_titulos") or estilo.get("color_encabezado") or "000000"
+        celda.font = _fuente(bold=True, size=float(estilo.get("tamano") or 11) + 5,
+                             color=color_titulo)
+        celda.alignment = Alignment(horizontal="left", vertical="center")
+        if columnas > 1:
+            ws.merge_cells(start_row=fila_actual, start_column=col0,
+                           end_row=fila_actual, end_column=col0 + columnas - 1)
+        fila_actual += 2                           # el título y una fila en blanco
+
+    fila_encabezado: Optional[int] = None
+    if encabezados and escribir_encabezados:
+        fila_encabezado = fila_actual
+        for i, texto in enumerate(encabezados):
+            celda = ws.cell(row=fila_actual, column=col0 + i, value=texto)
+            if celda_modelo_encabezado is not None and not estilo.get("color_encabezado"):
+                celda.font = copy(celda_modelo_encabezado.font)
+                celda.fill = copy(celda_modelo_encabezado.fill)
+                celda.alignment = copy(celda_modelo_encabezado.alignment)
+                celda.border = copy(celda_modelo_encabezado.border)
+            else:
+                celda.font = _fuente(bold=True,
+                                     color=estilo.get("color_texto_encabezado") or "FFFFFF")
+                celda.fill = PatternFill("solid",
+                                        fgColor=estilo.get("color_encabezado") or "305496")
+                celda.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                if borde:
+                    celda.border = borde
         fila_actual += 1
 
     primera_dato = fila_actual
     for fila in filas:
-        for i, valor in enumerate(fila[:columnas], 1):
-            celda = ws.cell(row=fila_actual, column=i, value=_valor_de_celda(valor))
-            celda.border = borde
+        for i, valor in enumerate(fila[:columnas], 0):
+            celda = ws.cell(row=fila_actual, column=col0 + i, value=_valor_de_celda(valor))
+            if borde:
+                celda.border = borde
+            if con_estilo_de_texto:
+                celda.font = _fuente()
         fila_actual += 1
     ultima_dato = fila_actual - 1
 
     # Totales: una fila con SUMA en cada columna que sea numérica, y la etiqueta en la primera.
     if hoja.get("totales") and filas and ultima_dato >= primera_dato:
         numericas = []
-        for c in range(1, columnas + 1):
+        for c in range(col0, col0 + columnas):
             valores = [ws.cell(row=r, column=c).value for r in range(primera_dato, ultima_dato + 1)]
             if valores and all(isinstance(v, (int, float)) or
                                (isinstance(v, str) and v.startswith("=")) for v in valores if v is not None) \
@@ -1053,49 +1623,61 @@ def _escribir_hoja(ws, hoja: Dict[str, Any], desde_fila: int = 1) -> Dict[str, A
                             for v in valores):
                 numericas.append(c)
         if numericas:
-            etiqueta = ws.cell(row=fila_actual, column=1, value="Total")
-            etiqueta.font = Font(bold=True)
+            etiqueta = ws.cell(row=fila_actual, column=col0, value="Total")
+            etiqueta.font = _fuente(bold=True)
             for c in numericas:
-                if c == 1:
+                if c == col0:
                     continue
                 letra = get_column_letter(c)
                 celda = ws.cell(row=fila_actual, column=c,
                                 value=f"=SUM({letra}{primera_dato}:{letra}{ultima_dato})")
-                celda.font = Font(bold=True)
-                celda.border = borde
+                celda.font = _fuente(bold=True)
+                if borde:
+                    celda.border = borde
             fila_actual += 1
 
-    # Formatos de número por columna: {"B": "#,##0", "D": "0.0%"}.
+    # Formatos de número por columna: {"B": "#,##0", "D": "0.0%"}. Las letras son las de
+    # la hoja, no las de la tabla: es lo que el usuario ve en Excel.
     for letra, formato in (hoja.get("formatos") or {}).items():
         try:
             for r in range(primera_dato, fila_actual):
-                ws[f"{letra}{r}"].number_format = str(formato)
+                ws[f"{str(letra).upper()}{r}"].number_format = str(formato)
         except Exception as e:
             logger.debug(f"formato «{formato}» no aplicable a la columna {letra}: {e}")
 
     # Anchos: a la medida del contenido, con tope.
-    for c in range(1, columnas + 1):
+    for c in range(col0, col0 + columnas):
         letra = get_column_letter(c)
+        desde_ancho = primera_dato - (1 if fila_encabezado else 0)
         largo = max((len(str(ws.cell(row=r, column=c).value or ""))
-                     for r in range(desde_fila, fila_actual)), default=8)
+                     for r in range(desde_ancho, fila_actual)), default=8)
         ws.column_dimensions[letra].width = min(max(10, largo + 2), _ANCHO_COLUMNA_MAXIMO)
 
-    if encabezados and desde_fila == 1:
-        ws.freeze_panes = "A2"
+    if fila_encabezado is not None and col0 == 1:
+        ws.freeze_panes = f"A{fila_encabezado + 1}"
         if ultima_dato >= primera_dato:
-            ws.auto_filter.ref = f"A1:{get_column_letter(columnas)}{ultima_dato}"
+            ws.auto_filter.ref = f"A{fila_encabezado}:{get_column_letter(columnas)}{ultima_dato}"
 
     grafico = hoja.get("grafico")
     if grafico and filas and ultima_dato >= primera_dato:
-        _agregar_grafico(ws, grafico, encabezados, primera_dato, ultima_dato, fila_actual + 2)
+        _agregar_grafico(ws, grafico, encabezados, primera_dato, ultima_dato, fila_actual + 2, col0)
 
-    return {"filas": len(filas), "columnas": columnas, "totales": bool(hoja.get("totales"))}
+    return {"filas": len(filas), "columnas": columnas, "totales": bool(hoja.get("totales")),
+            "fila_encabezado": fila_encabezado, "primera_dato": primera_dato}
 
 
 def _agregar_grafico(ws, grafico: Dict[str, Any], encabezados: List[str],
-                     primera: int, ultima: int, fila_ancla: int) -> None:
-    """Pone un gráfico de barras, líneas o torta con las columnas pedidas."""
+                     primera: int, ultima: int, fila_ancla: int, col0: int = 1) -> None:
+    """Pone un gráfico de barras, líneas o torta con las columnas pedidas.
+
+    Las columnas se buscan por su nombre en `encabezados` aunque el encabezado no se haya
+    escrito (plantilla que ya lo traía): antes, en ese caso, la búsqueda fallaba y se
+    graficaba la columna 2 con el nombre «Series1». El nombre de la serie se pone
+    explícito (`SeriesLabel`) y no se lee de la celda de arriba, que puede no ser el
+    encabezado.
+    """
     from openpyxl.chart import BarChart, LineChart, PieChart, Reference
+    from openpyxl.chart.series import SeriesLabel
     from openpyxl.utils import column_index_from_string
 
     tipo = str(grafico.get("tipo") or "barras").lower()
@@ -1107,28 +1689,35 @@ def _agregar_grafico(ws, grafico: Dict[str, Any], encabezados: List[str],
         chart.y_axis.title = str(grafico["eje_y"])
 
     columnas = grafico.get("columnas") or ([encabezados[1]] if len(encabezados) > 1 else [])
+    if isinstance(columnas, str):
+        columnas = [columnas]
     categorias = grafico.get("categorias") or (encabezados[0] if encabezados else "A")
+    normales = [_sin_tildes(e).strip().lower() for e in encabezados]
 
     def _indice(referencia: Any) -> int:
-        texto = str(referencia)
-        if texto in encabezados:
-            return encabezados.index(texto) + 1
+        texto = str(referencia).strip()
+        buscado = _sin_tildes(texto).lower()
+        if buscado in normales:
+            return col0 + normales.index(buscado)
         try:
             return column_index_from_string(texto.upper())
         except Exception:
-            return 2
+            return col0 + 1
 
     for col in columnas:
         c = _indice(col)
-        datos = Reference(ws, min_col=c, min_row=primera - 1 if encabezados else primera,
-                          max_row=ultima)
-        chart.add_data(datos, titles_from_data=bool(encabezados))
-    cats = Reference(ws, min_col=_indice(categorias), min_row=primera, max_row=ultima)
-    chart.set_categories(cats)
+        chart.add_data(Reference(ws, min_col=c, min_row=primera, max_row=ultima),
+                       titles_from_data=False)
+        nombre = encabezados[c - col0] if 0 <= c - col0 < len(encabezados) else str(col)
+        chart.series[-1].tx = SeriesLabel(v=nombre)
+    chart.set_categories(Reference(ws, min_col=_indice(categorias), min_row=primera,
+                                   max_row=ultima))
     chart.width, chart.height = 18, 9
     if chart.legend is not None:
         chart.legend.position = "b"          # abajo: a la derecha se corta al imprimir
-    ws.add_chart(chart, f"A{fila_ancla}")
+    from openpyxl.utils import get_column_letter
+
+    ws.add_chart(chart, f"{get_column_letter(col0)}{fila_ancla}")
 
 
 _REF_RE = re.compile(r"\$?([A-Z]{1,3})\$?(\d{1,7})")
@@ -1346,13 +1935,16 @@ def _pdf_apaisado_sin_office(html: str, ruta: Path) -> None:
 
 
 def crear_hoja(nombre: str, contenido: Any, plantilla: Optional[str] = None,
-               carpeta: Optional[str] = None) -> Resultado:
+               carpeta: Optional[str] = None, estilo: Any = None) -> Resultado:
     """Produce una hoja de cálculo: .xlsx o .csv. Levanta `DocumentoRechazado`.
 
     `contenido` trae `hojas`, y cada hoja `nombre`, `encabezados`, `filas`, y opcionalmente
     `totales` (fila de sumas), `formatos` (`{"B": "#,##0"}`), `grafico` (`tipo`, `titulo`,
     `columnas`, `categorias`) y `desde` (celda donde empezar, para una plantilla).
-    Las celdas que empiezan por `=` son fórmulas y las calcula Excel.
+    Las celdas que empiezan por `=` son fórmulas y las calcula Excel; pueden venir en
+    español (`=SUMA(...)`, `=SI(a;b;c)`, `0,19`) y se guardan como Excel las entiende.
+    `estilo` es lo que pidió el usuario: `fuente`, `tamano`, `color_encabezado`,
+    `color_texto_encabezado`, `bordes`; y cada hoja acepta `titulo`.
     """
     extension = _extension(nombre)
     if extension not in EXTENSIONES_HOJA + ("pdf",):
@@ -1360,6 +1952,8 @@ def crear_hoja(nombre: str, contenido: Any, plantilla: Optional[str] = None,
     spec = _como_estructura(contenido)
     rechazar_relleno(spec)
     hojas = _hojas_de(spec)
+    avisos_estilo: List[str] = []
+    estilo_hoja = _estilo_de(estilo, avisos_estilo)
     destino = carpeta_de_salida(carpeta)
     ruta = ruta_libre(destino, nombre)
 
@@ -1369,7 +1963,9 @@ def crear_hoja(nombre: str, contenido: Any, plantilla: Optional[str] = None,
         with tempfile.TemporaryDirectory() as temporal:
             intermedio = Path(temporal) / (ruta.stem + ".xlsx")
             resultado = _xlsx(hojas, intermedio,
-                              _plantilla_valida(plantilla, ("xlsx",)) if plantilla else None)
+                              _plantilla_valida(plantilla, ("xlsx",)) if plantilla else None,
+                              estilo_hoja)
+            resultado.avisos = avisos_estilo + resultado.avisos
             pdf_temporal = Path(temporal) / (ruta.stem + ".pdf")
             if _con_office("Excel", resultado.ruta, str(pdf_temporal)):
                 os.replace(str(pdf_temporal), str(ruta))
@@ -1396,10 +1992,14 @@ def crear_hoja(nombre: str, contenido: Any, plantilla: Optional[str] = None,
                          detalle=f"{len(hoja['filas'])} filas" +
                                  (", solo la primera hoja" if len(hojas) > 1 else ""))
 
-    return _xlsx(hojas, ruta, _plantilla_valida(plantilla, ("xlsx",)) if plantilla else None)
+    resultado = _xlsx(hojas, ruta, _plantilla_valida(plantilla, ("xlsx",)) if plantilla else None,
+                      estilo_hoja)
+    resultado.avisos = avisos_estilo + resultado.avisos
+    return resultado
 
 
-def _xlsx(hojas: List[Dict[str, Any]], ruta: Path, ruta_plantilla: Optional[Path]) -> Resultado:
+def _xlsx(hojas: List[Dict[str, Any]], ruta: Path, ruta_plantilla: Optional[Path],
+          estilo: Optional[Dict[str, Any]] = None) -> Resultado:
     """Escribe el libro en `ruta`, que ya viene decidida. Es lo que comparten .xlsx y .pdf."""
     from openpyxl import Workbook, load_workbook
 
@@ -1412,19 +2012,46 @@ def _xlsx(hojas: List[Dict[str, Any]], ruta: Path, ruta_plantilla: Optional[Path
     resumen = []
     avisos: List[str] = []
     for hoja in hojas:
-        desde_fila = 1
+        desde_fila, desde_columna = 1, 1
+        escribir_encabezados = True
+        celda_modelo = None
         if ruta_plantilla and hoja["nombre"] in wb.sheetnames:
             ws = wb[hoja["nombre"]]
-            celda = str(hoja.get("desde") or "A1").upper()
-            desde_fila = int(re.sub(r"[A-Z]+", "", celda) or 1)
-            if desde_fila == 1 and ws.max_row > 1:
-                # La plantilla ya tiene su encabezado: se escribe debajo de lo que haya.
+            if hoja.get("desde"):
+                # `desde` es donde va la primera fila de DATOS. Si la plantilla ya tiene
+                # el encabezado ahí o justo encima, no se repite; si está justo ahí, los
+                # datos bajan una fila.
+                desde_columna, desde_fila = _celda_a_indices(hoja["desde"])
+                fila_enc = _fila_de_encabezado_existente(ws, hoja["encabezados"],
+                                                         (desde_fila, desde_fila - 1))
+                if fila_enc is not None:
+                    escribir_encabezados = False
+                    if fila_enc == desde_fila:
+                        desde_fila += 1
+            elif (ws.max_row or 0) > 1 or ws.cell(row=1, column=1).value is not None:
+                # La plantilla tiene contenido: se escribe debajo de lo que haya, y si el
+                # encabezado ya está en alguna fila, no se repite.
+                fila_enc = _fila_de_encabezado_existente(ws, hoja["encabezados"],
+                                                         range(ws.max_row, 0, -1))
                 desde_fila = ws.max_row + 1
-                hoja = {**hoja, "encabezados": []}
+                if fila_enc is not None:
+                    escribir_encabezados = False
+                    primera_con_texto = next(
+                        (c.column for c in next(ws.iter_rows(min_row=fila_enc, max_row=fila_enc))
+                         if c.value is not None), 1)
+                    desde_columna = primera_con_texto
+            if escribir_encabezados:
+                celda_modelo = _celda_de_encabezado_con_estilo(ws, desde_fila)
         else:
             ws = wb.create_sheet(hoja["nombre"])
-        hecho = _escribir_hoja(ws, hoja, desde_fila)
-        resumen.append(f"{hoja['nombre']}: {hecho['filas']} filas × {hecho['columnas']} columnas")
+        hecho = _escribir_hoja(ws, hoja, desde_fila, desde_columna, escribir_encabezados,
+                               estilo, celda_modelo)
+        linea = f"{hoja['nombre']}: {hecho['filas']} filas × {hecho['columnas']} columnas"
+        if hecho["primera_dato"] != 2:
+            linea += f", datos desde la fila {hecho['primera_dato']}"
+            if hecho["fila_encabezado"]:
+                linea += f" (encabezado en la {hecho['fila_encabezado']})"
+        resumen.append(linea)
 
     wb.save(str(ruta))
     detalle = "; ".join(resumen)
@@ -1601,8 +2228,83 @@ def _agregar_diapositivas(prs, diapositivas: List[Dict[str, Any]], avisos: List[
 
 
 
+def _aplicar_estilo_pptx(prs, diapositivas, estilo: Dict[str, Any], avisos: List[str]) -> List[str]:
+    """Aplica a las diapositivas creadas lo que el usuario pidió de aspecto. Return qué se aplicó.
+
+    Fuente y colores van run por run (el tema de Office se aplica después con PowerPoint y
+    solo toca el patrón, así que el formato explícito se conserva). Logo, pie y número son
+    formas añadidas en las esquinas.
+    """
+    from pptx.dml.color import RGBColor
+    from pptx.enum.text import PP_ALIGN
+    from pptx.util import Cm, Pt
+
+    if not estilo or not diapositivas:
+        return []
+    aplicado: List[str] = []
+    fuente = estilo.get("fuente")
+    color_titulos = estilo.get("color_titulos")
+    color_texto = estilo.get("color_texto")
+    total = len(diapositivas)
+    ancho, alto = prs.slide_width, prs.slide_height
+
+    ruta_logo = str(estilo.get("logo") or "")
+    if ruta_logo and not os.path.isfile(ruta_logo):
+        avisos.append(f"No encontré el logo «{ruta_logo}»; la presentación salió sin él.")
+        ruta_logo = ""
+
+    for numero, slide in enumerate(diapositivas, 1):
+        titulo = slide.shapes.title
+        for shape in slide.shapes:
+            if not shape.has_text_frame:
+                continue
+            es_titulo = titulo is not None and shape.shape_id == titulo.shape_id
+            for parrafo in shape.text_frame.paragraphs:
+                for run in parrafo.runs:
+                    if fuente:
+                        run.font.name = str(fuente)
+                    color = color_titulos if es_titulo else color_texto
+                    if color:
+                        run.font.color.rgb = RGBColor.from_string(color)
+        if ruta_logo:
+            try:
+                ancho_logo = Cm(float(str(estilo.get("logo_ancho_cm") or 2.5).replace(",", ".")))
+                slide.shapes.add_picture(ruta_logo, ancho - ancho_logo - Cm(0.5), Cm(0.4),
+                                         width=ancho_logo)
+            except Exception as e:
+                avisos.append(f"No pude poner el logo: {e}.")
+                ruta_logo = ""
+        if estilo.get("pie"):
+            caja = slide.shapes.add_textbox(Cm(0.8), alto - Cm(1.2), ancho * 2 // 3, Cm(0.8))
+            p = caja.text_frame.paragraphs[0]
+            p.text = str(estilo["pie"])
+            p.font.size = Pt(10)
+            p.font.color.rgb = RGBColor.from_string(color_texto or "7F7F7F")
+            if fuente:
+                p.font.name = str(fuente)
+        if estilo.get("numeracion"):
+            caja = slide.shapes.add_textbox(ancho - Cm(3.3), alto - Cm(1.2), Cm(2.5), Cm(0.8))
+            p = caja.text_frame.paragraphs[0]
+            p.text = f"{numero} / {total}"
+            p.alignment = PP_ALIGN.RIGHT
+            p.font.size = Pt(10)
+            p.font.color.rgb = RGBColor.from_string(color_texto or "7F7F7F")
+            if fuente:
+                p.font.name = str(fuente)
+
+    for clave, etiqueta in (("fuente", f"fuente {fuente}"), ("color_titulos", "color de títulos"),
+                            ("color_texto", "color de texto"), ("pie", "pie"),
+                            ("numeracion", "número de diapositiva")):
+        if estilo.get(clave):
+            aplicado.append(etiqueta)
+    if ruta_logo:
+        aplicado.append("logo")
+    return aplicado
+
+
 def _pptx(cabecera: Dict[str, Any], diapositivas: List[Dict[str, Any]], ruta: Path,
-          plantilla: Optional[Path], reemplazos: Dict[str, str]) -> Resultado:
+          plantilla: Optional[Path], reemplazos: Dict[str, str],
+          estilo: Optional[Dict[str, Any]] = None) -> Resultado:
     from pptx import Presentation
     from pptx.util import Cm, Pt
 
@@ -1617,6 +2319,15 @@ def _pptx(cabecera: Dict[str, Any], diapositivas: List[Dict[str, Any]], ruta: Pa
         avisos.append("Ojo: ninguno de los marcadores que me diste aparece en la plantilla.")
     if plantilla and diapositivas:
         _quitar_diapositivas(prs)
+    if plantilla:
+        restantes = _marcadores_restantes_pptx(prs)
+        if restantes:
+            raise DocumentoRechazado(
+                "La plantilla quedó con marcadores sin rellenar: "
+                + "; ".join(f"{m} ({donde})" for m, donde in restantes)
+                + ". Pasá su valor en 'reemplazos' (o preguntale al usuario) y volvé a pedirlo."
+            )
+    habia = len(prs.slides)
 
     if cabecera.get("titulo"):
         slide = prs.slides.add_slide(_layout(prs, "Title Slide", "Diapositiva de título",
@@ -1628,6 +2339,7 @@ def _pptx(cabecera: Dict[str, Any], diapositivas: List[Dict[str, Any]], ruta: Pa
                 ph.text = str(cabecera["subtitulo"])
 
     _agregar_diapositivas(prs, diapositivas, avisos)
+    aplicado = _aplicar_estilo_pptx(prs, list(prs.slides)[habia:], estilo or {}, avisos)
 
     prs.save(str(ruta))
     detalle = f"{len(prs.slides)} diapositivas"
@@ -1635,6 +2347,8 @@ def _pptx(cabecera: Dict[str, Any], diapositivas: List[Dict[str, Any]], ruta: Pa
         detalle += f", {sustituidos} marcadores rellenados"
     if plantilla:
         detalle += f", con el tema de {plantilla.name}"
+    if aplicado:
+        detalle += ", estilo: " + ", ".join(aplicado)
     return Resultado(ruta=str(ruta), formato="pptx", detalle=detalle, avisos=avisos)
 
 
@@ -1758,12 +2472,14 @@ def _html_de_diapositivas(cabecera: Dict[str, Any], diapositivas: List[Dict[str,
 
 def crear_presentacion(nombre: str, contenido: Any, plantilla: Optional[str] = None,
                        reemplazos: Optional[Dict[str, str]] = None,
-                       carpeta: Optional[str] = None, tema: Optional[str] = None) -> Resultado:
+                       carpeta: Optional[str] = None, tema: Optional[str] = None,
+                       estilo: Any = None) -> Resultado:
     """Produce una presentación .pptx (o su .pdf). Levanta `DocumentoRechazado`.
 
     `contenido` trae `titulo`, `subtitulo` y `diapositivas`; cada una `titulo`, `puntos`
     (una lista dentro de la lista es un subnivel), `texto`, `tabla` (`encabezados`,
-    `filas`), `imagen` (ruta) y `notas` para el orador.
+    `filas`), `imagen` (ruta) y `notas` para el orador. `estilo`: `fuente`,
+    `color_titulos`, `color_texto`, `logo`, `pie`, `numeracion`.
     """
     extension = _extension(nombre)
     if extension not in EXTENSIONES_PRESENTACION + ("pdf",):
@@ -1776,9 +2492,13 @@ def crear_presentacion(nombre: str, contenido: Any, plantilla: Optional[str] = N
     destino = carpeta_de_salida(carpeta)
     ruta = ruta_libre(destino, nombre)
     ruta_plantilla = _plantilla_valida(plantilla, ("pptx",)) if plantilla else None
+    avisos_estilo: List[str] = []
+    estilo_pres = _estilo_de(estilo, avisos_estilo)
 
     def _producir(destino_pptx: Path) -> Resultado:
-        resultado = _pptx(cabecera, diapositivas, destino_pptx, ruta_plantilla, reemplazos)
+        resultado = _pptx(cabecera, diapositivas, destino_pptx, ruta_plantilla, reemplazos,
+                          estilo_pres)
+        resultado.avisos = avisos_estilo + resultado.avisos
         if ruta_plantilla is None:
             elegido = str(tema or TEMA_POR_DEFECTO)
             if _ruta_de_tema(elegido) is None:
@@ -2137,12 +2857,17 @@ def _editar_docx(origen: Path, destino: Path, cambios: Dict[str, Any]) -> Result
             avisos.append("No encontré ningún párrafo con los textos a quitar.")
 
     agregar = cambios.get("agregar") or []
+    despues_de = str(cambios.get("despues_de") or "").strip()
+    if isinstance(agregar, dict) and ("bloques" in agregar or "despues_de" in agregar):
+        # `agregar: {"despues_de": ..., "bloques": [...]}` es la forma natural de pedirlo,
+        # aunque la documentada lleve `despues_de` al lado. Se aceptan las dos.
+        despues_de = despues_de or str(agregar.get("despues_de") or "").strip()
+        agregar = agregar.get("bloques") or agregar.get("contenido") or []
     _, bloques = _bloques_de(agregar if isinstance(agregar, str) else {"bloques": agregar})
     if bloques:
         rechazar_relleno(bloques)
         antes = set(doc.element.body)
         _escribir_bloques(doc, bloques, avisos)
-        despues_de = str(cambios.get("despues_de") or "").strip()
         if despues_de and not _mover_al_final_despues_de(doc, despues_de, antes):
             avisos.append(f"No encontré «{despues_de}» para poner el contenido después; "
                           f"quedó al final.")
@@ -2153,6 +2878,115 @@ def _editar_docx(origen: Path, destino: Path, cambios: Dict[str, Any]) -> Result
         raise DocumentoRechazado("No me diste ningún cambio: 'reemplazos', 'agregar' o 'quitar'.")
     doc.save(str(destino))
     return Resultado(ruta=str(destino), formato="docx", detalle=", ".join(hechos), avisos=avisos)
+
+
+_TOTAL_RE = re.compile(r"^(total|totales|suma|sumatoria)\b", re.IGNORECASE)
+#: Una referencia de celda o rango dentro de una fórmula, con su hoja si la trae. Los
+#: lookarounds evitan tomar «LOG10(» o «DAYS360(» por referencias.
+_REF_EN_FORMULA_RE = re.compile(
+    r"(?<![A-Za-z0-9_])(?P<hoja>(?:'[^']+'|[A-Za-z0-9_\.]+)!)?"
+    r"(?P<c1>\$?[A-Z]{1,3})(?P<f1>\$?\d{1,7})"
+    r"(?::(?P<c2>\$?[A-Z]{1,3})(?P<f2>\$?\d{1,7}))?(?![A-Za-z0-9_(])"
+)
+
+
+def _fila_de_totales(ws) -> Optional[int]:
+    """Return la fila de totales de una hoja, o None: de abajo hacia arriba, la primera cuya
+    primera celda con texto diga «Total» o que traiga una SUM/SUBTOTAL sobre las de arriba."""
+    for fila in range((ws.max_row or 0), 1, -1):
+        celdas = next(ws.iter_rows(min_row=fila, max_row=fila))
+        valores = [c.value for c in celdas]
+        if all(v in (None, "") for v in valores):
+            continue
+        primer_texto = next((v for v in valores if isinstance(v, str) and v.strip()), "")
+        if _TOTAL_RE.match(primer_texto.strip()):
+            return fila
+        if any(isinstance(v, str) and re.match(r"=\s*(SUM|SUBTOTAL)\(", v, re.IGNORECASE)
+               for v in valores):
+            return fila
+        return None                                # la última fila con datos no es de totales
+    return None
+
+
+def _copiar_formato_de_fila(ws, origen: int, destinos) -> None:
+    """Copia fuente, borde, relleno, alineación y formato de número de una fila a otras."""
+    from copy import copy
+
+    if origen < 1 or origen > (ws.max_row or 0):
+        return
+    for celda in next(ws.iter_rows(min_row=origen, max_row=origen)):
+        for fila in destinos:
+            destino = ws.cell(row=fila, column=celda.column)
+            destino.font = copy(celda.font)
+            destino.border = copy(celda.border)
+            destino.fill = copy(celda.fill)
+            destino.alignment = copy(celda.alignment)
+            destino.number_format = celda.number_format
+
+
+def _desplazar_referencias(formula: str, hoja: str, hoja_de_la_formula: str,
+                           desde_fila: int, cuantas: int) -> str:
+    """Return la fórmula con las referencias a `hoja` corridas `cuantas` filas a partir de
+    `desde_fila`, y los rangos que terminaban justo encima extendidos para abarcar lo nuevo.
+
+    openpyxl inserta filas sin tocar una sola fórmula: el `=SUM(C2:C3)` de la fila de
+    totales seguiría sumando dos filas con tres, y el `=Clientes!C4` de otra hoja apuntaría
+    a una fila de datos. Es lo que Excel hace solo al insertar filas dentro de un rango.
+    """
+    def _misma_hoja(prefijo: Optional[str]) -> bool:
+        if not prefijo:
+            return hoja_de_la_formula == hoja
+        return prefijo[:-1].strip("'") == hoja
+
+    def _corregir(m: re.Match) -> str:
+        if not _misma_hoja(m.group("hoja")):
+            return m.group(0)
+        f1 = int(m.group("f1").replace("$", ""))
+        nuevo_f1 = f1 + cuantas if f1 >= desde_fila else f1
+        salida = ((m.group("hoja") or "") + m.group("c1")
+                  + m.group("f1").replace(str(f1), str(nuevo_f1)))
+        if m.group("c2"):
+            f2 = int(m.group("f2").replace("$", ""))
+            if f2 >= desde_fila:
+                nuevo_f2 = f2 + cuantas
+            elif f2 == desde_fila - 1 and f1 < desde_fila:
+                nuevo_f2 = f2 + cuantas        # terminaba justo encima: se extiende
+            else:
+                nuevo_f2 = f2
+            salida += ":" + m.group("c2") + m.group("f2").replace(str(f2), str(nuevo_f2))
+        return salida
+
+    # Las cadenas entre comillas no se tocan: "C4" dentro de un texto no es una referencia.
+    partes = re.split(r'("[^"]*")', formula)
+    return "".join(parte if parte.startswith('"') else _REF_EN_FORMULA_RE.sub(_corregir, parte)
+                   for parte in partes)
+
+
+def _insertar_filas_antes_del_total(wb, ws, fila_total: int, nuevas: List[List[Any]]) -> None:
+    """Mete las filas nuevas justo antes de la de totales, con el formato de la última fila
+    de datos, y corrige todas las fórmulas del libro (y los gráficos de la hoja)."""
+    cuantas = len(nuevas)
+    ws.insert_rows(fila_total, cuantas)
+    for i, fila in enumerate(nuevas):
+        for j, valor in enumerate(fila, 1):
+            ws.cell(row=fila_total + i, column=j, value=_valor_de_celda(valor))
+    if fila_total - 1 >= 1:
+        _copiar_formato_de_fila(ws, fila_total - 1, range(fila_total, fila_total + cuantas))
+
+    for hoja in wb.worksheets:
+        for fila_celdas in hoja.iter_rows():
+            for celda in fila_celdas:
+                if isinstance(celda.value, str) and celda.value.startswith("="):
+                    celda.value = _desplazar_referencias(celda.value, ws.title, hoja.title,
+                                                         fila_total, cuantas)
+    for grafico in getattr(ws, "_charts", []):
+        for serie in grafico.series:
+            for referencia in (getattr(serie.val, "numRef", None) if serie.val else None,
+                               getattr(serie.cat, "numRef", None) if serie.cat else None,
+                               getattr(serie.cat, "strRef", None) if serie.cat else None):
+                if referencia is not None and referencia.f:
+                    referencia.f = _desplazar_referencias(referencia.f, ws.title, ws.title,
+                                                          fila_total, cuantas)
 
 
 def _editar_xlsx(origen: Path, destino: Path, cambios: Dict[str, Any]) -> Resultado:
@@ -2182,12 +3016,19 @@ def _editar_xlsx(origen: Path, destino: Path, cambios: Dict[str, Any]) -> Result
         agregar = {wb.worksheets[0].title: agregar}
     for nombre_hoja, filas in (agregar or {}).items():
         ws = wb[nombre_hoja] if nombre_hoja in wb.sheetnames else wb.create_sheet(str(nombre_hoja)[:31])
-        cuantas = 0
-        for fila in filas or []:
-            valores = fila if isinstance(fila, (list, tuple)) else [fila]
-            ws.append([_valor_de_celda(v) for v in valores])
-            cuantas += 1
-        hechos.append(f"{cuantas} filas agregadas a «{ws.title}»")
+        nuevas = [list(f) if isinstance(f, (list, tuple)) else [f] for f in (filas or [])]
+        if nuevas:
+            fila_total = _fila_de_totales(ws)
+            if fila_total is not None:
+                _insertar_filas_antes_del_total(wb, ws, fila_total, nuevas)
+                hechos.append(f"{len(nuevas)} filas agregadas a «{ws.title}» antes de la fila "
+                              f"de totales")
+            else:
+                ultima = ws.max_row
+                for fila in nuevas:
+                    ws.append([_valor_de_celda(v) for v in fila])
+                _copiar_formato_de_fila(ws, ultima, range(ultima + 1, ultima + 1 + len(nuevas)))
+                hechos.append(f"{len(nuevas)} filas agregadas a «{ws.title}»")
 
     reemplazos = {str(k): str(v) for k, v in (cambios.get("reemplazos") or {}).items()}
     if reemplazos:

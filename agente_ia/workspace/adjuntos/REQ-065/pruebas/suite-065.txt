@@ -1,0 +1,1175 @@
+........................................................................ [  2%]
+........................................................................ [  4%]
+........................................................................ [  6%]
+........................................................................ [  8%]
+........................................................................ [ 10%]
+........................................................................ [ 12%]
+........................................................................ [ 14%]
+........................................................................ [ 16%]
+........................................................................ [ 19%]
+........................................................................ [ 21%]
+........................................................................ [ 23%]
+........................................................................ [ 25%]
+........................................................................ [ 27%]
+........................................................................ [ 29%]
+........................................................................ [ 31%]
+....................................Windows fatal exception: access violation
+
+Thread 0x00004cc0 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 359 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 655 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\tqdm\_monitor.py", line 69 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x00001594 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 359 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 655 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\tqdm\_monitor.py", line 69 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x0000508c (most recent call first):
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 642 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1010 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Current thread 0x00005774 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\transformers\tokenization_utils_tokenizers.py", line 959 in _encode_plus
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\transformers\tokenization_utils_base.py", line 2525 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\modules\transformer.py", line 1302 in _call_single_modality_processor
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\modules\transformer.py", line 1241 in _call_processor
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\modules\transformer.py", line 988 in preprocess
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\model.py", line 557 in preprocess
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\sentence_transformer\model.py", line 654 in encode
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\util\decorators.py", line 41 in wrapper
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\utils\_contextlib.py", line 124 in decorate_context
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\embedding_engine.py", line 41 in create_embedding
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 265 in _get_embedding
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 292 in store
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\tests\test_mejoras_escritorio.py", line 343 in _con_charla
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\tests\test_mejoras_escritorio.py", line 349 in test_renombrar_gana_sobre_el_titulo_derivado
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\python.py", line 167 in pytest_pyfunc_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\python.py", line 1707 in runtest
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 184 in pytest_runtest_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 250 in <lambda>
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 361 in from_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 249 in call_and_report
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 139 in runtestprotocol
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 118 in pytest_runtest_protocol
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 408 in pytest_runtestloop
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 384 in _main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 330 in wrap_session
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 377 in pytest_cmdline_main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\config\__init__.py", line 229 in _main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\config\__init__.py", line 253 in _console_main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pytest\__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+Windows fatal exception: access violation
+
+Thread 0x00004cc0 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 359 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 655 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\tqdm\_monitor.py", line 69 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x00001594 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 359 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 655 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\tqdm\_monitor.py", line 69 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x0000508c (most recent call first):
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 642 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1010 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Current thread 0x00005774 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\transformers\tokenization_utils_tokenizers.py", line 959 in _encode_plus
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\transformers\tokenization_utils_base.py", line 2525 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\modules\transformer.py", line 1302 in _call_single_modality_processor
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\modules\transformer.py", line 1241 in _call_processor
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\modules\transformer.py", line 988 in preprocess
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\model.py", line 557 in preprocess
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\sentence_transformer\model.py", line 654 in encode
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\util\decorators.py", line 41 in wrapper
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\utils\_contextlib.py", line 124 in decorate_context
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\embedding_engine.py", line 41 in create_embedding
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 265 in _get_embedding
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 292 in store
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\tests\test_mejoras_escritorio.py", line 343 in _con_charla
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\tests\test_mejoras_escritorio.py", line 349 in test_renombrar_gana_sobre_el_titulo_derivado
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\python.py", line 167 in pytest_pyfunc_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\python.py", line 1707 in runtest
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 184 in pytest_runtest_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 250 in <lambda>
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 361 in from_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 249 in call_and_report
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 139 in runtestprotocol
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 118 in pytest_runtest_protocol
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 408 in pytest_runtestloop
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 384 in _main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 330 in wrap_session
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 377 in pytest_cmdline_main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\config\__init__.py", line 229 in _main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\config\__init__.py", line 253 in _console_main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pytest\__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+Windows fatal exception: access violation
+
+Thread 0x00004cc0 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 359 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 655 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\tqdm\_monitor.py", line 69 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x00001594 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 359 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 655 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\tqdm\_monitor.py", line 69 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x0000508c (most recent call first):
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 642 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1010 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Current thread 0x00005774 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\transformers\tokenization_utils_tokenizers.py", line 959 in _encode_plus
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\transformers\tokenization_utils_base.py", line 2525 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\modules\transformer.py", line 1302 in _call_single_modality_processor
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\modules\transformer.py", line 1241 in _call_processor
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\modules\transformer.py", line 988 in preprocess
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\model.py", line 557 in preprocess
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\sentence_transformer\model.py", line 654 in encode
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\util\decorators.py", line 41 in wrapper
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\utils\_contextlib.py", line 124 in decorate_context
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\embedding_engine.py", line 41 in create_embedding
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 265 in _get_embedding
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 292 in store
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\tests\test_mejoras_escritorio.py", line 343 in _con_charla
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\tests\test_mejoras_escritorio.py", line 349 in test_renombrar_gana_sobre_el_titulo_derivado
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\python.py", line 167 in pytest_pyfunc_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\python.py", line 1707 in runtest
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 184 in pytest_runtest_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 250 in <lambda>
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 361 in from_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 249 in call_and_report
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 139 in runtestprotocol
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 118 in pytest_runtest_protocol
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 408 in pytest_runtestloop
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 384 in _main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 330 in wrap_session
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 377 in pytest_cmdline_main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\config\__init__.py", line 229 in _main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\config\__init__.py", line 253 in _console_main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pytest\__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+Windows fatal exception: access violation
+
+Thread 0x00004cc0 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 359 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 655 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\tqdm\_monitor.py", line 69 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x00001594 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 359 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 655 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\tqdm\_monitor.py", line 69 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x0000508c (most recent call first):
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 642 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1010 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Current thread 0x00005774 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\transformers\tokenization_utils_tokenizers.py", line 959 in _encode_plus
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\transformers\tokenization_utils_base.py", line 2525 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\modules\transformer.py", line 1302 in _call_single_modality_processor
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\modules\transformer.py", line 1241 in _call_processor
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\modules\transformer.py", line 988 in preprocess
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\model.py", line 557 in preprocess
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\sentence_transformer\model.py", line 654 in encode
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\util\decorators.py", line 41 in wrapper
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\utils\_contextlib.py", line 124 in decorate_context
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\embedding_engine.py", line 41 in create_embedding
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 265 in _get_embedding
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 292 in store
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\tests\test_mejoras_escritorio.py", line 343 in _con_charla
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\tests\test_mejoras_escritorio.py", line 349 in test_renombrar_gana_sobre_el_titulo_derivado
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\python.py", line 167 in pytest_pyfunc_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\python.py", line 1707 in runtest
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 184 in pytest_runtest_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 250 in <lambda>
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 361 in from_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 249 in call_and_report
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 139 in runtestprotocol
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 118 in pytest_runtest_protocol
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 408 in pytest_runtestloop
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 384 in _main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 330 in wrap_session
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 377 in pytest_cmdline_main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\config\__init__.py", line 229 in _main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\config\__init__.py", line 253 in _console_main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pytest\__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+Windows fatal exception: access violation
+
+Thread 0x00004cc0 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 359 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 655 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\tqdm\_monitor.py", line 69 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x00001594 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 359 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 655 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\tqdm\_monitor.py", line 69 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x0000508c (most recent call first):
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 642 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1010 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Current thread 0x00005774 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\transformers\tokenization_utils_tokenizers.py", line 959 in _encode_plus
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\transformers\tokenization_utils_base.py", line 2525 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\modules\transformer.py", line 1302 in _call_single_modality_processor
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\modules\transformer.py", line 1241 in _call_processor
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\modules\transformer.py", line 988 in preprocess
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\model.py", line 557 in preprocess
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\sentence_transformer\model.py", line 654 in encode
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\util\decorators.py", line 41 in wrapper
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\utils\_contextlib.py", line 124 in decorate_context
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\embedding_engine.py", line 41 in create_embedding
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 265 in _get_embedding
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 292 in store
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\tests\test_mejoras_escritorio.py", line 343 in _con_charla
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\tests\test_mejoras_escritorio.py", line 349 in test_renombrar_gana_sobre_el_titulo_derivado
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\python.py", line 167 in pytest_pyfunc_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\python.py", line 1707 in runtest
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 184 in pytest_runtest_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 250 in <lambda>
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 361 in from_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 249 in call_and_report
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 139 in runtestprotocol
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 118 in pytest_runtest_protocol
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 408 in pytest_runtestloop
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 384 in _main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 330 in wrap_session
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 377 in pytest_cmdline_main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\config\__init__.py", line 229 in _main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\config\__init__.py", line 253 in _console_main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pytest\__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+Windows fatal exception: access violation
+
+Thread 0x00004cc0 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 359 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 655 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\tqdm\_monitor.py", line 69 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x00001594 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 359 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 655 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\tqdm\_monitor.py", line 69 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x0000508c (most recent call first):
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 642 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1010 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Current thread 0x00005774 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\transformers\tokenization_utils_tokenizers.py", line 959 in _encode_plus
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\transformers\tokenization_utils_base.py", line 2525 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\modules\transformer.py", line 1302 in _call_single_modality_processor
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\modules\transformer.py", line 1241 in _call_processor
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\modules\transformer.py", line 988 in preprocess
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\model.py", line 557 in preprocess
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\sentence_transformer\model.py", line 654 in encode
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\util\decorators.py", line 41 in wrapper
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\utils\_contextlib.py", line 124 in decorate_context
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\embedding_engine.py", line 41 in create_embedding
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 265 in _get_embedding
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 292 in store
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\tests\test_mejoras_escritorio.py", line 343 in _con_charla
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\tests\test_mejoras_escritorio.py", line 349 in test_renombrar_gana_sobre_el_titulo_derivado
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\python.py", line 167 in pytest_pyfunc_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\python.py", line 1707 in runtest
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 184 in pytest_runtest_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 250 in <lambda>
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 361 in from_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 249 in call_and_report
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 139 in runtestprotocol
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 118 in pytest_runtest_protocol
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 408 in pytest_runtestloop
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 384 in _main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 330 in wrap_session
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 377 in pytest_cmdline_main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\config\__init__.py", line 229 in _main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\config\__init__.py", line 253 in _console_main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pytest\__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+Windows fatal exception: access violation
+
+Thread 0x00004cc0 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 359 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 655 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\tqdm\_monitor.py", line 69 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x00001594 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 359 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 655 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\tqdm\_monitor.py", line 69 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x0000508c (most recent call first):
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 642 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1010 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Current thread 0x00005774 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\transformers\tokenization_utils_tokenizers.py", line 959 in _encode_plus
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\transformers\tokenization_utils_base.py", line 2525 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\modules\transformer.py", line 1302 in _call_single_modality_processor
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\modules\transformer.py", line 1241 in _call_processor
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\modules\transformer.py", line 988 in preprocess
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\model.py", line 557 in preprocess
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\sentence_transformer\model.py", line 654 in encode
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\util\decorators.py", line 41 in wrapper
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\utils\_contextlib.py", line 124 in decorate_context
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\embedding_engine.py", line 41 in create_embedding
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 265 in _get_embedding
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 292 in store
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\tests\test_mejoras_escritorio.py", line 343 in _con_charla
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\tests\test_mejoras_escritorio.py", line 349 in test_renombrar_gana_sobre_el_titulo_derivado
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\python.py", line 167 in pytest_pyfunc_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\python.py", line 1707 in runtest
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 184 in pytest_runtest_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 250 in <lambda>
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 361 in from_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 249 in call_and_report
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 139 in runtestprotocol
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 118 in pytest_runtest_protocol
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 408 in pytest_runtestloop
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 384 in _main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 330 in wrap_session
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 377 in pytest_cmdline_main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\config\__init__.py", line 229 in _main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\config\__init__.py", line 253 in _console_main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pytest\__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+Windows fatal exception: access violation
+
+Thread 0x00004cc0 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 359 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 655 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\tqdm\_monitor.py", line 69 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x00001594 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 359 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 655 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\tqdm\_monitor.py", line 69 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x0000508c (most recent call first):
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 642 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1010 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Current thread 0x00005774 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\transformers\tokenization_utils_tokenizers.py", line 959 in _encode_plus
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\transformers\tokenization_utils_base.py", line 2525 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\modules\transformer.py", line 1302 in _call_single_modality_processor
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\modules\transformer.py", line 1241 in _call_processor
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\modules\transformer.py", line 988 in preprocess
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\model.py", line 557 in preprocess
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\sentence_transformer\model.py", line 654 in encode
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\util\decorators.py", line 41 in wrapper
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\utils\_contextlib.py", line 124 in decorate_context
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\embedding_engine.py", line 41 in create_embedding
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 265 in _get_embedding
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 292 in store
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\tests\test_mejoras_escritorio.py", line 343 in _con_charla
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\tests\test_mejoras_escritorio.py", line 349 in test_renombrar_gana_sobre_el_titulo_derivado
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\python.py", line 167 in pytest_pyfunc_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\python.py", line 1707 in runtest
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 184 in pytest_runtest_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 250 in <lambda>
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 361 in from_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 249 in call_and_report
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 139 in runtestprotocol
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 118 in pytest_runtest_protocol
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 408 in pytest_runtestloop
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 384 in _main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 330 in wrap_session
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 377 in pytest_cmdline_main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\config\__init__.py", line 229 in _main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\config\__init__.py", line 253 in _console_main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pytest\__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+Windows fatal exception: access violation
+
+Thread 0x00004cc0 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 359 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 655 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\tqdm\_monitor.py", line 69 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x00001594 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 359 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 655 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\tqdm\_monitor.py", line 69 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x0000508c (most recent call first):
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 642 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1010 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Current thread 0x00005774 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\nn\functional.py", line 2987 in layer_norm
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\nn\modules\normalization.py", line 228 in forward
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\nn\modules\module.py", line 1789 in _call_impl
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\nn\modules\module.py", line 1778 in _wrapped_call_impl
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\transformers\models\bert\modeling_bert.py", line 110 in forward
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\nn\modules\module.py", line 1789 in _call_impl
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\nn\modules\module.py", line 1778 in _wrapped_call_impl
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\transformers\models\bert\modeling_bert.py", line 657 in forward
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\transformers\utils\output_capturing.py", line 262 in wrapper
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\transformers\utils\generic.py", line 1040 in wrapper
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\modules\transformer.py", line 1096 in forward
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\nn\modules\module.py", line 1789 in _call_impl
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\nn\modules\module.py", line 1778 in _wrapped_call_impl
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\model.py", line 511 in forward
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\sentence_transformer\model.py", line 661 in encode
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\util\decorators.py", line 41 in wrapper
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\utils\_contextlib.py", line 124 in decorate_context
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\embedding_engine.py", line 41 in create_embedding
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 265 in _get_embedding
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 292 in store
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\tests\test_mejoras_escritorio.py", line 343 in _con_charla
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\tests\test_mejoras_escritorio.py", line 349 in test_renombrar_gana_sobre_el_titulo_derivado
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\python.py", line 167 in pytest_pyfunc_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\python.py", line 1707 in runtest
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 184 in pytest_runtest_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 250 in <lambda>
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 361 in from_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 249 in call_and_report
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 139 in runtestprotocol
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 118 in pytest_runtest_protocol
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 408 in pytest_runtestloop
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 384 in _main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 330 in wrap_session
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 377 in pytest_cmdline_main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\config\__init__.py", line 229 in _main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\config\__init__.py", line 253 in _console_main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pytest\__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+Windows fatal exception: access violation
+
+Thread 0x00004cc0 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 359 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 655 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\tqdm\_monitor.py", line 69 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x00001594 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 359 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 655 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\tqdm\_monitor.py", line 69 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x0000508c (most recent call first):
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 642 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1010 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Current thread 0x00005774 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\nn\functional.py", line 2987 in layer_norm
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\nn\modules\normalization.py", line 228 in forward
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\nn\modules\module.py", line 1789 in _call_impl
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\nn\modules\module.py", line 1778 in _wrapped_call_impl
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\transformers\models\bert\modeling_bert.py", line 110 in forward
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\nn\modules\module.py", line 1789 in _call_impl
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\nn\modules\module.py", line 1778 in _wrapped_call_impl
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\transformers\models\bert\modeling_bert.py", line 657 in forward
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\transformers\utils\output_capturing.py", line 262 in wrapper
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\transformers\utils\generic.py", line 1040 in wrapper
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\modules\transformer.py", line 1096 in forward
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\nn\modules\module.py", line 1789 in _call_impl
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\nn\modules\module.py", line 1778 in _wrapped_call_impl
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\model.py", line 511 in forward
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\sentence_transformer\model.py", line 661 in encode
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\util\decorators.py", line 41 in wrapper
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\utils\_contextlib.py", line 124 in decorate_context
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\embedding_engine.py", line 41 in create_embedding
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 265 in _get_embedding
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 292 in store
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\tests\test_mejoras_escritorio.py", line 343 in _con_charla
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\tests\test_mejoras_escritorio.py", line 349 in test_renombrar_gana_sobre_el_titulo_derivado
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\python.py", line 167 in pytest_pyfunc_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\python.py", line 1707 in runtest
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 184 in pytest_runtest_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 250 in <lambda>
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 361 in from_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 249 in call_and_report
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 139 in runtestprotocol
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 118 in pytest_runtest_protocol
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 408 in pytest_runtestloop
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 384 in _main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 330 in wrap_session
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 377 in pytest_cmdline_main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\config\__init__.py", line 229 in _main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\config\__init__.py", line 253 in _console_main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pytest\__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+Windows fatal exception: access violation
+
+Thread 0x00004cc0 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 359 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 655 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\tqdm\_monitor.py", line 69 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x00001594 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 359 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 655 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\tqdm\_monitor.py", line 69 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x0000508c (most recent call first):
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 642 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1010 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Current thread 0x00005774 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\nn\functional.py", line 2987 in layer_norm
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\nn\modules\normalization.py", line 228 in forward
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\nn\modules\module.py", line 1789 in _call_impl
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\nn\modules\module.py", line 1778 in _wrapped_call_impl
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\transformers\models\bert\modeling_bert.py", line 110 in forward
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\nn\modules\module.py", line 1789 in _call_impl
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\nn\modules\module.py", line 1778 in _wrapped_call_impl
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\transformers\models\bert\modeling_bert.py", line 657 in forward
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\transformers\utils\output_capturing.py", line 262 in wrapper
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\transformers\utils\generic.py", line 1040 in wrapper
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\modules\transformer.py", line 1096 in forward
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\nn\modules\module.py", line 1789 in _call_impl
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\nn\modules\module.py", line 1778 in _wrapped_call_impl
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\model.py", line 511 in forward
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\sentence_transformer\model.py", line 661 in encode
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\util\decorators.py", line 41 in wrapper
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\utils\_contextlib.py", line 124 in decorate_context
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\embedding_engine.py", line 41 in create_embedding
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 265 in _get_embedding
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 292 in store
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\tests\test_mejoras_escritorio.py", line 343 in _con_charla
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\tests\test_mejoras_escritorio.py", line 349 in test_renombrar_gana_sobre_el_titulo_derivado
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\python.py", line 167 in pytest_pyfunc_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\python.py", line 1707 in runtest
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 184 in pytest_runtest_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 250 in <lambda>
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 361 in from_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 249 in call_and_report
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 139 in runtestprotocol
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 118 in pytest_runtest_protocol
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 408 in pytest_runtestloop
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 384 in _main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 330 in wrap_session
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 377 in pytest_cmdline_main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\config\__init__.py", line 229 in _main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\config\__init__.py", line 253 in _console_main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pytest\__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+.................................... [ 33%]
+........................................................................ [ 35%]
+........................................................................ [ 38%]
+........................................................................ [ 40%]
+........................................................................ [ 42%]
+........................................................................ [ 44%]
+........................................................................ [ 46%]
+........................................................................ [ 48%]
+........................................................................ [ 50%]
+........................................................................ [ 52%]
+........................................................................ [ 54%]
+........................................................................ [ 57%]
+........................................................................ [ 59%]
+........................................................................ [ 61%]
+........................................................................ [ 63%]
+........................................................................ [ 65%]
+........................................................................ [ 67%]
+........................................................................ [ 69%]
+........................................................................ [ 71%]
+.........................................................Windows fatal exception: access violation
+
+Current thread 0x00004790 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\winpty\ptyprocess.py", line 113 in spawn
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\core\terminal_session.py", line 122 in _spawn_pty
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\core\terminal_session.py", line 314 in start
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\core\terminal_session.py", line 674 in crear
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ui\webview\bridge.py", line 2304 in _terminal_new_flow
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ui\webview\bridge.py", line 2284 in _terminal_open_flow
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ui\gui_workers.py", line 45 in run
+
+Thread 0x00004cc0 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 359 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 655 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\tqdm\_monitor.py", line 69 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x00001594 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 359 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 655 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\tqdm\_monitor.py", line 69 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x0000508c (most recent call first):
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 642 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1010 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x00005774 (most recent call first):
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\core\terminal_session.py", line 650 in ids
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\tests\test_webview_buttons.py", line 525 in <lambda>
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pytestqt\qtbot.py", line 582 in waitUntil
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\tests\test_webview_buttons.py", line 525 in test_la_terminal_abre_pestanas_y_cerrarlas_mata_los_procesos
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\python.py", line 167 in pytest_pyfunc_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\python.py", line 1707 in runtest
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 184 in pytest_runtest_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 250 in <lambda>
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 361 in from_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 249 in call_and_report
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 139 in runtestprotocol
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 118 in pytest_runtest_protocol
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 408 in pytest_runtestloop
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 384 in _main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 330 in wrap_session
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 377 in pytest_cmdline_main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\config\__init__.py", line 229 in _main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\config\__init__.py", line 253 in _console_main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pytest\__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+Windows fatal exception: access violation
+
+Current thread 0x00004790 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\winpty\ptyprocess.py", line 113 in spawn
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\core\terminal_session.py", line 122 in _spawn_pty
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\core\terminal_session.py", line 314 in start
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\core\terminal_session.py", line 674 in crear
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ui\webview\bridge.py", line 2304 in _terminal_new_flow
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ui\webview\bridge.py", line 2284 in _terminal_open_flow
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ui\gui_workers.py", line 45 in run
+
+Thread 0x00004cc0 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 359 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 655 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\tqdm\_monitor.py", line 69 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x00001594 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 359 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 655 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\tqdm\_monitor.py", line 69 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x0000508c (most recent call first):
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 642 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1010 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x00005774 (most recent call first):
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\core\terminal_session.py", line 650 in ids
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\tests\test_webview_buttons.py", line 525 in <lambda>
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pytestqt\qtbot.py", line 582 in waitUntil
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\tests\test_webview_buttons.py", line 525 in test_la_terminal_abre_pestanas_y_cerrarlas_mata_los_procesos
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\python.py", line 167 in pytest_pyfunc_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\python.py", line 1707 in runtest
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 184 in pytest_runtest_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 250 in <lambda>
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 361 in from_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 249 in call_and_report
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 139 in runtestprotocol
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 118 in pytest_runtest_protocol
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 408 in pytest_runtestloop
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 384 in _main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 330 in wrap_session
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 377 in pytest_cmdline_main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\config\__init__.py", line 229 in _main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\config\__init__.py", line 253 in _console_main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pytest\__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+Windows fatal exception: access violation
+
+Current thread 0x00001264 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\winpty\ptyprocess.py", line 113 in spawn
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\core\terminal_session.py", line 122 in _spawn_pty
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\core\terminal_session.py", line 314 in start
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\core\terminal_session.py", line 674 in crear
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ui\webview\bridge.py", line 2304 in _terminal_new_flow
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ui\gui_workers.py", line 45 in run
+
+Thread 0x00001c80 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\winpty\ptyprocess.py", line 193 in read
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\core\terminal_session.py", line 390 in _read_loop
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1010 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x00001c38 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\winpty\ptyprocess.py", line 353 in _read_in_thread
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1010 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x00004cc0 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 359 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 655 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\tqdm\_monitor.py", line 69 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x00001594 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 359 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 655 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\tqdm\_monitor.py", line 69 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x0000508c (most recent call first):
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 642 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1010 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x00005774 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pytestqt\qt_compat.py", line 160 in exec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pytestqt\wait_signal.py", line 58 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pytestqt\qtbot.py", line 503 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pytestqt\qtbot.py", line 600 in waitUntil
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\tests\test_webview_buttons.py", line 535 in test_la_terminal_abre_pestanas_y_cerrarlas_mata_los_procesos
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\python.py", line 167 in pytest_pyfunc_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\python.py", line 1707 in runtest
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 184 in pytest_runtest_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 250 in <lambda>
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 361 in from_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 249 in call_and_report
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 139 in runtestprotocol
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 118 in pytest_runtest_protocol
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 408 in pytest_runtestloop
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 384 in _main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 330 in wrap_session
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 377 in pytest_cmdline_main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\config\__init__.py", line 229 in _main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\config\__init__.py", line 253 in _console_main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pytest\__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+Windows fatal exception: access violation
+
+Current thread 0x00001264 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\winpty\ptyprocess.py", line 113 in spawn
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\core\terminal_session.py", line 122 in _spawn_pty
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\core\terminal_session.py", line 314 in start
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\core\terminal_session.py", line 674 in crear
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ui\webview\bridge.py", line 2304 in _terminal_new_flow
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ui\gui_workers.py", line 45 in run
+
+Thread 0x00001c80 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\winpty\ptyprocess.py", line 193 in read
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\core\terminal_session.py", line 390 in _read_loop
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1010 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x00001c38 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\winpty\ptyprocess.py", line 353 in _read_in_thread
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1010 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x00004cc0 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 359 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 655 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\tqdm\_monitor.py", line 69 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x00001594 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 359 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 655 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\tqdm\_monitor.py", line 69 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x0000508c (most recent call first):
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\ai\memory_manager.py", line 642 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1010 in run
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1073 in _bootstrap_inner
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1030 in _bootstrap
+
+Thread 0x00005774 (most recent call first):
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pytestqt\qt_compat.py", line 160 in exec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pytestqt\wait_signal.py", line 58 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pytestqt\qtbot.py", line 503 in wait
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pytestqt\qtbot.py", line 600 in waitUntil
+  File "C:\Users\WHOAMI\Documents\Apps\agent-ia\agente_ia\tests\test_webview_buttons.py", line 535 in test_la_terminal_abre_pestanas_y_cerrarlas_mata_los_procesos
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\python.py", line 167 in pytest_pyfunc_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\python.py", line 1707 in runtest
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 184 in pytest_runtest_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 250 in <lambda>
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 361 in from_call
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 249 in call_and_report
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 139 in runtestprotocol
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\runner.py", line 118 in pytest_runtest_protocol
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 408 in pytest_runtestloop
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 384 in _main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 330 in wrap_session
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\main.py", line 377 in pytest_cmdline_main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\config\__init__.py", line 229 in _main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\config\__init__.py", line 253 in _console_main
+  File "C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\pytest\__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+............... [ 73%]
+..................[17548:10312:0921/220542.948:ERROR:../../../qtwebengine/src/3rdparty/chromium/gpu/command_buffer/service/shared_image/shared_image_manager.cc:389] SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.
+...................................................... [ 76%]
+........................................................................ [ 78%]
+........................................................................ [ 80%]
+........................................................................ [ 82%]
+........................................................................ [ 84%]
+........................................................................ [ 86%]
+........................................................................ [ 88%]
+........................................................................ [ 90%]
+........................................................................ [ 92%]
+........................................................................ [ 95%]
+........................................................................ [ 97%]
+........................................................................ [ 99%]
+.........................                                                [100%]
+============================== warnings summary ===============================
+..\..\..\..\AppData\Local\Programs\Python\Python312\Lib\site-packages\speech_recognition\__init__.py:7
+  C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\speech_recognition\__init__.py:7: DeprecationWarning: 'aifc' is deprecated and slated for removal in Python 3.13
+    import aifc
+
+..\..\..\..\AppData\Local\Programs\Python\Python312\Lib\site-packages\speech_recognition\__init__.py:8
+  C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\speech_recognition\__init__.py:8: DeprecationWarning: 'audioop' is deprecated and slated for removal in Python 3.13
+    import audioop
+
+tests/test_agents.py::test_ca1_orchestrator
+  C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\_pytest\python.py:171: PytestReturnNotNoneWarning: Test functions should return None, but tests/test_agents.py::test_ca1_orchestrator returned <class 'core.orchestrator.AgentOrchestrator'>.
+  Did you mean to use `assert` instead of `return`?
+  See https://docs.pytest.org/en/stable/how-to/assert.html#return-not-none for more information.
+    warnings.warn(
+
+tests/test_classifier.py::test_classify_command_intent[abre el bloc de notas-OPEN_APP-expected_params0]
+tests/test_classifier.py::test_classify_command_intent[abre el bloc de notas-OPEN_APP-expected_params0]
+tests/test_classifier.py::test_classify_command_intent[abre el bloc de notas-OPEN_APP-expected_params0]
+tests/test_classifier_confidence.py::test_las_frases_ambiguas_no_ejecutan_un_intent[el viernes]
+tests/test_classifier_confidence.py::test_las_frases_ambiguas_no_ejecutan_un_intent[el viernes]
+tests/test_classifier_confidence.py::test_las_frases_ambiguas_no_ejecutan_un_intent[el viernes]
+  C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\joblib\numpy_pickle.py:207: DeprecationWarning: Setting the shape on a NumPy array has been deprecated in NumPy 2.5.
+  As an alternative, you can create a new view using np.reshape (with copy=False if needed).
+    array.shape = self.shape
+
+tests/test_classifier.py::test_classify_command_intent[abre el bloc de notas-OPEN_APP-expected_params0]
+tests/test_classifier_confidence.py::test_las_frases_ambiguas_no_ejecutan_un_intent[el viernes]
+  C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\joblib\numpy_pickle.py:204: DeprecationWarning: Setting the shape on a NumPy array has been deprecated in NumPy 2.5.
+  As an alternative, you can create a new view using np.reshape (with copy=False if needed).
+    array.shape = self.shape[::-1]
+
+tests/test_documentos.py: 59 warnings
+  C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\openpyxl\packaging\core.py:99: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.datetime.utcnow()
+
+tests/test_documentos.py: 23 warnings
+  C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\openpyxl\writer\excel.py:292: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    workbook.properties.modified = datetime.datetime.utcnow()
+
+tests/test_investigacion.py::test_un_pdf_de_la_web_se_lee
+  C:\Users\WHOAMI\AppData\Local\Programs\Python\Python312\Lib\site-packages\PyPDF2\__init__.py:21: DeprecationWarning: PyPDF2 is deprecated. Please move to the pypdf library instead.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+3409 passed, 94 warnings in 431.06s (0:07:11)

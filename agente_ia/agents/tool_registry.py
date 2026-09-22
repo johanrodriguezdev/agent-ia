@@ -2565,6 +2565,7 @@ def _document_create_invoke(params: dict) -> str:
     return _con_documento("document_create", lambda: crear_documento(
         nombre, params.get("contenido"), plantilla=params.get("plantilla"),
         reemplazos=params.get("reemplazos") or {}, carpeta=params.get("carpeta"),
+        estilo=params.get("estilo"),
     ))
 
 
@@ -2575,9 +2576,12 @@ register_tool(ToolSpec(
         "título, encabezados, párrafos, listas, tablas, imágenes y citas. Con 'plantilla' "
         "(un .docx del usuario) escribe DENTRO de ella: conserva membrete, pies, márgenes y "
         "estilos; y con 'reemplazos' rellena sus marcadores ({{cliente}}, [FECHA]) "
-        "conservando el formato. Antes de usar una plantilla, mirala con 'document_inspect'. "
-        "Un .pdf se hace en Word y se convierte, así que se ve igual que el Word. "
-        + _INSTRUCCION_CONTENIDO
+        "conservando el formato. Antes de usar una plantilla, mirala con 'document_inspect'; "
+        "si en ella queda algún marcador sin valor, el documento se rechaza: pedile el dato "
+        "al usuario. Con 'estilo' seguís lo que el usuario pida de aspecto sin plantilla "
+        "(o encima de ella): fuente, tamaño, color de títulos, márgenes, orientación, "
+        "encabezado, pie, logo, número de página. Un .pdf se hace en Word y se convierte, "
+        "así que se ve igual que el Word. " + _INSTRUCCION_CONTENIDO
     ),
     parameters_schema={
         "type": "object",
@@ -2598,6 +2602,18 @@ register_tool(ToolSpec(
                           "description": "Ruta a un .docx cuyo formato hay que seguir (opcional)."},
             "reemplazos": {"type": "object",
                            "description": "Marcadores de la plantilla y su valor: {'{{cliente}}': 'Agro SAS'}."},
+            "estilo": {
+                "type": "object",
+                "description": (
+                    "Aspecto pedido por el usuario (todo opcional): 'fuente' ('Arial'), 'tamano' "
+                    "(11), 'fuente_titulos', 'color_titulos' y 'color_texto' (hex o nombre: "
+                    "'azul oscuro', 'verde'), 'margenes_cm' (2 o {superior, inferior, izquierdo, "
+                    "derecho}), 'orientacion' ('vertical'|'horizontal'), 'encabezado' y 'pie' "
+                    "(texto), 'logo' (ruta de imagen; va en el encabezado, 'logo_posicion' "
+                    "izquierda|centro|derecha, 'logo_ancho_cm'), 'numeracion' (true: «Página N "
+                    "de M»), 'justificado' (true), 'interlineado' (1.15)."
+                ),
+            },
             "carpeta": {"type": "string",
                         "description": "Dónde guardarlo. Vacío = el Escritorio."},
         },
@@ -2618,7 +2634,7 @@ def _spreadsheet_create_invoke(params: dict) -> str:
         return f"Necesito el nombre del archivo, con su extensión{vocative()}."
     return _con_documento("spreadsheet_create", lambda: crear_hoja(
         nombre, params.get("contenido"), plantilla=params.get("plantilla"),
-        carpeta=params.get("carpeta"),
+        carpeta=params.get("carpeta"), estilo=params.get("estilo"),
     ))
 
 
@@ -2626,10 +2642,14 @@ register_tool(ToolSpec(
     name="spreadsheet_create",
     description=(
         "Crea una hoja de cálculo real: .xlsx (Excel) o .csv. Varias hojas, encabezados con "
-        "formato, filas, fórmulas (las celdas que empiezan por '='), fila de totales, "
-        "formatos de número por columna y un gráfico de barras, líneas o torta. Los números "
-        "escritos a la colombiana ('1.250.000', '12,5') se guardan como números. Con "
-        "'plantilla' (un .xlsx del usuario) escribe en sus hojas conservando su formato. "
+        "formato, filas, fórmulas (las celdas que empiezan por '='; podés escribirlas en "
+        "español: '=SUMA(B2:B4)', '=SI(B2>5;\"alto\";\"bajo\")', '=B2*0,19'), fila de "
+        "totales, formatos de número por columna y un gráfico de barras, líneas o torta. "
+        "Los números escritos a la colombiana ('1.250.000', '12,5') se guardan como números. "
+        "Con 'plantilla' (un .xlsx del usuario) escribe en sus hojas conservando su formato: "
+        "si la hoja ya tiene los encabezados, no los repite y los datos van debajo; el "
+        "resultado dice en qué fila empiezan los datos, para que las fórmulas apunten bien. "
+        "Con 'estilo' seguís lo que el usuario pida: fuente, tamaño, color del encabezado. "
         + _INSTRUCCION_CONTENIDO
     ),
     parameters_schema={
@@ -2638,13 +2658,24 @@ register_tool(ToolSpec(
             "nombre": {"type": "string", "description": "'ventas.xlsx' o 'clientes.csv'."},
             "contenido": {
                 "description": (
-                    "Objeto con 'hojas': lista de {nombre, encabezados, filas, totales (bool), "
-                    "formatos ({'B': '#,##0', 'D': '0.0%'}), grafico ({tipo: barras|lineas|torta, "
-                    "titulo, columnas, categorias}), desde ('A5', para una plantilla)}. "
-                    "También se acepta una lista de filas o una lista de registros."
+                    "Objeto con 'hojas': lista de {nombre, titulo (fila de título arriba del "
+                    "encabezado; entonces el encabezado va en la fila 3 y los datos desde la 4), "
+                    "encabezados, filas, totales (bool), formatos ({'B': '#,##0', 'D': '0.0%'}), "
+                    "grafico ({tipo: barras|lineas|torta, titulo, columnas (nombres de "
+                    "encabezado), categorias}), desde ('C5': la celda donde va la PRIMERA FILA "
+                    "DE DATOS en una plantilla)}. También se acepta una lista de filas o una "
+                    "lista de registros."
                 ),
             },
             "plantilla": {"type": "string", "description": "Ruta a un .xlsx a seguir (opcional)."},
+            "estilo": {
+                "type": "object",
+                "description": (
+                    "Aspecto pedido por el usuario (opcional): 'fuente', 'tamano', "
+                    "'color_encabezado' y 'color_texto_encabezado' (hex o nombre), "
+                    "'color_titulos', 'bordes' (false para quitarlos)."
+                ),
+            },
             "carpeta": {"type": "string", "description": "Dónde guardarlo. Vacío = el Escritorio."},
         },
         "required": ["nombre", "contenido"],
@@ -2663,7 +2694,7 @@ def _presentation_create_invoke(params: dict) -> str:
     return _con_documento("presentation_create", lambda: crear_presentacion(
         nombre, params.get("contenido"), plantilla=params.get("plantilla"),
         reemplazos=params.get("reemplazos") or {}, carpeta=params.get("carpeta"),
-        tema=params.get("tema"),
+        tema=params.get("tema"), estilo=params.get("estilo"),
     ))
 
 
@@ -2674,7 +2705,9 @@ register_tool(ToolSpec(
         "viñetas (y subniveles), tablas, imágenes y notas del orador. Sin plantilla aplica un "
         "tema de diseño de Office ('tema': Retrospect, Facet, Ion, Integral, Wisp...). Con "
         "'plantilla' (un .pptx del usuario) usa su tema y sus diseños, y con 'reemplazos' "
-        "rellena sus marcadores. " + _INSTRUCCION_CONTENIDO
+        "rellena sus marcadores (si queda alguno sin valor, se rechaza). Con 'estilo' seguís "
+        "lo que el usuario pida: fuente, colores, logo en cada diapositiva, pie, número. "
+        + _INSTRUCCION_CONTENIDO
     ),
     parameters_schema={
         "type": "object",
@@ -2690,6 +2723,14 @@ register_tool(ToolSpec(
             "plantilla": {"type": "string", "description": "Ruta a un .pptx a seguir (opcional)."},
             "reemplazos": {"type": "object", "description": "Marcadores de la plantilla y su valor."},
             "tema": {"type": "string", "description": "Tema de diseño de Office (sin plantilla)."},
+            "estilo": {
+                "type": "object",
+                "description": (
+                    "Aspecto pedido por el usuario (opcional): 'fuente', 'color_titulos', "
+                    "'color_texto' (hex o nombre), 'logo' (ruta de imagen, esquina superior "
+                    "derecha; 'logo_ancho_cm'), 'pie' (texto abajo), 'numeracion' (true: n / total)."
+                ),
+            },
             "carpeta": {"type": "string", "description": "Dónde guardarla. Vacío = el Escritorio."},
         },
         "required": ["nombre", "contenido"],

@@ -235,10 +235,14 @@ def test_contenido_nuevo_sobre_la_plantilla_hereda_estilos_y_quita_el_cuerpo_vie
     assert h1 and str(h1[0].style.font.color.rgb) == "1F6E43"  # y el estilo de la plantilla queda
 
 
-def test_marcadores_que_no_estan_en_la_plantilla_se_avisan(carpeta, plantilla_docx):
-    r = documentos.crear_documento("x.docx", {"bloques": []}, plantilla=plantilla_docx,
+def test_marcadores_que_no_estan_en_la_plantilla_se_rechaza_y_se_explica(carpeta, plantilla_docx):
+    # REQ-065: antes solo se avisaba y el archivo salía con {{cliente}} impreso.
+    with pytest.raises(documentos.DocumentoRechazado) as e:
+        documentos.crear_documento("x.docx", {"bloques": []}, plantilla=plantilla_docx,
                                    reemplazos={"{{inexistente}}": "nada"}, carpeta=carpeta)
-    assert any("ninguno de los marcadores" in a for a in r.avisos)
+    assert "sin rellenar" in str(e.value) and "{{cliente}}" in str(e.value)
+    assert "ninguno de los marcadores" in str(e.value)
+    assert not os.path.exists(os.path.join(carpeta, "x.docx"))
 
 
 def test_una_plantilla_que_no_existe_lo_dice(carpeta):
@@ -774,3 +778,366 @@ def test_document_edit_registrada_y_amarilla():
 
     assert get_tool("document_edit") is not None
     assert security_manager.classify_action("document_edit") == RiskLevel.YELLOW
+
+
+# =============================================================================== REQ-065
+# Segunda vuelta de documentos: lo que falló al validar REQ-040 con archivos reales, y el
+# estilo guiado por el usuario. Cada test nombra el criterio de la SPEC que protege.
+
+
+# ---------------------------------------------------------------- CA-01: fórmulas en español
+
+@pytest.mark.parametrize("en_espanol, como_la_guarda_excel", [
+    ("=D5*0,19", "=D5*0.19"),
+    ('=SI(B2>5;"al;to";"bajo")', '=IF(B2>5,"al;to","bajo")'),
+    ("=SUMA(B2:B4)", "=SUM(B2:B4)"),
+    ("=REDONDEAR(B5*1,19;2)", "=ROUND(B5*1.19,2)"),
+    ("=MÁX(A1:A3)+AÑO(HOY())", "=MAX(A1:A3)+YEAR(TODAY())"),
+    ('=CONTAR.SI(A:A;"x")', '=COUNTIF(A:A,"x")'),
+    ("=VERDADERO", "=TRUE"),
+    ("=PROMEDIO(B2:B4)*1,5", "=AVERAGE(B2:B4)*1.5"),
+    ("=si(a1>0;1;0)", "=IF(a1>0,1,0)"),
+    ("=SUMA(A1;{1;2})", "=SUM(A1,{1;2})"),             # el «;» de una matriz no es separador
+])
+def test_una_formula_en_espanol_se_guarda_como_excel_la_entiende(en_espanol, como_la_guarda_excel):
+    assert documentos.normalizar_formula(en_espanol) == como_la_guarda_excel
+
+
+@pytest.mark.parametrize("en_ingles", [
+    "=ROUND(B5*1.19,2)", "=SUM(B2:B4)/2", "=Clientes!C4", "='Hoja dos'!B2*2", "=B5*C5",
+    "=IF(A1>0,1,0)",
+])
+def test_una_formula_que_ya_venia_en_ingles_no_se_toca(en_ingles):
+    assert documentos.normalizar_formula(en_ingles) == en_ingles
+
+
+def test_las_formulas_del_excel_salen_normalizadas_en_el_archivo(carpeta):
+    from openpyxl import load_workbook
+
+    r = documentos.crear_hoja("f.xlsx", {"hojas": [{"nombre": "H", "encabezados": ["a", "b", "c"],
+                                                     "filas": [["x", "10", "=B2*0,19"],
+                                                               ["y", "20", '=SI(B3>5;"alto";"bajo")'],
+                                                               ["z", "30", "=SUMA(B2:B3)"]]}]},
+                              carpeta=carpeta)
+    ws = load_workbook(r.ruta)["H"]
+
+    assert ws["C2"].value == "=B2*0.19"
+    assert ws["C3"].value == '=IF(B3>5,"alto","bajo")'
+    assert ws["C4"].value == "=SUM(B2:B3)"
+
+
+# ---------------------------------------------------------------- CA-02 / CA-03 / CA-07: plantilla Excel
+
+@pytest.fixture
+def plantilla_xlsx_con_titulo(tmp_path):
+    """Título en la 1, subtítulo en la 2, encabezado verde en la 4 y nada más."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Ventas"
+    ws["A1"] = "AGRO SAS — Reporte de ventas"
+    ws["A2"] = "Área comercial"
+    for i, h in enumerate(["Producto", "Cantidad", "Precio", "Subtotal"], 1):
+        c = ws.cell(row=4, column=i, value=h)
+        c.font = Font(bold=True, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor="1B5E20")
+    ruta = tmp_path / "plantilla_ventas.xlsx"
+    wb.save(str(ruta))
+    return str(ruta)
+
+
+def test_desde_no_repite_el_encabezado_de_la_plantilla_y_los_datos_van_donde_el_modelo_cree(
+        carpeta, plantilla_xlsx_con_titulo):
+    from openpyxl import load_workbook
+
+    r = documentos.crear_hoja("v.xlsx", {"hojas": [{
+        "nombre": "Ventas", "desde": "A5",
+        "encabezados": ["Producto", "Cantidad", "Precio", "Subtotal"],
+        "filas": [["Abono", "120", "35.500", "=B5*C5"], ["Semilla", "40", "870.000", "=B6*C6"]],
+        "totales": True}]}, plantilla=plantilla_xlsx_con_titulo, carpeta=carpeta)
+    ws = load_workbook(r.ruta)["Ventas"]
+
+    assert [c.value for c in ws[4]] == ["Producto", "Cantidad", "Precio", "Subtotal"]   # el suyo
+    assert ws["A4"].fill.fgColor.rgb.endswith("1B5E20")                                  # con su verde
+    assert ws["A5"].value == "Abono" and ws["D5"].value == "=B5*C5"   # justo donde el modelo lo escribió
+    assert ws["A7"].value == "Total" and ws["D7"].value == "=SUM(D5:D6)"
+    assert "datos desde la fila 5" in r.detalle
+
+
+def test_desde_respeta_la_columna(carpeta, plantilla_xlsx_con_titulo):
+    from openpyxl import load_workbook
+
+    r = documentos.crear_hoja("v.xlsx", {"hojas": [{
+        "nombre": "Ventas", "desde": "C8", "encabezados": ["Mes", "Total"],
+        "filas": [["Enero", "100"], ["Febrero", "200"]]}]},
+        plantilla=plantilla_xlsx_con_titulo, carpeta=carpeta)
+    ws = load_workbook(r.ruta)["Ventas"]
+
+    assert ws["C8"].value == "Mes" and ws["D8"].value == "Total"
+    assert ws["C9"].value == "Enero" and ws["D10"].value == 200
+    assert ws["A8"].value is None
+
+
+def test_el_grafico_sobre_plantilla_grafica_la_columna_pedida_con_su_nombre(carpeta, plantilla_xlsx_con_titulo):
+    from openpyxl import load_workbook
+
+    r = documentos.crear_hoja("v.xlsx", {"hojas": [{
+        "nombre": "Ventas", "desde": "A5",
+        "encabezados": ["Producto", "Cantidad", "Precio", "Subtotal"],
+        "filas": [["Abono", "120", "35.500", "4.260.000"], ["Semilla", "40", "870.000", "34.800.000"]],
+        "grafico": {"tipo": "barras", "titulo": "Subtotal", "columnas": ["Subtotal"],
+                    "categorias": "Producto"}}]},
+        plantilla=plantilla_xlsx_con_titulo, carpeta=carpeta)
+    ws = load_workbook(r.ruta)["Ventas"]
+    serie = ws._charts[0].series[0]
+
+    assert "$D$5:$D$6" in serie.val.numRef.f            # Subtotal, no la columna 2
+    assert serie.tx.v == "Subtotal"                      # y con su nombre, no «Series1»
+    categorias = (serie.cat.numRef.f if serie.cat.numRef is not None else serie.cat.strRef.f)
+    assert "$A$5:$A$6" in categorias
+
+
+def test_un_encabezado_nuevo_en_la_plantilla_copia_el_estilo_del_que_ya_tiene(carpeta, plantilla_xlsx_con_titulo):
+    from openpyxl import load_workbook
+
+    r = documentos.crear_hoja("v.xlsx", {"hojas": [{
+        "nombre": "Ventas", "encabezados": ["Vendedor", "Zona", "Comisión"],   # otros nombres
+        "filas": [["Ana", "Norte", "1.200.000"]]}]},
+        plantilla=plantilla_xlsx_con_titulo, carpeta=carpeta)
+    ws = load_workbook(r.ruta)["Ventas"]
+
+    fila = next(f for f in range(5, ws.max_row + 1) if ws.cell(row=f, column=1).value == "Vendedor")
+    assert ws.cell(row=fila, column=1).fill.fgColor.rgb.endswith("1B5E20")   # el verde de la plantilla
+    assert ws.cell(row=fila + 1, column=1).value == "Ana"
+
+
+# ---------------------------------------------------------------- CA-04: agregar filas con totales
+
+def test_agregar_filas_en_una_hoja_con_totales_las_mete_antes_y_la_suma_las_incluye(carpeta):
+    from openpyxl import load_workbook
+
+    origen = documentos.crear_hoja("c.xlsx", {"hojas": [
+        {"nombre": "Clientes", "encabezados": ["Nombre", "Ciudad", "Deuda"],
+         "filas": [["Finca", "Ibagué", "4.350.000"], ["Roble", "Neiva", "250.000"]], "totales": True,
+         "formatos": {"C": '"$" #,##0'},
+         "grafico": {"tipo": "barras", "columnas": ["Deuda"], "categorias": "Nombre"}},
+        {"nombre": "Resumen", "encabezados": ["Concepto", "Valor"],
+         "filas": [["Cartera total", "=Clientes!C4"]]}]}, carpeta=carpeta).ruta
+    r = documentos.editar_documento(origen, {"agregar": {"Clientes": [["Vivero", "Cali", "1.100.000"]]}},
+                                    en_sitio=True)
+    wb = load_workbook(origen)
+    ws = wb["Clientes"]
+
+    assert [c.value for c in ws[4]] == ["Vivero", "Cali", 1100000]      # antes del total
+    assert ws["A5"].value == "Total" and ws["C5"].value == "=SUM(C2:C4)"   # y la suma la incluye
+    assert ws["C4"].number_format == '"$" #,##0'                         # con el formato de la fila anterior
+    assert wb["Resumen"]["B2"].value == "=Clientes!C5"                  # la otra hoja sigue apuntando al total
+    assert "$C$2:$C$4" in ws._charts[0].series[0].val.numRef.f           # y el gráfico también
+    assert "antes de la fila de totales" in r.detalle
+
+
+def test_agregar_filas_sin_totales_sigue_agregando_al_final(carpeta):
+    from openpyxl import load_workbook
+
+    origen = documentos.crear_hoja("s.xlsx", {"hojas": [{"nombre": "H", "encabezados": ["a", "b"],
+                                                          "filas": [["x", "1"]]}]}, carpeta=carpeta).ruta
+    documentos.editar_documento(origen, {"agregar": {"H": [["y", "2"]]}}, en_sitio=True)
+    ws = load_workbook(origen)["H"]
+
+    assert [c.value for c in ws[3]] == ["y", 2]
+
+
+# ---------------------------------------------------------------- CA-05: marcadores sin rellenar
+
+def test_contenido_nuevo_sobre_una_plantilla_con_marcador_en_el_pie_se_rechaza_y_dice_donde(carpeta, tmp_path):
+    from docx import Document
+
+    doc = Document()
+    doc.sections[0].footer.paragraphs[0].text = "Cliente: {{cliente}}"
+    plantilla = tmp_path / "membrete.docx"
+    doc.save(str(plantilla))
+
+    with pytest.raises(documentos.DocumentoRechazado, match=r"\{\{cliente\}\} \(pie de página\)"):
+        documentos.crear_documento("informe.docx", _INFORME, plantilla=str(plantilla), carpeta=carpeta)
+    assert not os.path.exists(os.path.join(carpeta, "informe.docx"))
+
+    # Con el valor, sale.
+    r = documentos.crear_documento("informe.docx", _INFORME, plantilla=str(plantilla),
+                                   reemplazos={"{{cliente}}": "Palmar"}, carpeta=carpeta)
+    assert Document(r.ruta).sections[0].footer.paragraphs[0].text == "Cliente: Palmar"
+
+
+def test_una_presentacion_sobre_plantilla_con_marcador_sin_valor_se_rechaza(carpeta):
+    from pptx import Presentation
+
+    origen = documentos.crear_presentacion("base.pptx", {"titulo": "[EMPRESA]", "diapositivas": [
+        {"titulo": "Uno", "texto": "Contenido uno."}, {"titulo": "Dos", "texto": "Contenido dos."}]},
+        carpeta=carpeta).ruta
+
+    with pytest.raises(documentos.DocumentoRechazado, match=r"\[EMPRESA\] \(diapositiva 1\)"):
+        documentos.crear_presentacion("nueva.pptx", {"bloques": []}, plantilla=origen,
+                                      reemplazos={"{{nada}}": "x"}, carpeta=carpeta)
+    r = documentos.crear_presentacion("nueva.pptx", {"bloques": []}, plantilla=origen,
+                                      reemplazos={"[EMPRESA]": "Agro SAS"}, carpeta=carpeta)
+    assert Presentation(r.ruta).slides[0].shapes.title.text == "Agro SAS"
+
+
+# ---------------------------------------------------------------- CA-06: formas tolerantes
+
+def test_agregar_con_despues_de_adentro_funciona_igual_que_la_forma_documentada(carpeta):
+    from docx import Document
+
+    origen = documentos.crear_documento("i.docx", _INFORME, carpeta=carpeta).ruta
+    r = documentos.editar_documento(origen, {"agregar": {
+        "despues_de": "Visita al lote 14",
+        "bloques": [{"tipo": "parrafo", "texto": "Nota: cifras preliminares."}]}})
+    textos = [p.text for p in Document(r.ruta).paragraphs]
+
+    assert textos[textos.index("Visita al lote 14") + 1] == "Nota: cifras preliminares."
+    assert "después de «Visita al lote 14»" in r.detalle
+    assert "despues_de" not in textos and "bloques" not in textos     # nada de claves como párrafos
+
+
+def test_bloques_que_es_un_objeto_sin_sentido_se_rechaza(carpeta):
+    with pytest.raises(documentos.DocumentoRechazado, match="lista de bloques"):
+        documentos.crear_documento("x.docx", {"bloques": {"seccion": "a", "otra": "b"}}, carpeta=carpeta)
+
+
+def test_un_bloque_suelto_como_objeto_se_acepta(carpeta):
+    r = documentos.crear_documento("x.docx", {"bloques": {"tipo": "parrafo", "texto": "a" * 150}},
+                                   carpeta=carpeta)
+    assert "1 bloques" in r.detalle
+
+
+# ---------------------------------------------------------------- CA-08 / CA-09 / CA-12: estilo en Word
+
+def test_el_estilo_del_usuario_se_aplica_al_word(carpeta, tmp_path):
+    from docx import Document
+    from docx.enum.section import WD_ORIENT
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml.ns import qn
+
+    logo = tmp_path / "logo.png"
+    documentos._grafico_como_imagen({"categorias": ["a"], "series": [{"nombre": "s", "valores": [1]}]}, str(logo))
+
+    r = documentos.crear_documento("e.docx", _INFORME, carpeta=carpeta, estilo={
+        "fuente": "Arial", "tamaño": "11", "fuente_titulos": "Georgia", "color_titulos": "azul oscuro",
+        "márgenes": 2, "orientacion": "horizontal", "encabezado": "AGRO SAS · Informe interno",
+        "pie": "Confidencial", "logo": str(logo), "numeracion": True, "justificado": True})
+    doc = Document(r.ruta)
+    seccion = doc.sections[0]
+
+    assert doc.styles["Normal"].font.name == "Arial" and doc.styles["Normal"].font.size.pt == 11
+    assert doc.styles["Normal"].paragraph_format.alignment == WD_ALIGN_PARAGRAPH.JUSTIFY
+    assert doc.styles["Heading 1"].font.name == "Georgia"
+    assert str(doc.styles["Heading 1"].font.color.rgb) == "1F3864"
+    assert seccion.orientation == WD_ORIENT.LANDSCAPE and seccion.page_width > seccion.page_height
+    assert round(seccion.left_margin.cm, 1) == 2.0
+    assert any("Informe interno" in p.text for p in seccion.header.paragraphs)
+    assert seccion.header._element.findall(".//" + qn("w:drawing"))          # el logo está
+    assert any("Confidencial" in p.text for p in seccion.footer.paragraphs)
+    instrucciones = [e.text for e in seccion.footer._element.iter(qn("w:instrText"))]
+    assert any("PAGE" in i for i in instrucciones) and any("NUMPAGES" in i for i in instrucciones)
+    assert "estilo:" in r.detalle and "número de página" in r.detalle
+
+
+def test_un_color_o_un_tamano_que_no_se_entiende_se_avisa_y_no_tumba_el_documento(carpeta):
+    r = documentos.crear_documento("e.docx", _INFORME, carpeta=carpeta,
+                                   estilo={"color_titulos": "fucsia brillante", "tamano": "doce"})
+    assert os.path.exists(r.ruta)
+    assert any("fucsia brillante" in a for a in r.avisos) and any("doce" in a for a in r.avisos)
+
+
+def test_los_colores_se_entienden_por_nombre_y_en_hex():
+    c = documentos._color_hex
+    assert c("azul oscuro") == "1F3864" and c("Verde") == "2E7D32"
+    assert c("#2e7d32") == "2E7D32" and c("2E7D32") == "2E7D32" and c("#abc") == "AABBCC"
+    assert c("fucsia brillante") is None and c("") is None
+
+
+def test_el_estilo_encima_de_la_plantilla_manda(carpeta, plantilla_docx):
+    from docx import Document
+
+    r = documentos.crear_documento("i.docx", _INFORME, plantilla=plantilla_docx, carpeta=carpeta,
+                                   reemplazos={"{{numero}}": "1", "{{cliente}}": "c",
+                                               "{{concepto}}": "u", "{{valor}}": "1"},
+                                   estilo={"color_titulos": "rojo"})
+    doc = Document(r.ruta)
+
+    assert doc.sections[0].header.paragraphs[0].text == "AGRO ORIENTAL S.A.S."   # la plantilla sigue
+    assert str(doc.styles["Heading 1"].font.color.rgb) == "C00000"              # pero el color es el pedido
+
+
+def test_el_estilo_no_aplica_a_md_y_se_dice(carpeta):
+    r = documentos.crear_documento("n.md", _INFORME, carpeta=carpeta, estilo={"fuente": "Arial"})
+    assert any("no aplica" in a for a in r.avisos)
+
+
+def test_el_html_lleva_la_fuente_y_los_colores_pedidos(carpeta):
+    r = documentos.crear_documento("n.html", _INFORME, carpeta=carpeta,
+                                   estilo={"fuente": "Georgia", "color_titulos": "verde", "tamano": 12})
+    html = Path(r.ruta).read_text(encoding="utf-8")
+    assert "'Georgia'" in html and "#2E7D32" in html and "12pt" in html
+
+
+# ---------------------------------------------------------------- CA-10: estilo y título en Excel
+
+def test_el_estilo_y_el_titulo_de_hoja_se_aplican_al_excel(carpeta):
+    from openpyxl import load_workbook
+
+    r = documentos.crear_hoja("v.xlsx", {"hojas": [{
+        "nombre": "Ventas", "titulo": "AGRO SAS — Ventas del trimestre",
+        "encabezados": ["Producto", "Total"], "filas": [["Abono", "100"], ["Semilla", "200"]],
+        "totales": True}]}, carpeta=carpeta,
+        estilo={"fuente": "Calibri", "tamano": 10, "color_encabezado": "verde oscuro", "bordes": False})
+    ws = load_workbook(r.ruta)["Ventas"]
+
+    assert ws["A1"].value == "AGRO SAS — Ventas del trimestre" and "A1:B1" in ws.merged_cells
+    assert ws["A3"].value == "Producto" and ws["A3"].fill.fgColor.rgb.endswith("1B5E20")
+    assert ws["A4"].value == "Abono" and ws["A4"].font.name == "Calibri" and ws["A4"].font.size == 10
+    assert ws["B6"].value == "=SUM(B4:B5)"
+    assert ws["A4"].border.left.style is None                       # sin bordes, como se pidió
+    assert ws.freeze_panes == "A4"
+    assert "encabezado en la 3" in r.detalle and "datos desde la fila 4" in r.detalle
+
+
+# ---------------------------------------------------------------- CA-11: estilo en PowerPoint
+
+def test_el_estilo_se_aplica_a_la_presentacion(carpeta, tmp_path):
+    from pptx import Presentation
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    logo = tmp_path / "logo.png"
+    documentos._grafico_como_imagen({"categorias": ["a"], "series": [{"nombre": "s", "valores": [1]}]}, str(logo))
+    r = documentos.crear_presentacion("p.pptx", {"titulo": "Resultados", "diapositivas": [
+        {"titulo": "Uno", "puntos": ["Primer punto", "Segundo punto"]},
+        {"titulo": "Dos", "texto": "Contenido dos."}]}, carpeta=carpeta,
+        estilo={"fuente": "Georgia", "color_titulos": "verde", "color_texto": "#333333",
+                "logo": str(logo), "pie": "Agro SAS · Confidencial", "numeracion": True})
+    prs = Presentation(r.ruta)
+    segunda = prs.slides[1]
+    titulo = segunda.shapes.title
+
+    assert titulo.text_frame.paragraphs[0].runs[0].font.name == "Georgia"
+    assert str(titulo.text_frame.paragraphs[0].runs[0].font.color.rgb) == "2E7D32"
+    for slide in prs.slides:
+        assert any(s.shape_type == MSO_SHAPE_TYPE.PICTURE for s in slide.shapes)      # logo en todas
+    textos = [s.text_frame.text for s in segunda.shapes if s.has_text_frame]
+    assert "Agro SAS · Confidencial" in textos and "2 / 3" in textos
+    assert "estilo:" in r.detalle and "logo" in r.detalle
+
+
+# ---------------------------------------------------------------- CA-13: el registro
+
+def test_las_tres_herramientas_exponen_estilo_y_spreadsheet_explica_desde():
+    from agents.tool_registry import get_tool
+
+    for nombre in ("document_create", "spreadsheet_create", "presentation_create"):
+        tool = get_tool(nombre)
+        assert "estilo" in tool.parameters_schema["properties"], nombre
+        assert "estilo" in tool.description.lower(), nombre
+    hoja = get_tool("spreadsheet_create")
+    assert "PRIMERA FILA DE DATOS" in hoja.parameters_schema["properties"]["contenido"]["description"]
+    assert "SUMA" in hoja.description
