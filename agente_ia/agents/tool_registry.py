@@ -2838,7 +2838,7 @@ def _document_edit_invoke(params: dict) -> str:
         return f"Necesito la ruta del documento que querés editar{vocative()}."
     return _con_documento("document_edit", lambda: editar_documento(
         ruta, params.get("cambios") or {}, en_sitio=bool(params.get("en_sitio")),
-        carpeta=params.get("carpeta"),
+        carpeta=params.get("carpeta"), estilo=params.get("estilo"),
     ))
 
 
@@ -2850,19 +2850,33 @@ register_tool(ToolSpec(
         "Markdown) con 'despues_de' (texto del párrafo tras el que va), 'quitar' [textos de "
         "párrafos]. Excel: 'celdas' {'Hoja!B4': valor}, 'agregar' {hoja: [filas]}, "
         "'reemplazos'. PowerPoint: 'reemplazos', 'agregar' [diapositivas], 'quitar' "
-        "[títulos o números]. Por defecto deja el original intacto y guarda una copia "
-        "editada al lado; con 'en_sitio' sobrescribe el original."
+        "[títulos o números]. Con 'estilo' le cambiás el ASPECTO a lo que ya está escrito "
+        "(«ponele el membrete», «pasalo a horizontal con números de página», «letra Arial»): "
+        "vale por sí solo, sin tocar el texto. Por defecto deja el original intacto y guarda "
+        "una copia editada al lado; con 'en_sitio' sobrescribe el original."
     ),
     parameters_schema={
         "type": "object",
         "properties": {
             "ruta": {"type": "string", "description": "Ruta al .docx, .xlsx o .pptx."},
             "cambios": {"description": "Objeto con los cambios, según el tipo de archivo."},
+            "estilo": {
+                "type": "object",
+                "description": (
+                    "Aspecto nuevo (opcional; solo con esto ya es un cambio válido). Word: "
+                    "'fuente', 'tamano', 'fuente_titulos', 'color_titulos', 'color_texto', "
+                    "'margenes_cm', 'orientacion', 'encabezado', 'pie', 'logo', 'numeracion', "
+                    "'justificado'. Excel: 'fuente', 'tamano' (a lo que ya está escrito, "
+                    "conservando negritas) y 'color_encabezado'. PowerPoint: 'fuente', "
+                    "'color_titulos', 'color_texto', 'logo', 'pie', 'numeracion' — se aplica "
+                    "a todas las diapositivas y no duplica el logo ni el pie si ya los tenía."
+                ),
+            },
             "en_sitio": {"type": "boolean",
                          "description": "True para sobrescribir el original (sin deshacer)."},
             "carpeta": {"type": "string", "description": "Dónde dejar la copia editada (opcional)."},
         },
-        "required": ["ruta", "cambios"],
+        "required": ["ruta"],
     },
     # YELLOW: modifica un documento del usuario. La confirmación muestra la ruta.
     risk_level=RiskLevel.YELLOW,

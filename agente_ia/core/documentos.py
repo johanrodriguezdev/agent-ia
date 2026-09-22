@@ -2228,12 +2228,54 @@ def _agregar_diapositivas(prs, diapositivas: List[Dict[str, Any]], avisos: List[
 
 
 
+#: Las formas que pone el estilo (logo, pie, número) se marcan con este prefijo en su
+#: nombre. Sin marca, volver a aplicar un estilo pondría un segundo logo encima del
+#: primero, y al agregar diapositivas los números viejos quedarían mintiendo.
+_MARCA_ESTILO = "ORION-estilo-"
+
+
+def _quitar_formas_de_estilo(slide) -> int:
+    """Quita de una diapositiva las formas que puso un estilo anterior. Return cuántas."""
+    quitadas = 0
+    for shape in list(slide.shapes):
+        if str(shape.name or "").startswith(_MARCA_ESTILO):
+            shape._element.getparent().remove(shape._element)
+            quitadas += 1
+    return quitadas
+
+
+def _renumerar_marcas_de_estilo(prs) -> int:
+    """Reescribe los «n / total» que puso un estilo, tras agregar o quitar diapositivas.
+
+    Return cuántos se actualizaron. Sin esto, agregar una diapositiva a una presentación
+    numerada dejaría «2 / 3» en una de cuatro: un número equivocado es peor que ninguno.
+    """
+    total = len(prs.slides)
+    actualizados = 0
+    for numero, slide in enumerate(prs.slides, 1):
+        for shape in slide.shapes:
+            if str(shape.name or "") == _MARCA_ESTILO + "numero" and shape.has_text_frame:
+                parrafo = shape.text_frame.paragraphs[0]
+                nuevo = f"{numero} / {total}"
+                if parrafo.runs:
+                    parrafo.runs[0].text = nuevo
+                    for run in parrafo.runs[1:]:
+                        run.text = ""
+                else:
+                    parrafo.text = nuevo
+                actualizados += 1
+    return actualizados
+
+
 def _aplicar_estilo_pptx(prs, diapositivas, estilo: Dict[str, Any], avisos: List[str]) -> List[str]:
-    """Aplica a las diapositivas creadas lo que el usuario pidió de aspecto. Return qué se aplicó.
+    """Aplica a esas diapositivas lo que el usuario pidió de aspecto. Return qué se aplicó.
 
     Fuente y colores van run por run (el tema de Office se aplica después con PowerPoint y
     solo toca el patrón, así que el formato explícito se conserva). Logo, pie y número son
-    formas añadidas en las esquinas.
+    formas añadidas en las esquinas, marcadas con `_MARCA_ESTILO` para poder rehacerlas sin
+    duplicarlas. El número de cada diapositiva es su posición real en la presentación, no
+    su posición en la lista que se pasa: al editar se estilan unas pocas y el «n / total»
+    tiene que seguir siendo el de la presentación entera.
     """
     from pptx.dml.color import RGBColor
     from pptx.enum.text import PP_ALIGN
@@ -2245,7 +2287,8 @@ def _aplicar_estilo_pptx(prs, diapositivas, estilo: Dict[str, Any], avisos: List
     fuente = estilo.get("fuente")
     color_titulos = estilo.get("color_titulos")
     color_texto = estilo.get("color_texto")
-    total = len(diapositivas)
+    posiciones = {slide.slide_id: i for i, slide in enumerate(prs.slides, 1)}
+    total = len(prs.slides)
     ancho, alto = prs.slide_width, prs.slide_height
 
     ruta_logo = str(estilo.get("logo") or "")
@@ -2253,7 +2296,9 @@ def _aplicar_estilo_pptx(prs, diapositivas, estilo: Dict[str, Any], avisos: List
         avisos.append(f"No encontré el logo «{ruta_logo}»; la presentación salió sin él.")
         ruta_logo = ""
 
-    for numero, slide in enumerate(diapositivas, 1):
+    for slide in diapositivas:
+        numero = posiciones.get(slide.slide_id, 1)
+        _quitar_formas_de_estilo(slide)
         titulo = slide.shapes.title
         for shape in slide.shapes:
             if not shape.has_text_frame:
@@ -2269,13 +2314,15 @@ def _aplicar_estilo_pptx(prs, diapositivas, estilo: Dict[str, Any], avisos: List
         if ruta_logo:
             try:
                 ancho_logo = Cm(float(str(estilo.get("logo_ancho_cm") or 2.5).replace(",", ".")))
-                slide.shapes.add_picture(ruta_logo, ancho - ancho_logo - Cm(0.5), Cm(0.4),
-                                         width=ancho_logo)
+                logo = slide.shapes.add_picture(ruta_logo, ancho - ancho_logo - Cm(0.5),
+                                                Cm(0.4), width=ancho_logo)
+                logo.name = _MARCA_ESTILO + "logo"
             except Exception as e:
                 avisos.append(f"No pude poner el logo: {e}.")
                 ruta_logo = ""
         if estilo.get("pie"):
             caja = slide.shapes.add_textbox(Cm(0.8), alto - Cm(1.2), ancho * 2 // 3, Cm(0.8))
+            caja.name = _MARCA_ESTILO + "pie"
             p = caja.text_frame.paragraphs[0]
             p.text = str(estilo["pie"])
             p.font.size = Pt(10)
@@ -2284,6 +2331,7 @@ def _aplicar_estilo_pptx(prs, diapositivas, estilo: Dict[str, Any], avisos: List
                 p.font.name = str(fuente)
         if estilo.get("numeracion"):
             caja = slide.shapes.add_textbox(ancho - Cm(3.3), alto - Cm(1.2), Cm(2.5), Cm(0.8))
+            caja.name = _MARCA_ESTILO + "numero"
             p = caja.text_frame.paragraphs[0]
             p.text = f"{numero} / {total}"
             p.alignment = PP_ALIGN.RIGHT
@@ -2828,12 +2876,17 @@ def _mover_al_final_despues_de(doc, ancla: str, habia_antes: set) -> bool:
     return True
 
 
-def _editar_docx(origen: Path, destino: Path, cambios: Dict[str, Any]) -> Resultado:
+def _editar_docx(origen: Path, destino: Path, cambios: Dict[str, Any],
+                 estilo: Optional[Dict[str, Any]] = None) -> Resultado:
     from docx import Document
 
     doc = Document(str(origen))
     avisos: List[str] = []
     hechos: List[str] = []
+
+    aplicado = _aplicar_estilo_docx(doc, estilo or {}, avisos)
+    if aplicado:
+        hechos.append("estilo: " + ", ".join(aplicado))
 
     reemplazos = {str(k): str(v) for k, v in (cambios.get("reemplazos") or {}).items()}
     if reemplazos:
@@ -2875,7 +2928,8 @@ def _editar_docx(origen: Path, destino: Path, cambios: Dict[str, Any]) -> Result
                       + (f" después de «{despues_de}»" if despues_de else " al final"))
 
     if not hechos:
-        raise DocumentoRechazado("No me diste ningún cambio: 'reemplazos', 'agregar' o 'quitar'.")
+        raise DocumentoRechazado("No me diste ningún cambio: 'reemplazos', 'agregar', "
+                                 "'quitar' o 'estilo'.")
     doc.save(str(destino))
     return Resultado(ruta=str(destino), formato="docx", detalle=", ".join(hechos), avisos=avisos)
 
@@ -2890,12 +2944,23 @@ _REF_EN_FORMULA_RE = re.compile(
 )
 
 
+#: Cuántas filas con contenido se miran, de abajo hacia arriba, buscando la de totales.
+#: Debajo del total suele haber una nota, una firma o una fila en blanco; más allá de eso,
+#: lo que se encuentre ya no es el cierre de esta tabla.
+_FILAS_A_MIRAR_BUSCANDO_EL_TOTAL = 5
+
+
 def _fila_de_totales(ws) -> Optional[int]:
-    """Return la fila de totales de una hoja, o None: de abajo hacia arriba, la primera cuya
-    primera celda con texto diga «Total» o que traiga una SUM/SUBTOTAL sobre las de arriba."""
+    """Return la fila de totales de una hoja, o None.
+
+    De abajo hacia arriba: la primera fila cuya primera celda con texto diga «Total» o que
+    traiga una SUM/SUBTOTAL. No se exige que sea la última con contenido — debajo puede
+    haber una nota al pie, y la fila nueva igual tiene que entrar antes del total, que es
+    donde el usuario la ve pertenecer.
+    """
+    miradas = 0
     for fila in range((ws.max_row or 0), 1, -1):
-        celdas = next(ws.iter_rows(min_row=fila, max_row=fila))
-        valores = [c.value for c in celdas]
+        valores = [c.value for c in next(ws.iter_rows(min_row=fila, max_row=fila))]
         if all(v in (None, "") for v in valores):
             continue
         primer_texto = next((v for v in valores if isinstance(v, str) and v.strip()), "")
@@ -2904,7 +2969,9 @@ def _fila_de_totales(ws) -> Optional[int]:
         if any(isinstance(v, str) and re.match(r"=\s*(SUM|SUBTOTAL)\(", v, re.IGNORECASE)
                for v in valores):
             return fila
-        return None                                # la última fila con datos no es de totales
+        miradas += 1
+        if miradas >= _FILAS_A_MIRAR_BUSCANDO_EL_TOTAL:
+            return None
     return None
 
 
@@ -2962,6 +3029,52 @@ def _desplazar_referencias(formula: str, hoja: str, hoja_de_la_formula: str,
                    for parte in partes)
 
 
+def _desplazar_combinadas(ws, desde_fila: int, cuantas: int) -> None:
+    """Corre las celdas combinadas que estén en `desde_fila` o más abajo.
+
+    `insert_rows` de openpyxl no las toca: un título combinado debajo de la tabla se
+    quedaba pegado a la fila que antes ocupaba y el archivo salía descuadrado.
+    """
+    from openpyxl.worksheet.cell_range import CellRange
+
+    rangos = [str(r) for r in ws.merged_cells.ranges]
+    for texto in rangos:
+        rango = CellRange(texto)
+        if rango.min_row < desde_fila:
+            continue
+        ws.unmerge_cells(texto)
+        ws.merge_cells(start_row=rango.min_row + cuantas, start_column=rango.min_col,
+                       end_row=rango.max_row + cuantas, end_column=rango.max_col)
+
+
+def _desplazar_formatos_condicionales(ws, desde_fila: int, cuantas: int) -> None:
+    """Corre —y extiende— los rangos de formato condicional al insertar filas.
+
+    Un rango que terminaba justo encima de lo insertado se extiende para abarcarlo: si las
+    filas de datos estaban pintadas por una regla, la fila nueva tiene que pintarse igual.
+    """
+    from openpyxl.formatting.formatting import ConditionalFormattingList
+    from openpyxl.worksheet.cell_range import CellRange, MultiCellRange
+
+    original = list(ws.conditional_formatting)
+    if not original:
+        return
+    nueva = ConditionalFormattingList()
+    for formato in original:
+        partes = []
+        for rango in formato.cells.ranges:
+            r = CellRange(str(rango))
+            if r.min_row >= desde_fila:
+                r.shift(row_shift=cuantas)
+            elif r.max_row >= desde_fila - 1:
+                r.expand(down=cuantas)
+            partes.append(str(r))
+        destino = MultiCellRange(" ".join(partes))
+        for regla in formato.rules:
+            nueva.add(str(destino), regla)
+    ws.conditional_formatting = nueva
+
+
 def _insertar_filas_antes_del_total(wb, ws, fila_total: int, nuevas: List[List[Any]]) -> None:
     """Mete las filas nuevas justo antes de la de totales, con el formato de la última fila
     de datos, y corrige todas las fórmulas del libro (y los gráficos de la hoja)."""
@@ -2987,9 +3100,91 @@ def _insertar_filas_antes_del_total(wb, ws, fila_total: int, nuevas: List[List[A
                 if referencia is not None and referencia.f:
                     referencia.f = _desplazar_referencias(referencia.f, ws.title, ws.title,
                                                           fila_total, cuantas)
+    _desplazar_combinadas(ws, fila_total, cuantas)
+    _desplazar_formatos_condicionales(ws, fila_total, cuantas)
 
 
-def _editar_xlsx(origen: Path, destino: Path, cambios: Dict[str, Any]) -> Resultado:
+def _fila_de_encabezado_visible(ws) -> Optional[int]:
+    """Return la primera fila que parece el encabezado de la tabla: la primera con dos o
+    más celdas de texto. Una fila de título es una sola celda (a menudo combinada), así que
+    no se la confunde con el encabezado."""
+    for fila in range(1, min((ws.max_row or 0), 30) + 1):
+        textos = [c for c in next(ws.iter_rows(min_row=fila, max_row=fila))
+                  if isinstance(c.value, str) and c.value.strip()]
+        if len(textos) >= 2:
+            return fila
+    return None
+
+
+def _aplicar_estilo_xlsx(wb, estilo: Dict[str, Any], avisos: List[str]) -> List[str]:
+    """Aplica a un libro que ya existe lo que el usuario pidió de aspecto. Return qué se aplicó.
+
+    La fuente y el tamaño van a las celdas que tienen algo escrito, conservando lo que cada
+    una traiga de negrita y de color: cambiar la letra de un informe no es despintarlo. El
+    color de encabezado va a la fila que parece el encabezado, y se dice cuál fue.
+    """
+    from copy import copy
+
+    from openpyxl.styles import PatternFill
+
+    if not estilo:
+        return []
+    aplicado: List[str] = []
+    fuente, tamano = estilo.get("fuente"), estilo.get("tamano")
+    if fuente or tamano:
+        # El tamaño pedido es el del cuerpo, y lo demás escala con él: un título de 16 en un
+        # libro de 11 no debe quedar en 10 porque se pidió «letra 10» — eso aplasta la
+        # jerarquía que el documento ya tenía. Se escala por el tamaño más frecuente.
+        factor = 1.0
+        if tamano:
+            tamanos = [c.font.size for ws in wb.worksheets for fila in ws.iter_rows()
+                       for c in fila if c.value is not None and c.font.size]
+            base = max(set(tamanos), key=tamanos.count) if tamanos else 11.0
+            factor = float(tamano) / float(base or 11.0)
+        for ws in wb.worksheets:
+            for fila in ws.iter_rows():
+                for celda in fila:
+                    if celda.value is None:
+                        continue
+                    nueva = copy(celda.font)
+                    if fuente:
+                        nueva.name = str(fuente)
+                    if tamano:
+                        actual = float(celda.font.size or 11.0)
+                        nueva.size = max(6.0, round(actual * factor * 2) / 2)
+                    celda.font = nueva
+        if fuente:
+            aplicado.append(f"fuente {fuente}")
+        if tamano:
+            aplicado.append(f"{float(tamano):g} pt")
+
+    if estilo.get("color_encabezado") or estilo.get("color_texto_encabezado"):
+        donde = []
+        for ws in wb.worksheets:
+            fila = _fila_de_encabezado_visible(ws)
+            if fila is None:
+                continue
+            for celda in next(ws.iter_rows(min_row=fila, max_row=fila)):
+                if celda.value is None:
+                    continue
+                if estilo.get("color_encabezado"):
+                    celda.fill = PatternFill("solid", fgColor=estilo["color_encabezado"])
+                nueva = copy(celda.font)
+                nueva.bold = True
+                if estilo.get("color_texto_encabezado"):
+                    nueva.color = estilo["color_texto_encabezado"]
+                celda.font = nueva
+            donde.append(f"{ws.title}!{fila}")
+        if donde:
+            aplicado.append("encabezado en " + ", ".join(donde))
+        else:
+            avisos.append("No encontré una fila de encabezado (dos o más textos seguidos) "
+                          "para pintarla.")
+    return aplicado
+
+
+def _editar_xlsx(origen: Path, destino: Path, cambios: Dict[str, Any],
+                 estilo: Optional[Dict[str, Any]] = None) -> Resultado:
     from openpyxl import load_workbook
 
     wb = load_workbook(str(origen))
@@ -3044,8 +3239,17 @@ def _editar_xlsx(origen: Path, destino: Path, cambios: Dict[str, Any]) -> Result
                         celda.value = _valor_de_celda(nuevo)
         hechos.append(f"{cuantos} reemplazos")
 
+    aplicado = _aplicar_estilo_xlsx(wb, estilo or {}, avisos)
+    if aplicado:
+        hechos.append("estilo: " + ", ".join(aplicado))
+
     if not hechos:
-        raise DocumentoRechazado("No me diste ningún cambio: 'celdas', 'agregar' o 'reemplazos'.")
+        # Si se pidió un estilo y no se pudo aplicar nada, el motivo concreto vale más que
+        # «no me diste ningún cambio»: el modelo sí lo dio, y así sabe qué corregir.
+        if estilo and avisos:
+            raise DocumentoRechazado("El libro quedó igual: " + " ".join(avisos))
+        raise DocumentoRechazado("No me diste ningún cambio: 'celdas', 'agregar', "
+                                 "'reemplazos' o 'estilo'.")
     wb.save(str(destino))
     wb.close()
     return Resultado(ruta=str(destino), formato="xlsx", detalle=", ".join(hechos), avisos=avisos)
@@ -3069,12 +3273,75 @@ def _renumerar_diapositivas(prs) -> None:
         slide.part.partname = PackURI(f"/ppt/slides/slide{i}.xml")
 
 
-def _editar_pptx(origen: Path, destino: Path, cambios: Dict[str, Any]) -> Resultado:
+def _color_rgb_de(fuente_de_texto) -> Optional[str]:
+    """Return el color de un run como «RRGGBB», o None si es del tema o no tiene."""
+    from pptx.enum.dml import MSO_COLOR_TYPE
+
+    try:
+        color = fuente_de_texto.color
+        if color is not None and color.type == MSO_COLOR_TYPE.RGB:
+            return str(color.rgb)
+    except Exception as e:
+        logger.debug(f"no se pudo leer el color de un run: {e}")
+    return None
+
+
+def _estilo_vigente_pptx(prs, hasta: int, carpeta_temporal: str) -> Dict[str, Any]:
+    """Return el estilo que ya llevan las primeras `hasta` diapositivas, para que las nuevas
+    salgan iguales.
+
+    Una diapositiva agregada a una presentación con logo, pie y letra propia tiene que
+    parecerse a las demás; si no, se ve de inmediato que la pegó otro. El logo se recupera
+    sacando la imagen del propio archivo a `carpeta_temporal` —no hay ninguna ruta guardada
+    que volver a leer—, y la letra y el color, del título y del cuerpo de las que ya están.
+    """
+    estilo: Dict[str, Any] = {}
+    from pptx.util import Cm
+
+    for slide in list(prs.slides)[:hasta]:
+        titulo = slide.shapes.title
+        for shape in slide.shapes:
+            nombre = str(shape.name or "")
+            if nombre.startswith(_MARCA_ESTILO):
+                if nombre == _MARCA_ESTILO + "pie" and shape.has_text_frame and "pie" not in estilo:
+                    estilo["pie"] = shape.text_frame.text
+                elif nombre == _MARCA_ESTILO + "numero":
+                    estilo["numeracion"] = True
+                elif nombre == _MARCA_ESTILO + "logo" and "logo" not in estilo:
+                    try:
+                        imagen = shape.image
+                        extension = f".{imagen.ext}" if imagen.ext else ""
+                        destino = os.path.join(carpeta_temporal, "logo" + extension)
+                        with open(destino, "wb") as f:
+                            f.write(imagen.blob)
+                        estilo["logo"] = destino
+                        estilo["logo_ancho_cm"] = round(shape.width / Cm(1), 2)
+                    except Exception as e:
+                        logger.debug(f"no se pudo recuperar el logo de la presentación: {e}")
+                continue
+            if not shape.has_text_frame:
+                continue
+            es_titulo = titulo is not None and shape.shape_id == titulo.shape_id
+            for parrafo in shape.text_frame.paragraphs:
+                for run in parrafo.runs:
+                    if run.font.name and "fuente" not in estilo:
+                        estilo["fuente"] = run.font.name
+                    clave = "color_titulos" if es_titulo else "color_texto"
+                    if clave not in estilo:
+                        color = _color_rgb_de(run.font)
+                        if color:
+                            estilo[clave] = color
+    return estilo
+
+
+def _editar_pptx(origen: Path, destino: Path, cambios: Dict[str, Any],
+                 estilo: Optional[Dict[str, Any]] = None) -> Resultado:
     from pptx import Presentation
 
     prs = Presentation(str(origen))
     avisos: List[str] = []
     hechos: List[str] = []
+    cuantas_habia = len(prs.slides)
 
     reemplazos = {str(k): str(v) for k, v in (cambios.get("reemplazos") or {}).items()}
     if reemplazos:
@@ -3102,20 +3369,44 @@ def _editar_pptx(origen: Path, destino: Path, cambios: Dict[str, Any]) -> Result
         if borradas:
             _renumerar_diapositivas(prs)
 
+    habia = len(prs.slides)
     _, diapositivas = _diapositivas_de({"diapositivas": cambios.get("agregar") or []})
     if diapositivas:
         rechazar_relleno(diapositivas)
         _agregar_diapositivas(prs, diapositivas, avisos)
         hechos.append(f"{len(diapositivas)} diapositivas agregadas al final")
 
+    # Un estilo pedido ahora se aplica a TODA la presentación; si no se pidió ninguno pero
+    # se agregaron diapositivas, las nuevas heredan el estilo que ya tuvieran las viejas.
+    nuevas = list(prs.slides)[habia:]
+    if estilo:
+        aplicado = _aplicar_estilo_pptx(prs, list(prs.slides), estilo, avisos)
+        if aplicado:
+            hechos.append("estilo: " + ", ".join(aplicado))
+    elif nuevas:
+        # El logo se extrae del propio archivo a un temporal, así que la aplicación tiene
+        # que ocurrir dentro del `with`: después, el archivo ya no está.
+        with tempfile.TemporaryDirectory() as temporal:
+            heredado = _estilo_vigente_pptx(prs, habia, temporal)
+            if heredado:
+                _aplicar_estilo_pptx(prs, nuevas, heredado, avisos)
+                hechos.append("las nuevas heredaron el estilo de la presentación")
+    # Se renumera si se quitó o se agregó, aunque la cantidad total coincida: quitar la
+    # primera y agregar una al final deja el mismo total y corre todas las posiciones.
+    if quitar or diapositivas or len(prs.slides) != cuantas_habia:
+        actualizados = _renumerar_marcas_de_estilo(prs)
+        if actualizados:
+            hechos.append("numeración de diapositivas al día")
+
     if not hechos:
-        raise DocumentoRechazado("No me diste ningún cambio: 'reemplazos', 'agregar' o 'quitar'.")
+        raise DocumentoRechazado("No me diste ningún cambio: 'reemplazos', 'agregar', "
+                                 "'quitar' o 'estilo'.")
     prs.save(str(destino))
     return Resultado(ruta=str(destino), formato="pptx", detalle=", ".join(hechos), avisos=avisos)
 
 
-def editar_documento(ruta: str, cambios: Any, en_sitio: bool = False,
-                     carpeta: Optional[str] = None) -> Resultado:
+def editar_documento(ruta: str, cambios: Any = None, en_sitio: bool = False,
+                     carpeta: Optional[str] = None, estilo: Any = None) -> Resultado:
     """Edita un .docx, .xlsx o .pptx que ya existe. Levanta `DocumentoRechazado`.
 
     `cambios` según el tipo:
@@ -3123,25 +3414,39 @@ def editar_documento(ruta: str, cambios: Any, en_sitio: bool = False,
       (texto del párrafo tras el que va), `quitar` [textos de párrafos].
     - Excel: `celdas` {"Hoja!B4": valor}, `agregar` {hoja: [filas]}, `reemplazos`.
     - PowerPoint: `reemplazos`, `agregar` [diapositivas], `quitar` [títulos o números].
+
+    `estilo` cambia el aspecto de lo que ya está escrito —fuente, colores, márgenes,
+    encabezado y pie, logo, numeración— y es un cambio por sí solo: «ponele el membrete a
+    este informe» no necesita tocar una palabra del texto.
     """
     origen = _origen_valido(ruta)
-    spec = _como_estructura(cambios)
+    spec = _como_estructura(cambios) if cambios else {}
     if not isinstance(spec, dict):
         raise DocumentoRechazado("Los cambios tienen que ser un objeto con 'reemplazos', "
-                                 "'agregar', 'quitar' o 'celdas'.")
+                                 "'agregar', 'quitar', 'celdas' o 'estilo'.")
+    # El estilo se acepta como argumento aparte y también dentro de `cambios`: es donde el
+    # modelo lo pone la mitad de las veces, y rechazarlo por eso sería una vuelta perdida.
+    estilo = estilo if estilo is not None else spec.get("estilo")
+    spec = {k: v for k, v in spec.items() if k != "estilo"}
+    if not spec and not estilo:
+        raise DocumentoRechazado("No me diste ningún cambio: 'reemplazos', 'agregar', "
+                                 "'quitar', 'celdas' o 'estilo'.")
     rechazar_relleno({k: v for k, v in spec.items() if k != "quitar"})
+    avisos_estilo: List[str] = []
+    estilo_pedido = _estilo_de(estilo, avisos_estilo)
     destino = _destino_de_edicion(origen, bool(en_sitio), carpeta)
     extension = _extension(origen.name)
 
     if extension == "docx":
-        resultado = _editar_docx(origen, destino, spec)
+        resultado = _editar_docx(origen, destino, spec, estilo_pedido)
     elif extension == "xlsx":
-        resultado = _editar_xlsx(origen, destino, spec)
+        resultado = _editar_xlsx(origen, destino, spec, estilo_pedido)
     elif extension == "pptx":
-        resultado = _editar_pptx(origen, destino, spec)
+        resultado = _editar_pptx(origen, destino, spec, estilo_pedido)
     else:
         raise DocumentoRechazado(f"No sé editar «{origen.name}»: solo .docx, .xlsx y .pptx.")
 
+    resultado.avisos = avisos_estilo + resultado.avisos
     if not en_sitio:
         resultado.detalle += f"; el original {origen.name} quedó intacto"
     return resultado

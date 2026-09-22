@@ -1141,3 +1141,239 @@ def test_las_tres_herramientas_exponen_estilo_y_spreadsheet_explica_desde():
     hoja = get_tool("spreadsheet_create")
     assert "PRIMERA FILA DE DATOS" in hoja.parameters_schema["properties"]["contenido"]["description"]
     assert "SUMA" in hoja.description
+
+
+# =============================================================================== REQ-066
+# El aspecto también se cambia después, no solo al crear.
+
+
+@pytest.fixture
+def logo(tmp_path):
+    ruta = tmp_path / "logo.png"
+    documentos._grafico_como_imagen(
+        {"categorias": ["a"], "series": [{"nombre": "s", "valores": [1]}]}, str(ruta))
+    return str(ruta)
+
+
+# ---------------------------------------------------------------- Word: restilar lo ya escrito
+
+def test_un_word_ya_escrito_se_restila_sin_tocar_el_texto(carpeta, logo):
+    from docx import Document
+    from docx.enum.section import WD_ORIENT
+    from docx.oxml.ns import qn
+
+    origen = documentos.crear_documento("i.docx", _INFORME, carpeta=carpeta).ruta
+    antes = [p.text for p in Document(origen).paragraphs]
+
+    r = documentos.editar_documento(origen, estilo={
+        "fuente": "Arial", "fuente_titulos": "Georgia", "color_titulos": "verde oscuro",
+        "orientacion": "horizontal", "encabezado": "AGRO SAS", "pie": "Confidencial",
+        "logo": logo, "numeracion": True}, carpeta=carpeta)
+    doc = Document(r.ruta)
+
+    assert [p.text for p in doc.paragraphs] == antes          # ni una palabra cambió
+    assert doc.styles["Normal"].font.name == "Arial"
+    assert str(doc.styles["Heading 1"].font.color.rgb) == "1B5E20"
+    assert doc.sections[0].orientation == WD_ORIENT.LANDSCAPE
+    assert any("AGRO SAS" in p.text for p in doc.sections[0].header.paragraphs)
+    assert doc.sections[0].header._element.findall(".//" + qn("w:drawing"))
+    assert "estilo:" in r.detalle
+
+
+def test_el_estilo_solo_ya_es_un_cambio_valido_y_sin_nada_se_rechaza(carpeta):
+    origen = documentos.crear_documento("i.docx", _INFORME, carpeta=carpeta).ruta
+
+    with pytest.raises(documentos.DocumentoRechazado, match="ningún cambio"):
+        documentos.editar_documento(origen, {}, carpeta=carpeta)
+    r = documentos.editar_documento(origen, estilo={"fuente": "Arial"}, carpeta=carpeta)
+    assert "estilo" in r.detalle
+
+
+def test_el_estilo_dentro_de_cambios_tambien_vale(carpeta):
+    from docx import Document
+
+    origen = documentos.crear_documento("i.docx", _INFORME, carpeta=carpeta).ruta
+    r = documentos.editar_documento(origen, {"estilo": {"color_titulos": "rojo"}}, carpeta=carpeta)
+
+    assert str(Document(r.ruta).styles["Heading 1"].font.color.rgb) == "C00000"
+
+
+# ---------------------------------------------------------------- Excel: restilar lo ya escrito
+
+def test_restilar_un_excel_conserva_la_jerarquia_de_tamanos_y_las_negritas(carpeta):
+    from openpyxl import load_workbook
+
+    origen = documentos.crear_hoja("v.xlsx", {"hojas": [{
+        "nombre": "Ventas", "titulo": "AGRO SAS — Ventas",
+        "encabezados": ["Producto", "Total"], "filas": [["Abono", "100"], ["Semilla", "200"]],
+        "totales": True}]}, carpeta=carpeta).ruta
+    r = documentos.editar_documento(origen, estilo={"fuente": "Calibri", "tamano": 10,
+                                                    "color_encabezado": "verde oscuro"},
+                                    carpeta=carpeta)
+    ws = load_workbook(r.ruta)["Ventas"]
+
+    assert ws["A4"].font.name == "Calibri" and ws["A4"].font.size == 10   # el cuerpo, al pedido
+    assert ws["A1"].font.size > 10                          # el título sigue siendo título
+    assert ws["A3"].fill.fgColor.rgb.endswith("1B5E20")     # el encabezado, pintado
+    assert ws["A3"].font.b and ws["A6"].font.b              # y el Total sigue en negrita
+    assert "encabezado en Ventas!3" in r.detalle
+
+
+def test_si_no_hay_una_fila_que_parezca_encabezado_se_avisa(carpeta, tmp_path):
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    wb.active["A1"] = "una sola celda"
+    origen = tmp_path / "suelto.xlsx"
+    wb.save(str(origen))
+
+    # Nada que pintar: el libro quedaría igual, y se dice por qué en vez de guardar una
+    # copia idéntica diciendo «Listo».
+    with pytest.raises(documentos.DocumentoRechazado, match="fila de encabezado"):
+        documentos.editar_documento(str(origen), estilo={"color_encabezado": "azul"},
+                                    carpeta=carpeta)
+
+
+# ---------------------------------------------------------------- PowerPoint: heredar y no duplicar
+
+def _formas_de_estilo(ruta):
+    from pptx import Presentation
+
+    return [sorted(str(s.name) for s in slide.shapes
+                   if str(s.name).startswith(documentos._MARCA_ESTILO))
+            for slide in Presentation(ruta).slides]
+
+
+def _numeros(ruta):
+    from pptx import Presentation
+
+    return [s.text_frame.text for slide in Presentation(ruta).slides for s in slide.shapes
+            if str(s.name) == documentos._MARCA_ESTILO + "numero"]
+
+
+@pytest.fixture
+def presentacion_con_estilo(carpeta, logo):
+    return documentos.crear_presentacion("p.pptx", {"titulo": "Resultados", "diapositivas": [
+        {"titulo": "Uno", "puntos": ["Primer punto", "Segundo punto"]},
+        {"titulo": "Dos", "texto": "Contenido dos."}]}, carpeta=carpeta,
+        estilo={"fuente": "Georgia", "color_titulos": "#FFD54F", "logo": logo,
+                "pie": "Agro SAS · Confidencial", "numeracion": True}).ruta
+
+
+def test_una_diapositiva_agregada_hereda_logo_letra_pie_y_numero(carpeta, presentacion_con_estilo):
+    from pptx import Presentation
+
+    assert _numeros(presentacion_con_estilo) == ["1 / 3", "2 / 3", "3 / 3"]
+    r = documentos.editar_documento(presentacion_con_estilo,
+                                    {"agregar": [{"titulo": "Tres", "texto": "Contenido tres."}]},
+                                    carpeta=carpeta)
+    nueva = Presentation(r.ruta).slides[-1]
+    titulo = nueva.shapes.title
+
+    assert _formas_de_estilo(r.ruta)[-1] == [documentos._MARCA_ESTILO + "logo",
+                                             documentos._MARCA_ESTILO + "numero",
+                                             documentos._MARCA_ESTILO + "pie"]
+    assert titulo.text_frame.paragraphs[0].runs[0].font.name == "Georgia"
+    assert str(titulo.text_frame.paragraphs[0].runs[0].font.color.rgb) == "FFD54F"
+    assert _numeros(r.ruta) == ["1 / 4", "2 / 4", "3 / 4", "4 / 4"]      # y se renumeró todo
+    assert "heredaron el estilo" in r.detalle
+
+
+def test_quitar_una_diapositiva_tambien_renumera(carpeta, presentacion_con_estilo):
+    r = documentos.editar_documento(presentacion_con_estilo, {"quitar": ["Uno"]}, carpeta=carpeta)
+
+    assert _numeros(r.ruta) == ["1 / 2", "2 / 2"]
+
+
+def test_volver_a_aplicar_un_estilo_no_duplica_el_logo_ni_el_pie(
+        carpeta, presentacion_con_estilo, logo):
+    antes = _formas_de_estilo(presentacion_con_estilo)
+    r = documentos.editar_documento(presentacion_con_estilo, estilo={
+        "fuente": "Georgia", "logo": logo, "pie": "Agro SAS · Interno", "numeracion": True},
+        carpeta=carpeta)
+
+    assert _formas_de_estilo(r.ruta) == antes                     # ni una forma de más
+    from pptx import Presentation
+    pies = [s.text_frame.text for slide in Presentation(r.ruta).slides for s in slide.shapes
+            if str(s.name) == documentos._MARCA_ESTILO + "pie"]
+    assert pies == ["Agro SAS · Interno"] * 3          # y el pie nuevo reemplazó al viejo
+
+
+# ---------------------------------------------------------------- Excel: combinadas y condicionales
+
+def test_insertar_filas_corre_las_combinadas_y_extiende_el_formato_condicional(tmp_path):
+    from openpyxl import Workbook, load_workbook
+    from openpyxl.formatting.rule import CellIsRule
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Caja"
+    ws.append(["Concepto", "Valor"])
+    ws.append(["Uno", 100])
+    ws.append(["Dos", 200])
+    ws.append(["Total", "=SUM(B2:B3)"])
+    ws.merge_cells("A6:B6")
+    ws["A6"] = "Nota al pie de la tabla"
+    ws.conditional_formatting.add("B2:B3", CellIsRule(operator="greaterThan", formula=["150"]))
+    origen = tmp_path / "caja.xlsx"
+    wb.save(str(origen))
+
+    documentos.editar_documento(str(origen), {"agregar": {"Caja": [["Tres", "300"]]}},
+                                en_sitio=True)
+    ws = load_workbook(str(origen))["Caja"]
+
+    assert [c.value for c in ws[4]] == ["Tres", 300]          # entró antes del total...
+    assert ws["B5"].value == "=SUM(B2:B4)"                     # ...que ahora la suma
+    assert "A7:B7" in [str(r) for r in ws.merged_cells.ranges]  # la nota se corrió
+    assert [str(f.cells) for f in ws.conditional_formatting] == ["B2:B4"]   # y la regla la abarca
+
+
+def test_la_fila_de_totales_se_encuentra_aunque_haya_una_nota_debajo(tmp_path):
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["Concepto", "Valor"])
+    ws.append(["Uno", 100])
+    ws.append(["Total", "=SUM(B2:B2)"])
+    ws.append([None, None])
+    ws.append(["Nota", None])
+
+    assert documentos._fila_de_totales(ws) == 3
+
+
+def test_una_tabla_sin_totales_no_inventa_una_fila_de_totales(tmp_path):
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["Concepto", "Valor"])
+    for i in range(10):
+        ws.append([f"Fila {i}", i])
+
+    assert documentos._fila_de_totales(ws) is None
+
+
+# ---------------------------------------------------------------- el registro
+
+def test_document_edit_expone_estilo_y_ya_no_exige_cambios():
+    from agents.tool_registry import get_tool
+
+    tool = get_tool("document_edit")
+    assert "estilo" in tool.parameters_schema["properties"]
+    assert tool.parameters_schema["required"] == ["ruta"]
+    assert "ASPECTO" in tool.description
+
+
+def test_quitar_una_y_agregar_otra_renumera_aunque_el_total_no_cambie(carpeta, presentacion_con_estilo):
+    from pptx import Presentation
+
+    # Quitar la primera y agregar una al final deja tres diapositivas, como antes, pero
+    # todas corridas: los números tienen que rehacerse igual.
+    r = documentos.editar_documento(presentacion_con_estilo, {
+        "quitar": ["Resultados"],
+        "agregar": [{"titulo": "Tres", "texto": "Contenido tres."}]}, carpeta=carpeta)
+    prs = Presentation(r.ruta)
+
+    assert [s.shapes.title.text for s in prs.slides] == ["Uno", "Dos", "Tres"]
+    assert _numeros(r.ruta) == ["1 / 3", "2 / 3", "3 / 3"]
