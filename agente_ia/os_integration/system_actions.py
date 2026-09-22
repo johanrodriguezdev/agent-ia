@@ -24,47 +24,41 @@ APP_COMMANDS = {
 }
 
 def open_notepad() -> str:
-    """Abre el Bloc de Notas de Windows."""
-    try:
-        subprocess.Popen("notepad.exe")
-        return "Bloc de notas abierto."
-    except Exception as e:
-        return f"No pude abrir el Bloc de Notas: {e}"
+    """Abre el editor de texto simple del sistema."""
+    from os_integration import plataforma
+
+    return plataforma.abrir_aplicacion("bloc de notas") or \
+        "No encontré un editor de texto para abrir."
 
 def open_file_explorer(path: str = "") -> str:
-    """Abre el Explorador de Windows, opcionalmente en una carpeta específica."""
-    try:
-        if path and os.path.exists(path):
-            subprocess.Popen(f'explorer.exe "{path}"')
-            return f"Explorador de archivos abierto en: {path}"
-        else:
-            subprocess.Popen("explorer.exe")
-            return "Explorador de archivos abierto."
-    except Exception as e:
-        return f"No pude abrir el Explorador: {e}"
+    """Abre el explorador de archivos, opcionalmente en una carpeta específica.
+
+    El «cómo» —`explorer.exe` o `xdg-open`— vive en `os_integration/plataforma` (REQ-068).
+    """
+    from os_integration import plataforma
+
+    return plataforma.abrir_carpeta(path)
 
 def open_app_by_name(app_name: str) -> str:
-    """Busca la aplicación en el mapa de comandos conocidos y la ejecuta."""
-    name_lower = app_name.lower().strip()
-    
-    # Búsqueda directa en el diccionario
-    cmd = APP_COMMANDS.get(name_lower)
-    
-    # Búsqueda parcial (si no hay coincidencia exacta)
-    if not cmd:
-        for key, val in APP_COMMANDS.items():
-            if name_lower in key or key in name_lower:
-                cmd = val
-                break
-    
-    if cmd:
-        try:
-            subprocess.Popen(cmd)
-            return f"Aplicación '{app_name}' iniciada correctamente."
-        except Exception as e:
-            return f"Error al iniciar '{app_name}': {e}"
-    
-    # Si no está en el mapa, intentar abrir con el menú de inicio de Windows
+    """Abre una aplicación por su nombre corriente.
+
+    Primero el catálogo de la plataforma (REQ-068); si no la conoce, se cae al buscador
+    del escritorio, que en Windows es el menú de inicio. Ese último recurso es de Windows
+    a propósito: teclear en el menú de inicio no tiene un equivalente único en Linux
+    —cada escritorio abre su buscador con una tecla distinta— y fingir que sí lo tiene
+    sería peor que decir que no se encontró.
+    """
+    from os_integration import plataforma
+
+    resultado = plataforma.abrir_aplicacion(app_name)
+    if resultado:
+        return resultado
+
+    if os.name != "nt":
+        return (f"No encontré '{app_name}' instalado. Decime el nombre del comando y lo "
+                f"abro.")
+
+    # Windows: último recurso, el menú de inicio.
     try:
         pyautogui.hotkey('win')
         time.sleep(0.8)

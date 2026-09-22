@@ -1,0 +1,108 @@
+# Los tests, en los dos sistemas — REQ-068
+#
+# Por qué existe: el proyecto se desarrolla en Windows, así que romper Linux no duele
+# —nadie se entera— hasta que alguien clona el repositorio allá y nada arranca. Este
+# workflow corre la misma suite en Ubuntu y en Windows en cada push, y es lo único que
+# mantiene vivo el soporte de Linux sin tener un Linux delante.
+#
+# Lo que NO cubre, y conviene saberlo: en el runner no hay pantalla, ni micrófono, ni
+# sesión gráfica. Los tests que necesitan eso se saltan solos (`tests/conftest.py`), así
+# que un verde acá significa «el código es sano en los dos sistemas», no «la ventana abre
+# en Linux». Eso sigue siendo prueba manual.
+
+name: tests
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  suite:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false        # que un sistema falle no debe ocultar el estado del otro
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      # Lo que en Windows ya viene con el sistema y en Linux hay que instalar: el audio
+      # para PyAudio, ffmpeg para la voz, Tesseract para el OCR y las bibliotecas de Qt
+      # para que PyQt6 importe sin pantalla.
+      - name: Dependencias del sistema (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            portaudio19-dev ffmpeg tesseract-ocr tesseract-ocr-spa \
+            libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 \
+            libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
+            libxcb-shape0 libxcb-xinerama0 libdbus-1-3 libxtst6 libxkbfile1
+
+      - name: Dependencias de Python
+        run: |
+          python -m pip install --upgrade pip
+          pip install --index-url https://download.pytorch.org/whl/cpu torch
+          pip install -r agente_ia/requirements.txt
+
+      # Sin pantalla, Qt necesita que se le diga que no la busque; si no, el import muere.
+      - name: Suite
+        working-directory: agente_ia
+        env:
+          QT_QPA_PLATFORM: offscreen
+          PYTEST_QT_API: pyqt6
+        run: python -m pytest tests/ -q --tb=short
+
+  instalador-linux:
+    name: la imagen de Docker se construye
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      # Construir la imagen es lo que prueba que el instalador de Linux sigue sirviendo:
+      # que las dependencias del sistema resuelven, que PyAudio compila y que nada del
+      # Dockerfile se quedó apuntando a un paquete que ya no existe.
+      - name: Construir
+        run: docker build -f agente_ia/docker/Dockerfile -t orion:linux agente_ia
+
+      # Y que arranque de verdad: que los módulos importen, incluido QtWebEngine, que es
+      # la ventana entera del agente y el que más dependencias del sistema necesita.
+      - name: Que lo de adentro funcione
+        run: |
+          docker run --rm --entrypoint bash orion:linux -lc '
+            python - <<PY
+          import sys
+          faltan = []
+          for m in ("PyQt6.QtWidgets","PyQt6.QtWebEngineWidgets","docx","openpyxl","pptx",
+                    "fitz","pyaudio","torch","ptyprocess","edge_tts","openai","sklearn"):
+              try:
+                  __import__(m)
+              except Exception as e:
+                  faltan.append(f"{m}: {type(e).__name__}")
+          for m in ("uiautomation","win32com","winsdk","winpty"):
+              try:
+                  __import__(m)
+                  faltan.append(f"{m} NO debería instalarse en Linux")
+              except ImportError:
+                  pass
+          if faltan:
+              print("FALLAN:", *faltan, sep="\\n  ")
+              sys.exit(1)
+          print("los módulos importan y los de solo-Windows no están")
+          PY
+            for b in ffplay soffice tesseract git; do
+              command -v $b >/dev/null || { echo "falta $b"; exit 1; }
+            done
+            echo "los binarios del sistema están"
+          '

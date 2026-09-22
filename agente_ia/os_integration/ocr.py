@@ -37,10 +37,22 @@ logger = logging.getLogger(__name__)
 _LADO_MAXIMO_POR_DEFECTO = 2600
 
 
+def _tesseract() -> Optional[str]:
+    """Return la ruta de Tesseract, el motor de OCR de Linux, o None (REQ-068)."""
+    import shutil
+
+    return shutil.which("tesseract")
+
+
 def disponible() -> bool:
-    """Return True si el motor de OCR de Windows se puede usar desde acá."""
+    """Return True si hay un motor de OCR utilizable en este equipo.
+
+    En Windows es `Windows.Media.Ocr`, que viene con el sistema. Fuera de Windows es
+    Tesseract, que hay que instalar (`apt install tesseract-ocr tesseract-ocr-spa`) y que
+    ya viene en la imagen de Docker del proyecto.
+    """
     if os.name != "nt":
-        return False
+        return _tesseract() is not None
     try:
         from winsdk.windows.media.ocr import OcrEngine  # noqa: F401
 
@@ -51,13 +63,59 @@ def disponible() -> bool:
 
 
 def idiomas() -> List[str]:
-    """Return las etiquetas de idioma que el OCR de Windows tiene instaladas."""
+    """Return las etiquetas de idioma que el motor de OCR tiene instaladas."""
+    if os.name != "nt":
+        return _idiomas_de_tesseract()
     try:
         from winsdk.windows.media.ocr import OcrEngine
 
         return [lang.language_tag for lang in OcrEngine.available_recognizer_languages]
     except Exception:
         return []
+
+
+def _idiomas_de_tesseract() -> List[str]:
+    import subprocess
+
+    binario = _tesseract()
+    if not binario:
+        return []
+    try:
+        salida = subprocess.run([binario, "--list-langs"], capture_output=True,
+                                text=True, timeout=10)
+    except (subprocess.TimeoutExpired, OSError) as e:
+        logger.debug(f"no se pudieron listar los idiomas de Tesseract: {e}")
+        return []
+    # La primera línea es un encabezado («List of available languages...»).
+    return [l.strip() for l in salida.stdout.splitlines()[1:] if l.strip()]
+
+
+def _leer_con_tesseract(ruta: str) -> str:
+    """Return el texto que Tesseract encuentra en una imagen. Es el OCR fuera de Windows.
+
+    Se le pasan los idiomas que tenga instalados, con el español primero si está: el mismo
+    criterio que en Windows, donde el motor usa los idiomas del sistema.
+    """
+    import subprocess
+
+    binario = _tesseract()
+    if not binario:
+        return ""
+    disponibles = _idiomas_de_tesseract()
+    preferidos = [i for i in ("spa", "eng") if i in disponibles] or disponibles[:1]
+    orden = ["-l", "+".join(preferidos)] if preferidos else []
+    try:
+        # `stdout` como destino: así no hay que limpiar un archivo temporal.
+        salida = subprocess.run([binario, ruta, "stdout", *orden],
+                                capture_output=True, text=True, timeout=60)
+    except (subprocess.TimeoutExpired, OSError) as e:
+        logger.warning(f"Tesseract no pudo leer {ruta!r}: {e}")
+        return ""
+    if salida.returncode != 0:
+        logger.warning(f"Tesseract falló ({salida.returncode}): "
+                       f"{(salida.stderr or '').strip()[:150]}")
+        return ""
+    return salida.stdout
 
 
 async def _reconocer(ruta: str) -> List[str]:
@@ -149,6 +207,9 @@ def leer_imagen(ruta: str) -> str:
         return ""
     if not ruta or not os.path.isfile(ruta):
         return ""
+
+    if os.name != "nt":
+        return corregir_cifras(_leer_con_tesseract(ruta)).strip()
 
     preparada = _encoger_si_hace_falta(ruta)
     try:

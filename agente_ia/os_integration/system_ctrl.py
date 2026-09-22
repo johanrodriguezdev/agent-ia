@@ -49,13 +49,9 @@ def shutdown_pc(channel=None) -> str:
     de esos caminos: quedaría sin confirmación. El parámetro `channel` se conserva por
     compatibilidad de firma con los callers actuales.
     """
-    try:
-        os.system("shutdown /s /t 5")
-        logger.warning("Apagado del sistema iniciado por el usuario")
-        return "Atención: El sistema se apagará en 5 segundos. Guarda tus archivos."
-    except Exception as e:
-        logger.error(f"No se pudo invocar el apagado: {e}")
-        return "No se pudo invocar el apagado."
+    from os_integration import plataforma
+
+    return plataforma.apagar(5)
 
 def close_app(app_name: str, channel=None) -> str:
     """Cerrar una aplicación por nombre.
@@ -67,49 +63,11 @@ def close_app(app_name: str, channel=None) -> str:
     quedaría sin confirmación. El parámetro `channel` se conserva por compatibilidad de
     firma con los callers actuales.
     """
-    import subprocess
+    from os_integration import plataforma
+
     if not app_name:
         return f"No me indicó qué programa cerrar{vocative()}."
-    app_aliases = {
-        "chrome": "chrome.exe", "google chrome": "chrome.exe",
-        "firefox": "firefox.exe", "mozilla": "firefox.exe",
-        "edge": "msedge.exe", "microsoft edge": "msedge.exe",
-        "word": "WINWORD.EXE", "excel": "EXCEL.EXE",
-        "powerpoint": "POWERPNT.EXE", "outlook": "OUTLOOK.EXE",
-        "teams": "Teams.exe", "discord": "Discord.exe",
-        "spotify": "Spotify.exe", "telegram": "Telegram.exe",
-        "whatsapp": "WhatsApp.exe", "steam": "steam.exe",
-        "epic games": "EpicGamesLauncher.exe",
-        "notepad": "notepad.exe", "bloc de notas": "notepad.exe",
-        "explorador": "explorer.exe", "explorer": "explorer.exe",
-        "vscode": "Code.exe", "visual studio code": "Code.exe",
-        "visual studio": "devenv.exe",
-        "calculadora": "CalculatorApp.exe",
-        "obs": "obs64.exe", "obs studio": "obs64.exe",
-        "vlc": "vlc.exe", "brave": "brave.exe", "opera": "opera.exe",
-    }
-    app_lower = app_name.lower().strip()
-    process_name = app_aliases.get(app_lower, None)
-    if not process_name:
-        process_name = app_lower if app_lower.endswith(".exe") else f"{app_lower}.exe"
-    try:
-        check = subprocess.run(
-            ["tasklist", "/FI", f"IMAGENAME eq {process_name}"],
-            capture_output=True, text=True, timeout=5
-        )
-        if process_name.lower() not in check.stdout.lower():
-            return f"El programa '{app_name}' no parece estar ejecutándose{vocative()}."
-        result = subprocess.run(
-            ["taskkill", "/IM", process_name, "/F"],
-            capture_output=True, text=True, timeout=10
-        )
-        if result.returncode == 0:
-            logger.info(f"Programa '{app_name}' cerrado por el usuario")
-            return f"Programa '{app_name}' cerrado exitosamente{vocative()}."
-        else:
-            return f"No pude cerrar '{app_name}': {result.stderr.strip()}"
-    except subprocess.TimeoutExpired:
-        return f"El intento de cerrar '{app_name}' tardó demasiado."
-    except Exception as e:
-        logger.error(f"Error al cerrar '{app_name}': {e}")
-        return f"Error al intentar cerrar '{app_name}': {str(e)[:60]}"
+    # El «cómo» —taskkill o pkill, y con qué nombre se llama cada programa— vive en
+    # `os_integration/plataforma`. Acá queda lo que no depende del sistema: el trato al
+    # usuario y el invariante de seguridad de arriba.
+    return plataforma.cerrar_aplicacion(app_name) + vocative() + "."
