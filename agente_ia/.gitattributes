@@ -1,0 +1,30 @@
+# Finales de línea — REQ-067
+#
+# Este repositorio se trabaja en Windows, donde git convierte a CRLF al sacar los archivos.
+# Para un .py o un .md da igual; para un script de shell no: un `#!/usr/bin/env bash` que
+# termina en CRLF falla en Linux con «bad interpreter: No such file or directory», y el
+# mensaje no menciona los finales de línea por ningún lado. Lo mismo vale para lo que se
+# copia dentro de una imagen de Docker.
+#
+# Por defecto, que git decida.
+* text=auto
+
+# Estos SIEMPRE con LF, se trabajen donde se trabajen.
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.dockerfile text eol=lf
+docker/** text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Binarios: que git no los toque.
+*.png binary
+*.jpg binary
+*.ico binary
+*.pdf binary
+*.docx binary
+*.xlsx binary
+*.pptx binary
+*.db binary
+*.pkl binary
+*.thmx binary

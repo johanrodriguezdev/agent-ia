@@ -1237,7 +1237,7 @@ def crear_documento(nombre: str, contenido: Any, plantilla: Optional[str] = None
             if _con_office("Word", str(intermedio), str(pdf_temporal)):
                 os.replace(str(pdf_temporal), str(ruta))
                 return Resultado(ruta=str(ruta), formato="pdf",
-                                 detalle=resultado.detalle + ", convertido con Word",
+                                 detalle=resultado.detalle + f", convertido con {conversor_de('Word')}",
                                  avisos=resultado.avisos)
         avisos = list(resultado.avisos)
         if ruta_plantilla:
@@ -1970,7 +1970,7 @@ def crear_hoja(nombre: str, contenido: Any, plantilla: Optional[str] = None,
             if _con_office("Excel", resultado.ruta, str(pdf_temporal)):
                 os.replace(str(pdf_temporal), str(ruta))
                 return Resultado(ruta=str(ruta), formato="pdf",
-                                 detalle=resultado.detalle + "; convertido con Excel",
+                                 detalle=resultado.detalle + f"; convertido con {conversor_de('Excel')}",
                                  avisos=resultado.avisos)
             html, avisos = _html_de_hoja(Path(resultado.ruta))
             _pdf_apaisado_sin_office(html, ruta)
@@ -2571,7 +2571,7 @@ def crear_presentacion(nombre: str, contenido: Any, plantilla: Optional[str] = N
         if _con_office("PowerPoint", str(intermedio), str(pdf_temporal)):
             os.replace(str(pdf_temporal), str(ruta))
             return Resultado(ruta=str(ruta), formato="pdf",
-                             detalle=resultado.detalle + ", convertido con PowerPoint",
+                             detalle=resultado.detalle + f", convertido con {conversor_de('PowerPoint')}",
                              avisos=resultado.avisos)
 
     # Sin PowerPoint: cada diapositiva es una página apaisada con su título, sus puntos, su
@@ -2611,14 +2611,66 @@ def crear_archivo(nombre: str, contenido: Any, carpeta: Optional[str] = None) ->
 
 # ======================================================================= PDF con Office
 
+def conversor_de(aplicacion: str) -> str:
+    """Return el nombre de quien convierte a PDF acá: Office en Windows, LibreOffice fuera.
+
+    El resultado se lo dice el agente al usuario, así que tiene que ser cierto: en Linux
+    decir «convertido con Word» es mentira, y una mentira que importa el día que el PDF
+    sale distinto de lo esperado y hay que entender por qué.
+    """
+    return aplicacion if os.name == "nt" else "LibreOffice"
+
+
+def _con_libreoffice(origen: str, destino_pdf: str) -> bool:
+    """Convierte a PDF con LibreOffice. Return si pudo. Es el Office de Linux (REQ-067).
+
+    Fuera de Windows no hay COM, y sin esto un .docx se maquetaba a mano con PyMuPDF: el
+    contenido está, pero la plantilla del usuario —su membrete, sus estilos, su tema— no
+    sobrevive, que es justamente lo que REQ-040 fue a resolver. LibreOffice abre el mismo
+    archivo y lo exporta, así que el PDF se parece al documento.
+
+    Se usa un perfil propio y descartable: si el usuario tiene LibreOffice abierto, una
+    segunda instancia con el perfil de siempre se cuelga esperando a la primera.
+    """
+    import shutil
+    import subprocess
+
+    binario = shutil.which("soffice") or shutil.which("libreoffice")
+    if not binario:
+        return False
+    salida = os.path.dirname(destino_pdf) or "."
+    with tempfile.TemporaryDirectory() as perfil:
+        try:
+            proceso = subprocess.run(
+                [binario, "--headless", "--norestore",
+                 f"-env:UserInstallation=file://{perfil}",
+                 "--convert-to", "pdf", "--outdir", salida, origen],
+                capture_output=True, timeout=120, check=False,
+            )
+        except (subprocess.TimeoutExpired, OSError) as e:
+            logger.warning(f"LibreOffice no pudo convertir «{os.path.basename(origen)}»: {e}")
+            return False
+    if proceso.returncode != 0:
+        logger.warning(f"LibreOffice falló ({proceso.returncode}): "
+                       f"{proceso.stderr.decode('utf-8', 'replace')[:200]}")
+        return False
+    # LibreOffice nombra la salida por el archivo de origen, no por el destino pedido.
+    producido = os.path.join(salida, os.path.splitext(os.path.basename(origen))[0] + ".pdf")
+    if producido != destino_pdf and os.path.isfile(producido):
+        os.replace(producido, destino_pdf)
+    return os.path.isfile(destino_pdf)
+
+
 def _con_office(aplicacion: str, origen: str, destino_pdf: str) -> bool:
     """Convierte con Word, Excel o PowerPoint en una instancia propia e invisible. Return si pudo.
 
     Instancia propia (`DispatchEx`) y no la que el usuario tenga abierta: cerrar la nuestra
     al terminar no puede llevarse la suya, ni su documento a medio escribir.
+
+    Fuera de Windows no hay COM, y el lugar de Office lo ocupa LibreOffice.
     """
     if os.name != "nt":
-        return False
+        return _con_libreoffice(origen, destino_pdf)
     try:
         import pythoncom
         import win32com.client
@@ -2673,7 +2725,8 @@ def convertir_a_pdf(ruta: str, carpeta: Optional[str] = None) -> Resultado:
     destino = carpeta_de_salida(carpeta) if carpeta else origen.parent
     salida = ruta_libre(destino, origen.stem + ".pdf")
     if _con_office(aplicacion, str(origen), str(salida)):
-        return Resultado(ruta=str(salida), formato="pdf", detalle=f"convertido con {aplicacion}")
+        return Resultado(ruta=str(salida), formato="pdf",
+                         detalle=f"convertido con {conversor_de(aplicacion)}")
     if aplicacion == "Excel":
         html, avisos = _html_de_hoja(origen)
         _pdf_apaisado_sin_office(html, salida)

@@ -1,0 +1,37 @@
+=== O.R.I.O.N. en Linux — verificación dentro de la imagen ===
+-- binarios
+   ffplay     OK
+   soffice    OK
+   tesseract  OK
+   git        OK
+   scrot      OK
+   xdg-open   OK
+   bash       OK
+-- modulos de Python (en shell de login, que es el caso dificil)
+   OK    PyQt6.QtWidgets
+   OK    PyQt6.QtWebEngineWidgets
+   OK    docx
+   OK    openpyxl
+   OK    pptx
+warning: The `fitz` API is deprecated and will be removed in future. Use `import pymupdf` instead.
+   OK    fitz
+   OK    pyaudio
+   OK    torch
+   OK    ptyprocess
+   OK    edge_tts
+   OK    openai
+   OK    sklearn
+   OK    sentence_transformers
+-- paquetes de solo-Windows: NO deben estar
+   OK    uiautomation ausente
+   OK    win32com ausente
+   OK    winsdk ausente
+   OK    winpty ausente
+-- identidad del proyecto dentro de la imagen, estado del usuario fuera
+   IDENTITY.md  presente
+   SOUL.md      presente
+   config.json  ausente (OK)
+   .env         ausente (OK)
+   memory.db    ausente (OK)
+-- terminal: que shell usaria el agente
+   ES_WINDOWS = False

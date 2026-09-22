@@ -1,0 +1,53 @@
+# Lo que NO entra a la imagen. Todo esto o pesa, o es estado de una máquina, o es un
+# secreto que jamás debe quedar horneado dentro de una imagen que se puede distribuir.
+
+# Secretos y estado local
+.env
+config.json
+authorized_users.json
+security_overrides.json
+mcp_allowlist.json
+mcp_variables.json
+users_data/
+USER.md
+MEMORY.md
+MEMORY.md.bak
+# IDENTITY.md y SOUL.md NO se excluyen: son del proyecto (están versionados) y le dan al
+# agente su carácter. Sin ellos adentro, el agente del contenedor no es el mismo agente.
+
+# Bases de datos: van en volúmenes, no dentro de la imagen
+*.db
+*.db-journal
+*.db-wal
+*.db.bak*
+
+# Entornos y cachés
+.venv/
+venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+
+# Logs
+logs/
+*.log
+output.txt
+
+# Material de referencia (444 MB, no es parte del producto)
+openclaw-main/
+
+# Historia y herramientas de desarrollo
+.git/
+.github/
+.claude/
+.vscode/
+.idea/
+
+# Evidencia del pipeline de REQs: se versiona en git, pero no hace falta en la imagen
+workspace/
+
+# Modelos entrenados: se regeneran en el primer arranque
+intent/saved_model.pkl

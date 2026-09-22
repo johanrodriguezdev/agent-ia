@@ -1,0 +1,28 @@
+Herramientas registradas: 68
+
+[— sin dependencia de Windows —]  (41)
+   chat_project_assign_current, chat_project_create, chat_project_list, file_delete, file_edit, file_list, file_move, file_read, file_search, file_write, git_diff, git_log, git_status, http_request, image_look, intent_cancel, intent_create, intent_list, mcp_add_server, mcp_allow_tools, mcp_list_servers, mcp_probe_server, mcp_remove_server, mcp_set_server_enabled, pc_key, pc_look, pc_screenshot, project_output, project_start, project_stop, project_tree, research, task_complete, task_complete_all, task_create, task_list, web_read, web_search, wikipedia_search, workspace_add_folder, workspace_remove_folder
+
+[documentos]  (8)
+   chat_export_current, document_create, document_edit, document_inspect, document_to_pdf, file_create, presentation_create, spreadsheet_create
+
+[navegador]  (7)
+   browser_act, browser_open, browser_page, browser_tab_close, browser_tab_switch, browser_tabs, browser_text
+
+[ocr]  (1)
+   pc_read
+
+[pc_controller]  (2)
+   pc_click, pc_type
+
+[terminal_session]  (3)
+   connection_map, terminal_read_output, terminal_run_command
+
+[ui_tree]  (3)
+   pc_act, pc_enable_tree, pc_find
+
+[workspace_run]  (3)
+   code_index, code_search, project_run
+
+RESUMEN: 27 de 68 herramientas tocan un módulo de Windows.
+Afectadas: browser_act, browser_open, browser_page, browser_tab_close, browser_tab_switch, browser_tabs, browser_text, chat_export_current, code_index, code_search, connection_map, document_create, document_edit, document_inspect, document_to_pdf, file_create, pc_act, pc_click, pc_enable_tree, pc_find, pc_read, pc_type, presentation_create, project_run, spreadsheet_create, terminal_read_output, terminal_run_command

@@ -65,14 +65,21 @@ logger = logging.getLogger(__name__)
 
 #: Navegadores que se reconocen, por el texto que ponen en el título de su ventana, y dónde
 #: buscarlos. El orden importa: se prefiere el primero que esté instalado.
+#:
+#: Las entradas sin barras son nombres de ejecutable y se buscan en el PATH: así el mismo
+#: catálogo sirve en Linux, donde Chrome es `google-chrome` y no una ruta de Program Files
+#: (REQ-067). Ahí solo vale para **abrir** el navegador: leer la página necesita UI
+#: Automation, que no existe fuera de Windows, y `disponible()` lo dice.
 NAVEGADORES = (
     ("Google Chrome", (
         r"C:\Program Files\Google\Chrome\Application\chrome.exe",
         r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        "google-chrome", "google-chrome-stable", "chromium", "chromium-browser",
     )),
     ("Microsoft Edge", (
         r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
         r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        "microsoft-edge", "microsoft-edge-stable",
     )),
     # Firefox NO está probado: no está instalado en esta máquina, así que nada de lo de
     # acá abajo se midió contra él. Publica su interfaz por otro camino (IAccessible2, que
@@ -82,6 +89,7 @@ NAVEGADORES = (
     ("Mozilla Firefox", (
         r"C:\Program Files\Mozilla Firefox\firefox.exe",
         r"C:\Program Files (x86)\Mozilla Firefox\firefox.exe",
+        "firefox",
     )),
 )
 
@@ -189,13 +197,24 @@ def ventanas_de_navegador() -> List[Tuple[int, str, str]]:
 
 
 def ruta_del_navegador(nombre: Optional[str] = None) -> Optional[Tuple[str, str]]:
-    """Return `(nombre, ruta)` del primer navegador instalado, o None."""
+    """Return `(nombre, ruta)` del primer navegador instalado, o None.
+
+    Una entrada sin separadores es un nombre de ejecutable y se busca en el PATH, que es
+    como se encuentran los programas en Linux (REQ-067).
+    """
+    import shutil
+
     for candidato, rutas in NAVEGADORES:
         if nombre and candidato != nombre:
             continue
         for ruta in rutas:
-            if os.path.exists(ruta):
-                return candidato, ruta
+            if "\\" in ruta or "/" in ruta:
+                if os.path.exists(ruta):
+                    return candidato, ruta
+                continue
+            encontrado = shutil.which(ruta)
+            if encontrado:
+                return candidato, encontrado
     return None
 
 

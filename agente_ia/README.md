@@ -1,6 +1,7 @@
 # O.R.I.O.N.
 
-Asistente personal de escritorio para Windows. Escucha por voz, responde por voz, y ejecuta
+Asistente personal de escritorio para Windows (y en Linux por Docker, con alcance acotado:
+ver «En Linux» más abajo). Escucha por voz, responde por voz, y ejecuta
 acciones reales en el sistema — abrir aplicaciones, buscar archivos, crear recordatorios, consultar
 el estado del equipo. Funciona desde una ventana de escritorio, desde la consola, o a distancia por
 Telegram y Discord.
@@ -13,10 +14,29 @@ dato, lo pregunta en vez de inventárselo.
 ## Requisitos
 
 - **Python 3.12+**
-- **Windows** — el control del sistema (`pyautogui`, `setx`, gestión de procesos) es específico de
-  Windows. El núcleo es portable, pero la integración con el sistema operativo no.
+- **Windows** para la experiencia completa. El control del escritorio —manejar el navegador,
+  pulsar controles de otras aplicaciones, leer texto de la pantalla— está construido sobre
+  **UI Automation**, la API de accesibilidad de Windows, y no tiene equivalente directo fuera
+  de ahí.
 - **FFmpeg en el PATH** — necesario para la síntesis y el reconocimiento de voz.
 - **Micrófono** — solo para los modos de voz. El modo texto no lo necesita.
+
+### En Linux
+
+Hay una instalación por Docker en [`docker/`](docker/): la aplicación de escritorio completa
+—ventana, voz, terminal y documentos— en un contenedor que toma prestada la pantalla del
+equipo.
+
+```bash
+cd docker && ./orion.sh --construir && ./orion.sh
+```
+
+Funciona el chat, la memoria, los archivos, git, la investigación en la web, las tareas, los
+bots, los servidores MCP, la voz, la terminal embebida (con tu `$SHELL`, no PowerShell) y la
+creación de documentos —el PDF fiel lo hace LibreOffice en vez de Office—. **No** funciona el
+control del navegador ni del resto de aplicaciones, ni el OCR de pantalla: son las once
+herramientas atadas a UI Automation. `docker/README.md` las lista una por una y explica la
+trampa de Wayland.
 
 ## Instalación
 

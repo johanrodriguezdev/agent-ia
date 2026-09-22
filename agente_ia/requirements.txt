@@ -104,7 +104,9 @@ pillow
 # UI Automation: el sistema ya sabe donde esta cada boton y como se llama. Da coordenadas
 # EXACTAS en milisegundos, sin gastar una llamada al modelo ni adivinar sobre una imagen.
 # No todas las apps lo exponen (Electron suele no hacerlo); ahi se cae a la vision.
-uiautomation
+# Solo Windows: depende de `comtypes`, que es COM y no existe fuera de Windows. Sin este
+# marcador, `pip install -r requirements.txt` falla entero en Linux (REQ-067).
+uiautomation; sys_platform == "win32"
 
 # --- Terminal embebida ---
 # La pseudo-consola real del sistema: ConPTY en Windows, PTY en Linux/macOS. Con tuberias

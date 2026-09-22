@@ -1,0 +1,61 @@
+# O.R.I.O.N. en Linux — escritorio dentro de un contenedor (REQ-067)
+#
+# Se levanta con `docker/orion.sh`, no con `docker compose up` a secas: hay que darle
+# permiso al contenedor para dibujar en tu pantalla (`xhost`) y averiguar tu UID, y eso
+# lo hace el lanzador.
+
+services:
+  orion:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        # Para que los archivos que cree el agente sean tuyos y no de root.
+        UID: "${ORION_UID:-1000}"
+        GID: "${ORION_GID:-1000}"
+    image: orion:linux
+    container_name: orion
+
+    environment:
+      # --- La pantalla del equipo
+      DISPLAY: "${DISPLAY}"
+      XDG_RUNTIME_DIR: "/run/user/${ORION_UID:-1000}"
+      # --- Audio por PulseAudio/PipeWire
+      PULSE_SERVER: "unix:/run/user/${ORION_UID:-1000}/pulse/native"
+      # --- Qt: plataforma y escalado
+      QT_QPA_PLATFORM: "xcb"
+      QT_AUTO_SCREEN_SCALE_FACTOR: "1"
+      QTWEBENGINE_DISABLE_SANDBOX: "1"
+
+    volumes:
+      # --- Pantalla: el socket X11 del equipo
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - "${XAUTHORITY:-/dev/null}:/home/orion/.Xauthority:ro"
+      # --- Audio: el socket de PulseAudio/PipeWire del usuario
+      - "/run/user/${ORION_UID:-1000}/pulse:/run/user/${ORION_UID:-1000}/pulse:ro"
+      # --- Estado: configuración, claves, memoria, tareas y logs. Esto es lo que
+      #     sobrevive a reconstruir la imagen.
+      - ./datos:/datos
+      # --- Tus archivos. El agente crea documentos en el Escritorio y lee los que le
+      #     pidas; si esto no se monta, los escribe adentro del contenedor y se pierden.
+      #     Montar la carpeta personal entera es lo que más se parece a Windows; si
+      #     preferís acotarlo, cambiá el origen por una sola carpeta (ej. ~/Documentos).
+      - "${HOME}:/home/orion:rw"
+
+    # El micrófono (para la voz) y la tarjeta de sonido.
+    devices:
+      - "/dev/snd:/dev/snd"
+
+    # La aplicación es una ventana en tu sesión, no un servicio en su propia red: con la
+    # red del equipo, X11 y los bots funcionan sin abrir ni mapear un solo puerto.
+    network_mode: host
+
+    # Sin esto, QtWebEngine (Chromium) no arranca: necesita crear espacios de nombres de
+    # usuario para su propio aislamiento interno.
+    security_opt:
+      - seccomp:unconfined
+
+    # Que Ctrl+C cierre de verdad, y que la app reciba la señal.
+    init: true
+    stdin_open: true
+    tty: true

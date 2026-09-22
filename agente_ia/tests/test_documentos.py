@@ -1377,3 +1377,135 @@ def test_quitar_una_y_agregar_otra_renumera_aunque_el_total_no_cambie(carpeta, p
 
     assert [s.shapes.title.text for s in prs.slides] == ["Uno", "Dos", "Tres"]
     assert _numeros(r.ruta) == ["1 / 3", "2 / 3", "3 / 3"]
+
+
+# =============================================================================== REQ-067
+# Que el proyecto siga siendo instalable en Linux. Estos tests corren en Windows y lo que
+# protegen es justamente lo que un Windows no avisa: que el paquete solo-Windows tenga su
+# marcador, que el PDF tenga un camino fuera de Office, y que el instalador no se rompa por
+# un final de línea.
+
+
+def _raiz():
+    return Path(documentos.__file__).resolve().parent.parent
+
+
+def test_las_dependencias_solo_de_windows_llevan_su_marcador():
+    """Sin el marcador, `pip install -r requirements.txt` falla ENTERO en Linux."""
+    requisitos = (_raiz() / "requirements.txt").read_text(encoding="utf-8")
+    solo_windows = ("uiautomation", "pywinpty", "winsdk")
+
+    for paquete in solo_windows:
+        linea = next((l.strip() for l in requisitos.splitlines()
+                      if l.strip().startswith(paquete)), None)
+        assert linea, f"{paquete} no está en requirements.txt"
+        assert 'sys_platform == "win32"' in linea, (
+            f"«{linea}» instalaría {paquete} en Linux, donde no existe")
+
+
+def test_los_scripts_del_instalador_no_llevan_finales_de_linea_de_windows():
+    """Un .sh con CRLF falla en Linux con «bad interpreter», sin decir por qué."""
+    for relativo in ("docker/entrypoint.sh", "docker/orion.sh"):
+        archivo = _raiz() / relativo
+        assert archivo.is_file(), f"falta {relativo}"
+        crudo = archivo.read_bytes()
+        assert b"\r\n" not in crudo, f"{relativo} tiene CRLF y no va a arrancar en Linux"
+        assert crudo.startswith(b"#!"), f"{relativo} no empieza con shebang"
+
+
+def test_el_gitattributes_fija_los_finales_de_linea_de_los_scripts():
+    contenido = (_raiz() / ".gitattributes").read_text(encoding="utf-8")
+    assert "*.sh text eol=lf" in contenido
+
+
+def test_el_dockerignore_deja_fuera_las_claves_y_el_estado():
+    """Una imagen puede terminar distribuida: la clave de API no puede ir adentro."""
+    contenido = (_raiz() / ".dockerignore").read_text(encoding="utf-8")
+    for secreto in (".env", "config.json", "*.db", "users_data/", "authorized_users.json"):
+        assert secreto in contenido, f"{secreto} podría quedar horneado en la imagen"
+
+
+def test_fuera_de_windows_el_pdf_pasa_por_libreoffice(monkeypatch):
+    """`_con_office` es el único camino al PDF fiel; fuera de Windows tiene que delegar."""
+    llamadas = []
+    monkeypatch.setattr(documentos.os, "name", "posix")
+    monkeypatch.setattr(documentos, "_con_libreoffice",
+                        lambda origen, destino: llamadas.append((origen, destino)) or True)
+
+    assert documentos._con_office("Word", "/tmp/a.docx", "/tmp/a.pdf") is True
+    assert llamadas == [("/tmp/a.docx", "/tmp/a.pdf")]
+
+
+def test_sin_libreoffice_instalado_se_responde_que_no_y_no_se_revienta(monkeypatch):
+    import shutil as _shutil
+
+    monkeypatch.setattr(_shutil, "which", lambda _nombre: None)
+    assert documentos._con_libreoffice("/tmp/a.docx", "/tmp/a.pdf") is False
+
+
+def test_el_navegador_se_encuentra_por_el_path_como_en_linux(monkeypatch, tmp_path):
+    """En Linux no hay «C:\\Program Files»: el ejecutable se busca en el PATH."""
+    from os_integration import navegador
+
+    falso = tmp_path / "google-chrome"
+    falso.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setattr(navegador, "NAVEGADORES",
+                        (("Google Chrome", (r"C:\no\existe\chrome.exe", "google-chrome")),))
+    monkeypatch.setattr("shutil.which", lambda n: str(falso) if n == "google-chrome" else None)
+
+    assert navegador.ruta_del_navegador() == ("Google Chrome", str(falso))
+
+
+def test_una_ruta_absoluta_que_no_existe_no_se_confunde_con_un_ejecutable(monkeypatch):
+    from os_integration import navegador
+
+    monkeypatch.setattr(navegador, "NAVEGADORES",
+                        (("Fantasma", (r"C:\no\existe\x.exe",)),))
+    monkeypatch.setattr("shutil.which", lambda n: "/usr/bin/lo-que-sea")
+
+    assert navegador.ruta_del_navegador() is None
+
+
+def test_la_identidad_del_proyecto_viaja_dentro_de_la_imagen():
+    """`IDENTITY.md` y `SOUL.md` le dan su carácter al agente y están versionados: si se
+    excluyen de la imagen o se enlazan al volumen del usuario, el agente del contenedor
+    arranca sin personalidad y el síntoma —responde raro— no señala a Docker."""
+    raiz = Path(documentos.__file__).resolve().parent.parent
+    excluidos = (raiz / ".dockerignore").read_text(encoding="utf-8")
+    entrypoint = (raiz / "docker" / "entrypoint.sh").read_text(encoding="utf-8")
+
+    for archivo in ("IDENTITY.md", "SOUL.md"):
+        assert not any(l.strip() == archivo for l in excluidos.splitlines()), \
+            f"{archivo} quedaría fuera de la imagen"
+        assert not any(l.strip() == f"  {archivo}".strip() and not l.startswith("#")
+                       for l in entrypoint.splitlines()), \
+            f"{archivo} se estaría enlazando al volumen del usuario"
+
+    # Y lo que sí es del usuario tiene que seguir yendo al volumen.
+    for archivo in ("USER.md", "MEMORY.md", "config.json"):
+        assert f"  {archivo}" in entrypoint, f"{archivo} no se está persistiendo"
+
+
+def test_el_resultado_dice_quien_convirtio_de_verdad(monkeypatch):
+    """En Linux convierte LibreOffice: decir «convertido con Word» sería mentirle al
+    usuario, y una mentira que importa el día que el PDF sale distinto y hay que entender
+    por qué."""
+    monkeypatch.setattr(documentos.os, "name", "nt")
+    assert documentos.conversor_de("Word") == "Word"
+    assert documentos.conversor_de("PowerPoint") == "PowerPoint"
+
+    monkeypatch.setattr(documentos.os, "name", "posix")
+    for aplicacion in ("Word", "Excel", "PowerPoint"):
+        assert documentos.conversor_de(aplicacion) == "LibreOffice"
+
+
+def test_el_pdf_hecho_fuera_de_windows_se_atribuye_a_libreoffice(carpeta, monkeypatch):
+    # Se simula el resultado de estar fuera de Windows sin tocar `os.name`: cambiarlo de
+    # verdad rompe `pathlib`, que en Windows se niega a construir un PosixPath.
+    monkeypatch.setattr(documentos, "conversor_de", lambda aplicacion: "LibreOffice")
+    monkeypatch.setattr(documentos, "_con_office",
+                        lambda aplicacion, origen, destino: Path(destino).write_bytes(b"%PDF-1.4") or True)
+
+    r = documentos.crear_documento("informe.pdf", _INFORME, carpeta=carpeta)
+    assert "convertido con LibreOffice" in r.detalle
+    assert "Word" not in r.detalle
