@@ -63,6 +63,20 @@ from typing import List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+#: Fuera de Windows no hay UI Automation, y el navegador se maneja por el protocolo del
+#: propio navegador (`navegador_cdp.py`, REQ-069). La elección se hace en la primera línea
+#: de cada función pública y no moviendo el código de Windows: lo que funciona se queda
+#: donde está, y lo nuevo vive al lado. Las funciones internas de este módulo siguen siendo
+#: de UI Automation y no se llaman nunca fuera de Windows.
+_ES_WINDOWS = os.name == "nt"
+
+
+def _cdp():
+    """Return el adaptador del navegador para sistemas sin UI Automation."""
+    from os_integration import navegador_cdp
+
+    return navegador_cdp
+
 #: Navegadores que se reconocen, por el texto que ponen en el título de su ventana, y dónde
 #: buscarlos. El orden importa: se prefiere el primero que esté instalado.
 #:
@@ -609,6 +623,8 @@ def _pestanas_de(hwnd: int) -> List:
 
 def listar_pestanas() -> str:
     """Return qué pestañas hay abiertas, marcando la que está delante."""
+    if not _ES_WINDOWS:
+        return _cdp().listar_pestanas()
     abiertas = ventanas_de_navegador()
     if not abiertas:
         return "No hay ninguna ventana de navegador abierta."
@@ -674,6 +690,8 @@ def cambiar_de_pestana(objetivo: str) -> str:
     foco a lo que el usuario esté haciendo**. Un clic en la barra de pestañas exigiría traer
     la ventana al frente y acertarle a un objetivo de veinte píxeles de alto.
     """
+    if not _ES_WINDOWS:
+        return _cdp().cambiar_de_pestana(objetivo)
     nombre = str(objetivo or "").strip()
     if not nombre:
         return "Necesito el nombre de la pestaña a la que querés cambiar."
@@ -702,6 +720,8 @@ def cambiar_de_pestana(objetivo: str) -> str:
 
 def cerrar_pestana(objetivo: str) -> str:
     """Cierra la pestaña que se llame así. Return qué pasó."""
+    if not _ES_WINDOWS:
+        return _cdp().cerrar_pestana(objetivo)
     nombre = str(objetivo or "").strip()
     if not nombre:
         return "Necesito el nombre de la pestaña que querés cerrar."
@@ -766,6 +786,8 @@ def texto_de_pagina(maximo_caracteres: int = MAX_CARACTERES_DE_TEXTO) -> str:
     Se pide con `TextPattern`, que devuelve el documento entero de una vez. Recorrer los
     nodos de texto uno por uno serían 2.572 viajes a Windows en una página de Wikipedia.
     """
+    if not _ES_WINDOWS:
+        return _cdp().texto_de_pagina(maximo_caracteres)
     ventana = ventana_con_pagina()
     if ventana is None:
         return ("No puedo leer el contenido de ninguna pestaña del navegador. Abrí la página "
@@ -865,6 +887,8 @@ def _esperar_ventana(antes: dict, segundos: float = 15.0) -> Optional[Tuple[int,
 
 def abrir(url: str) -> str:
     """Abre `url` y espera a poder leerla. Return qué pasó, en lenguaje de usuario."""
+    if not _ES_WINDOWS:
+        return _cdp().abrir(url)
     direccion = _normalizar_url(url)
     if not direccion:
         return "Necesito la dirección que querés abrir."
@@ -913,6 +937,8 @@ def abrir(url: str) -> str:
 
 def resumen_de_pagina(maximo: int = 40) -> str:
     """Return lo accionable de la página abierta: enlaces, campos y botones."""
+    if not _ES_WINDOWS:
+        return _cdp().resumen_de_pagina(maximo)
     abiertas = ventanas_de_navegador()
     if not abiertas:
         return "No hay ninguna ventana de navegador abierta."
@@ -1221,6 +1247,8 @@ def accionar(objetivo: str, texto: Optional[str] = None) -> str:
     hay ventana de tiempo entre mirar y pulsar, que es el riesgo que `pc_click` controla
     validando el fotograma. Acá el árbol se lee en el momento del clic.
     """
+    if not _ES_WINDOWS:
+        return _cdp().accionar(objetivo, texto)
     from automation.pc_controller import click_position, type_text
 
     nombre_objetivo = str(objetivo or "").strip()

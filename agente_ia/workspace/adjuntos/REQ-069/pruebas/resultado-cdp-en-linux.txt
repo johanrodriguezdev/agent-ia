@@ -1,0 +1,30 @@
+1. La fachada delega fuera de Windows
+   _ES_WINDOWS = False → debe ser False
+2. ¿Hay con qué manejar un navegador?
+   disponible: True | ('Google Chrome', '/usr/bin/chromium')
+3. Abrir una página (por la fachada, como lo haría el agente)
+   Abrí «http://127.0.0.1:49893/» en el navegador.
+4. Listar las pestañas
+   En el navegador:
+     «Pagina de prueba»  ← la que estás viendo
+     «about:blank»
+5. Leer el texto de la página
+   'Informe trimestral\nLa produccion subio 12,5 % frente al trimestre anterior.\nVer el detalle'
+6. Qué se puede usar en la página
+   «Pagina de prueba» — http://127.0.0.1:49893/
+   3 cosas que se pueden usar:
+     1. [a] Ver el detalle
+     2. [button] Aceptar
+     3. [input] Buscar
+   Para pulsar algo, pedímelo por su número o por su texto.
+7. Pulsar el botón por su texto
+   Pulsé «Aceptar».
+   la página reaccionó: 'boton pulsado' aparece en el texto
+8. Escribir en el campo de búsqueda
+   Escribí «palma de aceite» en «Buscar».
+9. Pedir algo que no existe
+   No encontré «un boton que no existe» en la página. Mirá qué hay con 'browser_pag
+10. Cerrar la pestaña
+   Cerré «Pagina de prueba».
+
+TODO BIEN: el ciclo completo funciona contra un Chromium real.

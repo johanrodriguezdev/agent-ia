@@ -74,6 +74,13 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
     tesseract-ocr tesseract-ocr-spa \
     # --- Control del escritorio (pyautogui necesita scrot) y abrir aplicaciones
     scrot xdg-utils \
+    # --- El navegador que el agente maneja por CDP (REQ-069). En un escritorio Linux de
+    #     verdad el usuario ya tendrá el suyo; dentro del contenedor no hay ninguno, y sin
+    #     esto las siete herramientas `browser_*` no tendrían a qué hablarle.
+    #     `chromium-sandbox` no es opcional: sin él, Chromium se cierra al arrancar con
+    #     «No usable sandbox!». Es lo que el propio error recomienda antes que
+    #     `--no-sandbox`, que apaga una protección de verdad.
+    chromium chromium-sandbox \
     # --- Herramientas que el agente usa de verdad
     git curl ca-certificates \
     # --- Tipografías: sin esto los documentos y la interfaz salen con cuadraditos

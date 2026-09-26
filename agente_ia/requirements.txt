@@ -124,3 +124,9 @@ winsdk; sys_platform == "win32"
 pymupdf
 # Presentaciones de PowerPoint (REQ-040).
 python-pptx
+
+# --- El navegador fuera de Windows (REQ-069) ---
+# CDP (Chrome DevTools Protocol) habla por WebSocket. Solo hace falta para LEER la pagina
+# y pulsar en ella: listar, abrir, activar y cerrar pestanas van por HTTP y funcionan sin
+# esto. En Windows no se usa: ahi manda UI Automation, que lee el Chrome ya abierto.
+websocket-client
