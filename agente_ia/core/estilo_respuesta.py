@@ -120,7 +120,11 @@ def registrar(respuesta: Optional[str], canal: str = "", con_herramientas: bool 
             "herramientas": bool(con_herramientas),
         }
         with _candado:
-            os.makedirs(os.path.dirname(_ARCHIVO), exist_ok=True)
+            carpeta = os.path.dirname(_ARCHIVO)
+            # `makedirs` en cada respuesta es una llamada al sistema por turno para algo
+            # que solo puede hacer falta la primera vez.
+            if not os.path.isdir(carpeta):
+                os.makedirs(carpeta, exist_ok=True)
             with open(_ARCHIVO, "a", encoding="utf-8") as f:
                 f.write(json.dumps(medida, ensure_ascii=False) + "\n")
             _recortar_si_crecio()
@@ -128,12 +132,25 @@ def registrar(respuesta: Optional[str], canal: str = "", con_herramientas: bool 
         logger.debug(f"no se pudo registrar la longitud de la respuesta: {e}")
 
 
+#: Lo que ocupa una medida en el archivo. Medido, no estimado: una línea real ronda los 75
+#: bytes. Sirve para saber si hace falta recortar sin abrir el archivo — `getsize` es una
+#: llamada al sistema; leer 5.000 líneas, no.
+_BYTES_POR_MEDIDA = 75
+
+
 def _recortar_si_crecio() -> None:
-    """Deja el archivo en las últimas `MAX_MEDIDAS` líneas."""
+    """Deja el archivo en las últimas `MAX_MEDIDAS` líneas, si creció de más.
+
+    Se mira primero el **tamaño** del archivo, no su contenido: esto corre después de cada
+    respuesta del agente, y leer medio mega de medidas en cada una para contar líneas sería
+    pagar un precio por una limpieza que hace falta una vez cada mil turnos.
+    """
     try:
+        if os.path.getsize(_ARCHIVO) <= MAX_MEDIDAS * _BYTES_POR_MEDIDA * 1.2:
+            return
         with open(_ARCHIVO, encoding="utf-8") as f:
             lineas = f.readlines()
-        if len(lineas) <= MAX_MEDIDAS * 1.2:        # con margen: no reescribir en cada turno
+        if len(lineas) <= MAX_MEDIDAS:
             return
         with open(_ARCHIVO, "w", encoding="utf-8") as f:
             f.writelines(lineas[-MAX_MEDIDAS:])
