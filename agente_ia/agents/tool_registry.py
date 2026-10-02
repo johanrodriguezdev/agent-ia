@@ -19,6 +19,7 @@ from core.security_manager import (ActionDenied, CHANNEL_ACTION_EXCEPTIONS, Chan
                                    DESKTOP_ONLY_ACTIONS, RiskLevel, format_details,
                                    security_manager)
 from core.address import vocative, vocative_start
+from core.errores import explicar
 
 logger = logging.getLogger(__name__)
 
@@ -830,7 +831,7 @@ def _pc_key_invoke(params: dict) -> str:
         return f"Pulsado: {combo}"
     except Exception as e:
         logger.warning(f"Fallo pulsando '{combo}': {e}")
-        return f"No pude pulsar '{combo}': {e}"
+        return explicar(e, f"pulsar '{combo}'")
 
 
 def _pc_click_invoke(params: dict) -> str:
@@ -1116,7 +1117,7 @@ def _terminal_run_command_invoke(params: dict) -> str:
         salida = sesion.run_command_capture(command)
     except TerminalUnavailable as e:
         logger.error(f"terminal no disponible para '{command}': {e}")
-        return f"No pude usar la terminal: {e}"
+        return explicar(e, "usar la terminal")
 
     if not salida:
         return f"Ejecuté `{command}` en la terminal. No devolvió salida."

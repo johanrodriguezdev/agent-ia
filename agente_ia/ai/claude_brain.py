@@ -6,6 +6,17 @@ from datetime import datetime
 from core import streaming
 from core.address import vocative, vocative_start
 from core.identity import build_identity_block
+
+
+def _contrato_de_economia() -> str:
+    """Return el contrato de economía de la respuesta (REQ-071).
+
+    El mismo que usa el bucle de razonamiento: antes de REQ-068 los dos caminos ya habían
+    divergido una vez y el agente sonaba distinto por Telegram que por voz. Una sola fuente.
+    """
+    from core.estilo_respuesta import bloque_para_el_prompt
+
+    return bloque_para_el_prompt()
 from core.progress import report as progress_report
 
 logger = logging.getLogger(__name__)
@@ -52,6 +63,8 @@ def _build_system_prompt(
 
     base_prompt = f"""Eres {agent_name.upper()}, un asistente de inteligencia artificial de nivel operativo, instalado localmente en el PC del usuario.
 {identity_block}
+
+{_contrato_de_economia()}
 
 REGLAS DE COMPORTAMIENTO:
 - Responde siempre en espanol, de forma concisa y directa.

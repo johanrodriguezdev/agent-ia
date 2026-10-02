@@ -16,6 +16,7 @@ from datetime import datetime
 from typing import Optional
 
 from core.security_manager import security_manager, format_details
+from core.errores import explicar
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ def open_chrome() -> str:
                 return "Google Chrome abierto."
         return "No encontré Chrome en las rutas habituales."
     except Exception as e:
-        return f"Error al abrir Chrome: {e}"
+        return explicar(e, "abrir Chrome")
 
 def write_file_direct(text: str = "", filename: str = "") -> str:
     """Escribe texto directamente a un archivo en el Escritorio usando Python,
@@ -74,7 +75,7 @@ def get_active_window_info() -> str:
             return f"Ventana activa: {active.get('title', active['process'])} ({active['process']})"
         return format_open_windows()
     except Exception as e:
-        return f"No pude obtener información de ventanas: {e}"
+        return explicar(e, "ver qué ventanas hay abiertas")
 
 
 # ─────────────────────────────────────────────
@@ -102,7 +103,7 @@ def open_browser() -> str:
         webbrowser.open("https://www.google.com")
         return "Navegador abierto con Google."
     except Exception as e:
-        return f"No pude abrir el navegador: {e}"
+        return explicar(e, "abrir el navegador")
 
 
 def open_spotify() -> str:
@@ -125,7 +126,7 @@ def open_spotify() -> str:
         return "Spotify no está instalado; abrí open.spotify.com en el navegador."
     except Exception as e:
         logger.error(f"Error al abrir Spotify: {e}")
-        return f"No pude abrir Spotify: {e}"
+        return explicar(e, "abrir Spotify")
 
 
 # ─────────────────────────────────────────────

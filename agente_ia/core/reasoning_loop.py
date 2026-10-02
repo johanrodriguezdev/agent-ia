@@ -43,6 +43,7 @@ from core.address import momento_actual, vocative, vocative_start
 from core.composer_modes import ModoComposer, get_mode
 from core.progress import report as progress_report
 from core.identity import build_identity_block
+from core import estilo_respuesta
 
 logger = logging.getLogger(__name__)
 
@@ -175,7 +176,14 @@ def _build_system_prompt(modo_def: Optional[ModoComposer] = None) -> str:
     # tenía. Ahora ambos leen los mismos documentos.
     identity_block = build_identity_block(agent_name)
 
-    operating_rules = (
+    # REQ-071: la economía de la respuesta va ANTES de las reglas de herramientas y
+    # después de la identidad. Antes solo se pedía «concisa y directa» en una línea suelta,
+    # y medido no se cumplía: la mitad de las respuestas pasaba de 400 caracteres. Un
+    # contrato con el contraste de lo que está mal y lo que está bien se cumple; un
+    # adjetivo, no.
+    from core.estilo_respuesta import bloque_para_el_prompt
+
+    operating_rules = bloque_para_el_prompt() + "\n\n" + (
         "Tienes acceso a herramientas para ejecutar acciones reales en el sistema del "
         "usuario. Usa una herramienta solo si el pedido la requiere de verdad; si puedes "
         "responder directamente con lo que ya sabes, hazlo sin llamar a ninguna "
@@ -712,6 +720,14 @@ def run(task: str, channel, user_id: str = "default", agent_name: str = "reasoni
     agent_context_manager.update_context(agent_name, user_id, {"role": "user", "content": task})
     agent_context_manager.update_context(
         agent_name, user_id, {"role": "assistant", "content": final_text[:MAX_RESPUESTA_GUARDADA]}
+    )
+
+    # REQ-071: se anota cuánto midió la respuesta —solo la longitud, el canal y si hubo
+    # herramientas; nunca el texto—. Es lo que permite saber si el contrato de economía
+    # sirvió, en vez de volver a pedir brevedad en prosa y no enterarse.
+    estilo_respuesta.registrar(
+        final_text, canal=getattr(resolved_channel, "value", str(resolved_channel)),
+        con_herramientas=bool(historial),
     )
 
     return final_text

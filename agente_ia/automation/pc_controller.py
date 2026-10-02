@@ -2,6 +2,7 @@ import subprocess
 import os
 import pyautogui
 import time
+from core.errores import explicar
 
 pyautogui.FAILSAFE = True
 pyautogui.PAUSE = 0.5 
@@ -57,7 +58,7 @@ def open_application(app_name: str) -> str:
         pyautogui.press('enter')
         return f"Aplicación '{app_name}' abierta."
     except Exception as e:
-        return f"Hubo un fallo abriendo la aplicación: {e}"
+        return explicar(e, "abrir la aplicación")
 
 def click_position(x: int, y: int) -> str:
     """Haz que el puntero del mouse vaya físicamente al punto y haga un clic izquierdo."""
@@ -65,7 +66,7 @@ def click_position(x: int, y: int) -> str:
         pyautogui.click(x=x, y=y)
         return f"He hecho clic en las coordenadas ({x}, {y})."
     except Exception as e:
-        return f"Error ejecutando el clic: {e}"
+        return explicar(e, "hacer el clic")
 
 #: Pausa entre cada pulsación y cada soltura. Sale de medirlo: sin pausa, el Bloc de notas
 #: de Windows 11 escribía basura reproducible; con 12 ms fallaba uno de cada cuatro intentos.

@@ -6,6 +6,7 @@ el estado compartido entre pasos (ej: texto generado → escribir en app).
 
 import time
 from agents.action_registry import get_action, execute_action
+from core.errores import explicar
 
 
 class StepResult:
@@ -114,4 +115,4 @@ class TaskExecutor:
         try:
             return execute_action(action_name, params, channel=channel)
         except Exception as e:
-            return f"Error al ejecutar '{action_name}': {e}"
+            return explicar(e, f"ejecutar '{action_name}'")
