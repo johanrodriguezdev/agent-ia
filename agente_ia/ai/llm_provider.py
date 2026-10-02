@@ -83,6 +83,41 @@ def rutas_de_imagen(image_path) -> list:
     return [str(r) for r in crudas if r and os.path.exists(str(r))]
 
 
+def bloques_de_imagen(rutas, formato: str) -> list:
+    """Return las imágenes listas para el protocolo que se pida. Return [] si no hay.
+
+    `formato` es "anthropic" (`{"type": "image", "source": {...}}`) o "openai"
+    (`{"type": "image_url", ...}`). Lo comparten el turno actual y las imágenes que se
+    recuperan del historial (REQ-070), así ninguna de las dos vías puede quedarse atrás.
+    """
+    import base64
+
+    from core.imagenes import media_type, preparar_para_el_modelo
+
+    bloques = []
+    for ruta in rutas:
+        # `preparar_para_el_modelo` deja la imagen dentro de los topes de la API y devuelve
+        # None si no se pudo; ahí se salta, porque una imagen de menos es mucho mejor que
+        # una llamada rechazada entera.
+        try:
+            lista = preparar_para_el_modelo(ruta)
+            if not lista:
+                continue
+            with open(lista, "rb") as f:
+                datos = base64.standard_b64encode(f.read()).decode("utf-8")
+        except (OSError, ValueError) as e:
+            logger.warning(f"no se pudo preparar la imagen {ruta!r}: {e}")
+            continue
+        tipo = media_type(lista)
+        if formato == "anthropic":
+            bloques.append({"type": "image",
+                            "source": {"type": "base64", "media_type": tipo, "data": datos}})
+        else:
+            bloques.append({"type": "image_url",
+                            "image_url": {"url": f"data:{tipo};base64,{datos}"}})
+    return bloques
+
+
 def _cache_key(messages, system_prompt, image_path, provider):
     raw = json.dumps({"m": messages, "s": system_prompt, "i": image_path, "p": provider}, sort_keys=True)
     return hashlib.md5(raw.encode()).hexdigest()
@@ -700,26 +735,28 @@ def _mensajes_para_anthropic(messages, image_path):
                 })
         salida.append({"role": mensaje["role"], "content": bloques})
 
+    # REQ-070: las imágenes de turnos ANTERIORES vuelven a su propio mensaje, para poder
+    # seguir hablando de lo que ya se mostró sin volver a pegarlo. Van antes que las del
+    # turno actual porque insertarlas corre los índices de `salida`… y por eso se recorren
+    # de atrás hacia adelante: así cada índice sigue siendo válido cuando le toca.
+    from core.imagenes import imagenes_del_historial
+
+    for indice, rutas_viejas in sorted(imagenes_del_historial(messages).items(), reverse=True):
+        if indice >= len(salida) or salida[indice].get("role") != "user":
+            continue
+        contenido = salida[indice].get("content")
+        if isinstance(contenido, list):
+            contenido[0:0] = bloques_de_imagen(rutas_viejas, "anthropic")
+
     # CA-09: la imagen va al último mensaje de TEXTO del usuario, nunca a uno que
     # transporta resultados de herramientas. REQ-063: varias, en el orden en que se
     # adjuntaron, todas antes del texto.
+    # REQ-054: el tipo REAL del archivo. Antes decía siempre `image/jpeg`, y la API rechaza
+    # una imagen cuyo contenido no coincide con lo declarado: las fotos de Telegram son
+    # JPEG y pasaban, una captura pegada en el escritorio es PNG y no.
     rutas = rutas_de_imagen(image_path)
     if rutas and indice_plano is not None and salida[indice_plano]["role"] == "user":
-        import base64
-        from core.imagenes import media_type
-
-        bloques_imagen = []
-        for ruta in rutas:
-            with open(ruta, "rb") as f:
-                image_data = base64.standard_b64encode(f.read()).decode("utf-8")
-            # REQ-054: el tipo REAL del archivo. Antes decía siempre `image/jpeg`, y la API
-            # rechaza una imagen cuyo contenido no coincide con lo declarado: las fotos de
-            # Telegram son JPEG y pasaban, una captura pegada en el escritorio es PNG y no.
-            bloques_imagen.append({
-                "type": "image",
-                "source": {"type": "base64", "media_type": media_type(ruta), "data": image_data},
-            })
-        salida[indice_plano]["content"][0:0] = bloques_imagen
+        salida[indice_plano]["content"][0:0] = bloques_de_imagen(rutas, "anthropic")
 
     return salida
 
@@ -740,6 +777,13 @@ def _mensajes_para_openai(messages, system_prompt, image_path, *, imagen_como_bl
     messages = tool_history.con_ids_normalizados(messages)
     indice_plano = _indice_del_ultimo_plano(messages)
 
+    # REQ-070: las imágenes de turnos anteriores vuelven a viajar con SU mensaje. Solo en
+    # los proveedores que aceptan un mensaje multimodal; DeepSeek (`imagen_como_bloque`
+    # falso) manda texto plano y no las vería de todos modos.
+    from core.imagenes import imagenes_del_historial
+
+    viejas = imagenes_del_historial(messages) if imagen_como_bloque else {}
+
     salida = [{"role": "system", "content": system_prompt}]
     for i, mensaje in enumerate(messages):
         if tool_history.es_estructurado(mensaje):
@@ -748,6 +792,12 @@ def _mensajes_para_openai(messages, system_prompt, image_path, *, imagen_como_bl
             salida.append(_ultimo_mensaje_openai(
                 mensaje, image_path, imagen_como_bloque, aviso_sin_vision,
             ))
+        elif i in viejas:
+            salida.append({
+                "role": mensaje["role"],
+                "content": [*bloques_de_imagen(viejas[i], "openai"),
+                            {"type": "text", "text": mensaje["content"]}],
+            })
         else:
             salida.append({"role": mensaje["role"], "content": mensaje["content"]})
 

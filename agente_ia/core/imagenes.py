@@ -356,3 +356,60 @@ def separar_adjunto(texto: Optional[str]) -> Tuple[str, Optional[str]]:
     saber si hubo un adjunto; con varios, `separar_adjuntos`."""
     limpio, rutas = separar_adjuntos(texto)
     return limpio, (rutas[0] if rutas else None)
+
+
+#: Cuántas imágenes de turnos ANTERIORES vuelven a viajar con la consulta (REQ-070).
+#: Cuatro es el mismo tope que `MAX_ADJUNTOS`: alcanza para seguir hablando de lo que ya
+#: se mostró sin convertir cada pregunta en una galería. Cada imagen cuesta tokens en cada
+#: vuelta del bucle de razonamiento, así que el número importa.
+MAX_IMAGENES_DEL_HISTORIAL = 4
+
+#: Hasta dónde se mira hacia atrás. Más allá, una imagen suele ser de otro asunto y
+#: reenviarla es pagar por ruido.
+VENTANA_DEL_HISTORIAL = 12
+
+
+def imagenes_del_historial(messages, tope: int = MAX_IMAGENES_DEL_HISTORIAL,
+                           ventana: int = VENTANA_DEL_HISTORIAL) -> Dict[int, List[str]]:
+    """Return `{índice del mensaje: rutas de sus imágenes}` de los turnos ANTERIORES.
+
+    **Qué resuelve.** Una imagen pegada solo viajaba en su turno. En el mensaje siguiente
+    el modelo ya no la veía —solo le quedaba el marcador de texto— así que «¿y qué dice el
+    botón de abajo?» o «comparala con esta otra» obligaban a volver a pegarla. Acá se
+    recuperan las rutas de los marcadores que `marcar_adjuntos` dejó en el historial para
+    que vuelvan a adjuntarse como imagen.
+
+    **Por qué con topes.** Cada imagen se manda otra vez en CADA vuelta del bucle de
+    razonamiento. Sin tope, una conversación larga con capturas multiplicaría el coste sin
+    que nadie lo pidiera. Se quedan las más recientes, que son de lo que se está hablando.
+
+    El último mensaje no entra: ese es el turno actual y sus imágenes ya viajan por
+    `image_path`. Una ruta que ya no está en disco se salta en silencio: el usuario pudo
+    borrarla, y eso no puede romper la conversación.
+    """
+    if not messages or len(messages) < 2:
+        return {}
+
+    primero = max(0, len(messages) - 1 - max(0, int(ventana)))
+    encontradas: List[Tuple[int, str]] = []
+    for indice in range(primero, len(messages) - 1):          # el último queda fuera
+        mensaje = messages[indice] or {}
+        if mensaje.get("role") != "user":
+            continue
+        contenido = mensaje.get("content")
+        if not isinstance(contenido, str):
+            continue                                          # un turno de herramientas
+        _limpio, rutas = separar_adjuntos(contenido)
+        for ruta in rutas:
+            if es_imagen(ruta) and os.path.isfile(ruta):
+                encontradas.append((indice, ruta))
+
+    # Las más recientes primero a la hora de recortar, pero devueltas en su orden original:
+    # el modelo tiene que verlas como ocurrieron.
+    if len(encontradas) > max(0, int(tope)):
+        encontradas = encontradas[-int(tope):] if tope else []
+
+    salida: Dict[int, List[str]] = {}
+    for indice, ruta in encontradas:
+        salida.setdefault(indice, []).append(ruta)
+    return salida
