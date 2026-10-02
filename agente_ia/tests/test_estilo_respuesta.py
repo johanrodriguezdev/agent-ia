@@ -174,3 +174,42 @@ def test_el_contrato_sigue_siendo_corto():
     """Cada regla cuesta tokens en CADA llamada. Un contrato de economía que engorda el
     prompt sin límite se contradice a sí mismo."""
     assert len(estilo_respuesta.bloque_para_el_prompt()) < 2600
+
+
+def test_la_herramienta_cuenta_como_vienen_las_respuestas(monkeypatch, tmp_path):
+    """El medidor guardado en un archivo que nadie abre no sirve de nada (§25)."""
+    from agents.tool_registry import get_tool
+
+    monkeypatch.setattr(estilo_respuesta, "_ARCHIVO", str(tmp_path / "m.jsonl"))
+    herramienta = get_tool("response_stats")
+    assert herramienta is not None
+
+    assert "Todavía no tengo medidas" in herramienta.invoke({})
+
+    estilo_respuesta.registrar("Listo.", con_herramientas=False)
+    estilo_respuesta.registrar("x" * 900, con_herramientas=True)
+
+    todas = herramienta.invoke({})
+    charla = herramienta.invoke({"solo_conversacion": True})
+
+    assert "2 respuestas medidas" in todas
+    assert "1 respuestas medidas" in charla
+    assert "sin contar los turnos con herramientas" in charla
+
+
+def test_la_herramienta_de_metricas_es_verde():
+    """Lee un archivo de métricas propio: ni datos del usuario ni del sistema."""
+    from core.security_manager import RiskLevel, security_manager
+
+    assert security_manager.classify_action("response_stats") == RiskLevel.GREEN
+
+
+def test_la_economia_no_mata_la_proactividad():
+    """§15 y §38 de la especificación tiran en direcciones opuestas: una pide ofrecer, la
+    otra acortar. Lo que sobra es la coletilla vacía, no la iniciativa — y el contrato
+    tiene que decirlo, o el modelo deja de ofrecer nada."""
+    contrato = estilo_respuesta.bloque_para_el_prompt()
+
+    assert "coletilla" in contrato
+    assert "Te quedan 4,8 GB" in contrato                     # la oferta concreta, sí
+    assert "no la iniciativa" in contrato

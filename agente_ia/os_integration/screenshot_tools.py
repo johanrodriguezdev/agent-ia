@@ -2,6 +2,7 @@ import pyautogui
 import time
 from pathlib import Path
 from datetime import datetime
+from core.errores import explicar
 
 def _get_save_dir() -> Path:
     """Determina el directorio de guardado inteligente (OneDrive Desktop o Desktop local)."""
@@ -27,7 +28,7 @@ def take_full_screenshot(delay: float = 1.0) -> str:
         screenshot.save(filepath)
         return f"Captura completa guardada en: Escritorio/Jarvis_Screenshots/{filename}"
     except Exception as e:
-        return f"Error al tomar captura: {e}"
+        return explicar(e, "tomar la captura")
 
 def take_region_screenshot(x: int, y: int, width: int, height: int) -> str:
     """Toma una captura de una región específica de la pantalla."""
@@ -41,7 +42,7 @@ def take_region_screenshot(x: int, y: int, width: int, height: int) -> str:
         screenshot.save(filepath)
         return f"Captura de región guardada en: Escritorio/Jarvis_Screenshots/{filename}"
     except Exception as e:
-        return f"Error al capturar región: {e}"
+        return explicar(e, "capturar esa región")
 
 def get_screen_resolution() -> str:
     """Devuelve la resolución actual de pantalla."""
@@ -49,4 +50,4 @@ def get_screen_resolution() -> str:
         width, height = pyautogui.size()
         return f"Resolución actual de pantalla: {width} x {height} píxeles."
     except Exception as e:
-        return f"No pude obtener la resolución: {e}"
+        return explicar(e, "ver la resolución de la pantalla")

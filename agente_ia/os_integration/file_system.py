@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from core.errores import explicar
 
 # Mapa de variables de entorno comunes a sus path de Windows
 COMMON_PATHS = {
@@ -40,7 +41,7 @@ def list_files(path_str: str) -> str:
              return f"La carpeta {path} está vacía."
          return f"Archivos en {path}:\n" + "\n".join([f"- {f}" for f in files])
      except Exception as e:
-         return f"Error al listar archivos: {e}"
+         return explicar(e, "listar los archivos")
 
 def create_file(filename: str) -> str:
      try:
@@ -48,4 +49,4 @@ def create_file(filename: str) -> str:
              f.write("") # Crea archivo vacío
          return f"Archivo '{filename}' creado exitosamente en {Path.cwd()}."
      except Exception as e:
-         return f"Error al crear el archivo: {e}"
+         return explicar(e, "crear el archivo")

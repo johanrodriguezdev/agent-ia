@@ -17,6 +17,7 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from skills.base_skill import BaseSkill
+from core.errores import causa
 
 logger = logging.getLogger(__name__)
 
@@ -217,7 +218,7 @@ class EmailSkill(BaseSkill):
                 mensaje = email_reader.traer_mensaje(original.cuenta, original.uid)
             except Exception as e:
                 logger.error(f"No se pudo recuperar el correo a responder: {e}")
-                return f"No pude recuperar ese correo para responderlo{vocative()}: {e}"
+                return f"No pude recuperar ese correo para responderlo{vocative()}: {causa(e)}."
 
             datos = email_sender.datos_para_responder(mensaje)
             destino = datos["destinatario"]
@@ -256,7 +257,7 @@ class EmailSkill(BaseSkill):
             email_reader.marcar_leido(correo.cuenta, correo.uid)
         except Exception as e:
             logger.error(f"No se pudo marcar como leído: {e}")
-            return f"No pude marcarlo como leído{vocative()}: {e}"
+            return f"No pude marcarlo como leído{vocative()}: {causa(e)}."
         return f"Marqué como leído el correo de {correo.remitente}{vocative()}."
 
     @staticmethod
@@ -324,7 +325,7 @@ class EmailSkill(BaseSkill):
             ruta = email_attachments.guardar(mensaje, adjunto.nombre)
         except Exception as e:
             logger.error(f"No se pudo guardar el adjunto '{adjunto.nombre}': {e}")
-            return f"No pude guardar «{adjunto.nombre}»{vocative()}: {e}"
+            return f"No pude guardar «{adjunto.nombre}»{vocative()}: {causa(e)}."
 
         aviso = ""
         if adjunto.peligroso:
@@ -372,7 +373,7 @@ class EmailSkill(BaseSkill):
         except Exception as e:
             # Nunca propagar: un fallo leyendo correo no puede tumbar la conversación.
             logger.error(f"Fallo al revisar el correo: {e}")
-            return f"No pude revisar el correo ahora mismo{vocative()}: {e}"
+            return f"No pude revisar el correo ahora mismo{vocative()}: {causa(e)}."
 
         if not resumen:
             return f"No llegó nada nuevo desde la última revisión{vocative()}."

@@ -3446,3 +3446,50 @@ register_tool(ToolSpec(
     risk_level=RiskLevel.GREEN,
     invoke=_connection_map_invoke,
 ))
+
+
+# ── REQ-071 — que el agente pueda mirar cómo le están saliendo las respuestas ───────────
+#
+# El medidor de `core/estilo_respuesta.py` no sirve de nada guardado en un archivo que
+# nadie abre. Con esto, «¿cómo vienen tus respuestas?» se contesta con datos: es la §25 de
+# la especificación (respuestas de estado) aplicada al propio comportamiento del agente.
+
+def _response_stats_invoke(params: dict) -> str:
+    from core.estilo_respuesta import LARGA, estadisticas
+
+    solo_charla = bool(params.get("solo_conversacion"))
+    e = estadisticas(solo_sin_herramientas=solo_charla)
+    if not e.get("respuestas"):
+        return "Todavía no tengo medidas de mis respuestas."
+
+    de_que = "sin contar los turnos con herramientas" if solo_charla else "en total"
+    return (
+        f"{e['respuestas']} respuestas medidas ({de_que}):\n"
+        f"  mediana {e['mediana']} caracteres, media {e['media']}, p90 {e['p90']}\n"
+        f"  {e['una_linea']} de una línea · {e['largas']} por encima de {LARGA} "
+        f"({e['porcentaje_largas']} %)"
+    )
+
+
+register_tool(ToolSpec(
+    name="response_stats",
+    description=(
+        "Mira cuánto miden tus propias respuestas: mediana, media y cuántas se pasan de "
+        "largo. Útil cuando el usuario pregunta si estás siendo breve, o para comparar con "
+        "la medición previa (mediana 374 caracteres antes del contrato de economía). Con "
+        "'solo_conversacion' deja fuera los turnos que usaron herramientas, donde una "
+        "respuesta larga puede estar justificada."
+    ),
+    parameters_schema={
+        "type": "object",
+        "properties": {
+            "solo_conversacion": {
+                "type": "boolean",
+                "description": "True para mirar solo los turnos sin herramientas.",
+            },
+        },
+    },
+    # GREEN: lee un archivo de métricas propio, sin datos del usuario ni del sistema.
+    risk_level=RiskLevel.GREEN,
+    invoke=_response_stats_invoke,
+))

@@ -7,6 +7,7 @@ También abre la calculadora nativa de Windows si se requiere.
 import subprocess
 import math
 import operator
+from core.errores import explicar
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -19,7 +20,7 @@ def open_calculator() -> str:
         subprocess.Popen("calc.exe")
         return "Calculadora de Windows abierta."
     except Exception as e:
-        return f"No pude abrir la calculadora: {e}"
+        return explicar(e, "abrir la calculadora")
 
 
 # ─────────────────────────────────────────────────────────────────

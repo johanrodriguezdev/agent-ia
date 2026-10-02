@@ -2,6 +2,7 @@ import os
 import shutil
 from pathlib import Path
 from datetime import datetime
+from core.errores import explicar
 
 # Mapa de alias comunes a rutas del sistema
 FOLDER_ALIASES = {
@@ -58,7 +59,7 @@ def analyze_folder_storage(folder_path: str = "escritorio") -> str:
             f"  - Disco libre:  {free_gb:.1f} GB de {total_gb:.1f} GB totales"
         )
     except Exception as e:
-        return f"Error al analizar almacenamiento: {e}"
+        return explicar(e, "analizar el almacenamiento")
 
 def create_text_file(filename: str, content: str = "", folder: str = ".") -> str:
     """
@@ -78,7 +79,7 @@ def create_text_file(filename: str, content: str = "", folder: str = ".") -> str
             f.write(content)
         return f"Archivo '{filename}' creado en {save_dir}."
     except Exception as e:
-        return f"Error al crear el archivo: {e}"
+        return explicar(e, "crear el archivo")
 
 def list_files_detailed(folder_path: str = ".") -> str:
     """Lista archivos con tamaño y fecha de modificación."""
@@ -105,7 +106,7 @@ def list_files_detailed(folder_path: str = ".") -> str:
 
         return "\n".join(lines)
     except Exception as e:
-        return f"Error al listar archivos: {e}"
+        return explicar(e, "listar los archivos")
 
 def get_disk_info() -> str:
     """Devuelve el estado de almacenamiento del disco principal."""
@@ -122,4 +123,4 @@ def get_disk_info() -> str:
             f"  - Libre: {free:.1f} GB"
         )
     except Exception as e:
-        return f"No pude obtener info del disco: {e}"
+        return explicar(e, "mirar el estado del disco")
